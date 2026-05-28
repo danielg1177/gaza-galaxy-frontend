@@ -35,5 +35,12 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
+## 2026-05-28 — Round-Gated Simulation Tick
+**Decision:** Treat one round as a full cycle of all active players, and execute round-gated simulation (`advanceFleets`, `runProduction`, building activation checks) only on turn-order wrap, not on every individual player turn.
+**Rationale:** Keeps fleet ETA, production cadence, and construction activation aligned with game design semantics and prevents per-player over-ticking in multi-player matches.
+
+---
+
 ## Changelog
+- 2026-05-28: Added round-gated simulation tick decision (Task 57).
 - 2026-05-27: File created with initial decisions.

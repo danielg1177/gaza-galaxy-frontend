@@ -1,14 +1,36 @@
-/**
- * Letter grade for a planet's economic quality (A = best, E = weakest).
- * Higher classes produce ships and resources faster; class does not affect research speed.
- */
-export type PlanetClass = 'A' | 'B' | 'C' | 'D' | 'E';
+import type { AiDifficulty } from './aiEngine';
 
 /**
- * Kind of structure that can be built on a planet.
- * Manufacturing facilities drive ship/resource production; research facilities advance tech level.
+ * Letter grade for a planet's economic quality (A = best, P = weakest).
+ * Higher classes yield more factory troop and gold output per factory.
  */
-export type BuildingType = 'manufacturingFacility' | 'researchFacility';
+export type PlanetClass =
+  | 'A'
+  | 'B'
+  | 'C'
+  | 'D'
+  | 'E'
+  | 'F'
+  | 'G'
+  | 'H'
+  | 'I'
+  | 'J'
+  | 'K'
+  | 'L'
+  | 'M'
+  | 'N'
+  | 'O'
+  | 'P';
+
+/**
+ * Kind of structure that can be built on a planet within building slots.
+ */
+export type BuildingType = 'factory' | 'researchLab';
+
+/**
+ * How a match is played: shared device (pass-and-play) or async across devices.
+ */
+export type PlayMode = 'passAndPlay' | 'asyncMultiplayer';
 
 /**
  * Identity of who controls a planet or fleet: a player id string, or `'neutral'` for unowned territory.
@@ -24,11 +46,11 @@ export interface Position {
 }
 
 /**
- * A single built structure on a planet, identified by its kind and upgrade level.
+ * A single built structure on a planet.
  */
 export interface Building {
   type: BuildingType;
-  level: number;
+  builtOnRound: number;
 }
 
 /**
@@ -36,12 +58,35 @@ export interface Building {
  */
 export interface Planet {
   id: string;
+  name: string;
   position: Position;
   class: PlanetClass;
   owner: OwnerId;
   shipCount: number;
+  troopAccumulator: number;
   buildings: Building[];
+  buildingSlots: number;
+  productionSlider: number;
   isHomePlanet: boolean;
+}
+
+/**
+ * Planet information as seen by a specific player (fog of war).
+ * Non-own planets expose position, class, and name only; economy and garrison are hidden.
+ */
+export interface VisiblePlanet {
+  id: string;
+  position: Position;
+  class: PlanetClass;
+  name: string;
+  isOwn: boolean;
+  isHomePlanet: boolean;
+  owner: OwnerId;
+  shipCount: number | null;
+  buildingSlots: number | null;
+  buildings: Building[] | null;
+  productionSlider: number | null;
+  troopAccumulator: number | null;
 }
 
 /**
@@ -54,6 +99,9 @@ export interface Fleet {
   originPlanetId: string;
   destinationPlanetId: string;
   turnsRemaining: number;
+  /** Total turns from dispatch to arrival (same value as turnsRemaining at creation). */
+  totalTurns: number;
+  dispatchedInRound: number;
 }
 
 /**
@@ -64,9 +112,12 @@ export interface Player {
   name: string;
   homePlanetId: string;
   techLevel: number;
-  resources: number;
+  gold: number;
+  researchPoints: number;
   isEliminated: boolean;
   isAI: boolean;
+  /** Only set for AI players. */
+  difficulty?: AiDifficulty;
 }
 
 /**
@@ -86,8 +137,10 @@ export interface GameState {
   players: Player[];
   fleets: Fleet[];
   turnNumber: number;
+  roundNumber: number;
   currentPlayerId: string;
   seed: number;
+  playMode: PlayMode;
   status: 'active' | 'finished';
   winnerId: string | null;
 }

@@ -1,24 +1,51 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
+  Alert,
+  Animated as RNAnimated,
+  Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Slider from '@react-native-community/slider';
+import Svg, { Circle, G, Line, Text as SvgText } from 'react-native-svg';
+import Animated, {
+  runOnJS,
+  runOnUI,
+  useAnimatedStyle,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
-import { computeTurnsInTransit } from '../game/movementEngine';
+import {
+  FACTORY_GOLD_OUTPUT,
+  FACTORY_TROOP_OUTPUT,
+  MAX_TECH_LEVEL,
+  researchThreshold,
+} from '../game/productionEngine';
+import {
+  computeClickDistance,
+  computeTurnsInTransit,
+  effectiveRange,
+  effectiveSpeed,
+  isInRange,
+} from '../game/movementEngine';
 import type { Fleet, OwnerId, Planet, Player } from '../game/types';
-import { useGameStore } from '../store/gameStore';
+import {
+  getLocalHumanPlayerId,
+  type PendingFleet,
+  useGameStore,
+  useVisibleGameState,
+} from '../store/gameStore';
 
 type GameNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Game'>;
 
 const CELL_SIZE = 18;
+const PLANET_HIT_RADIUS = CELL_SIZE * 2.5;
 const PLANET_SIZE = 14;
 const PLANET_SIZE_SELECTED = 16;
 const HUMAN_COLOR = '#4a9eff';
@@ -52,6 +79,18 @@ function getPlayerColor(ownerId: OwnerId, humanPlayerId: string, players: Player
   return AI_COLORS[Math.max(0, aiIndex) % AI_COLORS.length];
 }
 
+function getPlanetColor(planet: Planet, humanPlayerId: string): string {
+  if (planet.owner === humanPlayerId) {
+    return '#27ae60'; // green — current player's own planet
+  }
+  if (planet.owner === 'neutral') {
+    return '#2a2a4a'; // very dim — neutral, no detail known
+  }
+  // All other planets are enemy-owned; the fog layer zeroes their shipCount
+  // so they are visible only as gray blobs
+  return '#333355'; // gray — enemy planet, fogged
+}
+
 function getOwnerName(ownerId: OwnerId, players: Player[]): string {
   if (ownerId === 'neutral') {
     return 'Neutral';
@@ -59,75 +98,161 @@ function getOwnerName(ownerId: OwnerId, players: Player[]): string {
   return players.find((p) => p.id === ownerId)?.name ?? ownerId;
 }
 
-function sumOwnedShips(map: { planets: Planet[] }, ownerId: string): number {
-  return map.planets
-    .filter((p) => p.owner === ownerId)
-    .reduce((sum, p) => sum + p.shipCount, 0);
+function planetCenterPx(planet: Planet): { x: number; y: number } {
+  return {
+    x: planet.position.x * CELL_SIZE + CELL_SIZE / 2,
+    y: planet.position.y * CELL_SIZE + CELL_SIZE / 2,
+  };
+}
+
+function screenToMapCoords(
+  localX: number,
+  localY: number,
+  scale: number,
+  rawTx: number,
+  rawTy: number,
+): { x: number; y: number } {
+  return {
+    x: (localX - rawTx) / scale,
+    y: (localY - rawTy) / scale,
+  };
+}
+
+function findPlanetAtMapCoords(
+  mapX: number,
+  mapY: number,
+  planets: Planet[],
+): Planet | undefined {
+  let best: Planet | undefined;
+  let bestDist = Infinity;
+  for (const planet of planets) {
+    const center = planetCenterPx(planet);
+    const dx = mapX - center.x;
+    const dy = mapY - center.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= PLANET_HIT_RADIUS && dist < bestDist) {
+      bestDist = dist;
+      best = planet;
+    }
+  }
+  return best;
+}
+
+function DragLine({
+  startX,
+  startY,
+  endX,
+  endY,
+}: {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+}) {
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  if (length < 1) {
+    return null;
+  }
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.dragLine,
+        {
+          left: startX,
+          top: startY - 1,
+          width: length,
+          transform: [{ rotate: `${angle}deg` }],
+        },
+      ]}
+    />
+  );
+}
+
+function clampTranslation(
+  tx: number,
+  ty: number,
+  currentScale: number,
+  mapW: number,
+  mapH: number,
+  viewW: number,
+  viewH: number,
+): { x: number; y: number } {
+  'worklet';
+  const maxOffsetX = Math.max(0, mapW * currentScale - viewW);
+  const maxOffsetY = Math.max(0, mapH * currentScale - viewH);
+  const minX = -maxOffsetX;
+  const maxX = 0;
+  const minY = -maxOffsetY;
+  const maxY = 0;
+  return {
+    x: Math.min(maxX, Math.max(minX, tx)),
+    y: Math.min(maxY, Math.max(minY, ty)),
+  };
 }
 
 function PlanetNode({
   planet,
   color,
+  isOwned,
   isSelected,
-  isHome,
-  onPress,
+  isDragOrigin,
+  adjustedShipCount,
 }: {
   planet: Planet;
   color: string;
+  isOwned: boolean;
   isSelected: boolean;
-  isHome: boolean;
-  onPress: () => void;
+  isDragOrigin: boolean;
+  adjustedShipCount: number;
 }) {
-  const pulse = useRef(new Animated.Value(0)).current;
-  const size = isSelected ? PLANET_SIZE_SELECTED : PLANET_SIZE;
-  const offset = (CELL_SIZE - size) / 2;
+  const highlighted = isSelected || isDragOrigin;
+  const pulse = useRef(new RNAnimated.Value(0)).current;
+  const size = highlighted ? PLANET_SIZE_SELECTED : PLANET_SIZE;
+  const planetCenterX = planet.position.x * CELL_SIZE + CELL_SIZE / 2;
+  const planetCenterY = planet.position.y * CELL_SIZE + CELL_SIZE / 2;
+  const touchTargetHalfSize = PLANET_SIZE_SELECTED / 2;
 
   useEffect(() => {
-    if (!isSelected) {
+    if (!highlighted) {
       pulse.setValue(0);
       return;
     }
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: false }),
-        Animated.timing(pulse, { toValue: 0, duration: 700, useNativeDriver: false }),
+    const animation = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: false }),
+        RNAnimated.timing(pulse, { toValue: 0, duration: 700, useNativeDriver: false }),
       ]),
     );
     animation.start();
     return () => animation.stop();
-  }, [isSelected, pulse]);
+  }, [highlighted, pulse]);
 
   const borderColor = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: ['#ffffff', '#4a9eff'],
+    outputRange: ['rgba(255,255,255,0.85)', 'rgba(255,255,255,0.15)'],
   });
 
-  return (
-    <TouchableOpacity
-      activeOpacity={0.8}
-      onPress={onPress}
-      style={[
-        styles.planetTouchTarget,
-        {
-          left: planet.position.x * CELL_SIZE + offset - (isHome ? 2 : 0),
-          top: planet.position.y * CELL_SIZE + offset - (isHome ? 2 : 0),
-        },
-      ]}
-    >
-      {isHome && (
-        <View
-          style={[
-            styles.homeRing,
-            {
-              width: size + 8,
-              height: size + 8,
-              borderRadius: (size + 8) / 2,
-            },
-          ]}
-        />
-      )}
-      {isSelected ? (
-        <Animated.View
+  const touchStyle = [
+    styles.planetTouchTarget,
+    {
+      left: planetCenterX - touchTargetHalfSize,
+      top: planetCenterY - touchTargetHalfSize,
+    },
+  ];
+
+  const planetBody = (
+    <>
+      <Text
+        style={[styles.planetNameLabel, !isOwned && styles.planetNameLabelFogged]}
+      >
+        {planet.name}
+      </Text>
+      {highlighted && !isDragOrigin && isOwned ? (
+        <RNAnimated.View
           style={[
             styles.planetCircle,
             {
@@ -139,7 +264,11 @@ function PlanetNode({
               borderColor,
             },
           ]}
-        />
+        >
+          <Text style={[styles.planetClassLabel, !isOwned && styles.planetClassLabelFogged]}>
+            {planet.class}
+          </Text>
+        </RNAnimated.View>
       ) : (
         <View
           style={[
@@ -149,56 +278,169 @@ function PlanetNode({
               height: size,
               borderRadius: size / 2,
               backgroundColor: color,
-              borderWidth: isHome ? 2 : 0,
-              borderColor: '#ffffff',
+              borderWidth: isDragOrigin ? 2 : 0,
+              borderColor: 'rgba(255,255,255,0.6)',
             },
           ]}
-        />
+        >
+          <Text style={[styles.planetClassLabel, !isOwned && styles.planetClassLabelFogged]}>
+            {planet.class}
+          </Text>
+        </View>
       )}
-      <Text style={styles.shipCountLabel}>{planet.shipCount}</Text>
-    </TouchableOpacity>
+      {isOwned && (
+        <Text style={styles.shipCountLabel}>{adjustedShipCount}</Text>
+      )}
+    </>
+  );
+
+  return (
+    <View pointerEvents="none" style={touchStyle}>
+      {planetBody}
+    </View>
   );
 }
 
-function FleetMarker({
-  fleet,
-  destPlanet,
-  color,
-  index,
+const PENDING_DEPARTURE_OFFSET_PX = 18;
+
+function FleetLayer({
+  fleets,
+  planets,
+  queuedOrders,
+  humanPlayerId,
+  players,
+  mapPixelWidth,
+  mapPixelHeight,
 }: {
-  fleet: Fleet;
-  destPlanet: Planet;
-  color: string;
-  index: number;
+  fleets: Fleet[];
+  planets: Planet[];
+  queuedOrders: PendingFleet[];
+  humanPlayerId: string;
+  players: Player[];
+  mapPixelWidth: number;
+  mapPixelHeight: number;
 }) {
   return (
-    <View
-      style={[
-        styles.fleetMarker,
-        {
-          left: destPlanet.position.x * CELL_SIZE + 2,
-          top: destPlanet.position.y * CELL_SIZE + PLANET_SIZE + 4 + index * 10,
-        },
-      ]}
+    <Svg
+      width={mapPixelWidth}
+      height={mapPixelHeight}
+      style={styles.fleetLayer}
+      pointerEvents="none"
     >
-      <Text style={styles.fleetArrow}>→</Text>
-      <View style={[styles.fleetDot, { backgroundColor: color }]} />
-      <Text style={styles.fleetShips}>{fleet.shipCount}</Text>
-    </View>
+      {fleets.map((fleet) => {
+        const originPlanet = planets.find((p) => p.id === fleet.originPlanetId);
+        const destPlanet = planets.find((p) => p.id === fleet.destinationPlanetId);
+        if (originPlanet === undefined || destPlanet === undefined) {
+          return null;
+        }
+        const color = getPlayerColor(fleet.ownerId, humanPlayerId, players);
+        const totalTurns = fleet.totalTurns;
+        const progress = totalTurns > 0 ? 1 - fleet.turnsRemaining / totalTurns : 1;
+        const x =
+          originPlanet.position.x * CELL_SIZE +
+          CELL_SIZE / 2 +
+          (destPlanet.position.x - originPlanet.position.x) * CELL_SIZE * progress;
+        const y =
+          originPlanet.position.y * CELL_SIZE +
+          CELL_SIZE / 2 +
+          (destPlanet.position.y - originPlanet.position.y) * CELL_SIZE * progress;
+        const destX = destPlanet.position.x * CELL_SIZE + CELL_SIZE / 2;
+        const destY = destPlanet.position.y * CELL_SIZE + CELL_SIZE / 2;
+
+        return (
+          <G key={fleet.id}>
+            <Line
+              x1={x}
+              y1={y}
+              x2={destX}
+              y2={destY}
+              stroke={color}
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              opacity={0.6}
+            />
+            <Circle cx={x} cy={y} r={4} fill={color} />
+            <SvgText x={x + 6} y={y - 4} fill="white" fontSize={8}>
+              {fleet.shipCount}
+            </SvgText>
+          </G>
+        );
+      })}
+      <G pointerEvents="none">
+        {queuedOrders.map((order, index) => {
+          const originPlanet = planets.find((p) => p.id === order.fromPlanetId);
+          const destPlanet = planets.find((p) => p.id === order.toPlanetId);
+          if (originPlanet === undefined || destPlanet === undefined) {
+            return null;
+          }
+          const originCenter = planetCenterPx(originPlanet);
+          const destCenter = planetCenterPx(destPlanet);
+          const dx = destCenter.x - originCenter.x;
+          const dy = destCenter.y - originCenter.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length < 1) {
+            return null;
+          }
+          const ux = dx / length;
+          const uy = dy / length;
+          const dotX = originCenter.x + ux * PENDING_DEPARTURE_OFFSET_PX;
+          const dotY = originCenter.y + uy * PENDING_DEPARTURE_OFFSET_PX;
+
+          return (
+            <G key={`pending-${order.fromPlanetId}-${order.toPlanetId}-${index}`}>
+              <Line
+                x1={originCenter.x}
+                y1={originCenter.y}
+                x2={dotX}
+                y2={dotY}
+                stroke={HUMAN_COLOR}
+                strokeWidth={1}
+                strokeDasharray="3 3"
+                opacity={0.5}
+              />
+              <Circle cx={dotX} cy={dotY} r={3} fill={HUMAN_COLOR} opacity={0.7} />
+              <SvgText x={dotX + 5} y={dotY - 4} fill="white" fontSize={8}>
+                {order.shipCount}
+              </SvgText>
+            </G>
+          );
+        })}
+      </G>
+    </Svg>
   );
 }
 
 export default function GameScreen() {
   const navigation = useNavigation<GameNavigationProp>();
   const insets = useSafeAreaInsets();
-  const gameState = useGameStore((s) => s.gameState);
+  const gameState = useVisibleGameState();
   const selectedPlanetId = useGameStore((s) => s.selectedPlanetId);
+  const pendingFleet = useGameStore((s) => s.pendingFleet);
+  const queuedOrders = useGameStore((s) => s.queuedOrders);
   const selectPlanet = useGameStore((s) => s.selectPlanet);
-  const sendFleet = useGameStore((s) => s.sendFleet);
+  const setPendingFleet = useGameStore((s) => s.setPendingFleet);
+  const confirmPendingFleet = useGameStore((s) => s.confirmPendingFleet);
+  const cancelQueuedOrder = useGameStore((s) => s.cancelQueuedOrder);
+  const endTurn = useGameStore((s) => s.endTurn);
+  const queueBuildOrder = useGameStore((s) => s.queueBuildOrder);
+  const cancelBuildOrder = useGameStore((s) => s.cancelBuildOrder);
+  const demolishBuilding = useGameStore((s) => s.demolishBuilding);
+  const setProductionSlider = useGameStore((s) => s.setProductionSlider);
+  const showingLockScreen = useGameStore((s) => s.showingLockScreen);
+  const dismissLockScreen = useGameStore((s) => s.dismissLockScreen);
   const resetGame = useGameStore((s) => s.resetGame);
 
-  const [destPlanetId, setDestPlanetId] = useState<string | null>(null);
-  const [shipCount, setShipCount] = useState(1);
+  const [dragOriginPlanetId, setDragOriginPlanetId] = useState<string | null>(null);
+  const [dragFingerLocal, setDragFingerLocal] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+  const fleetDragActivatedRef = useRef(false);
+  const [outOfRangeMessage, setOutOfRangeMessage] = useState(false);
+  const [showResearchModal, setShowResearchModal] = useState(false);
+  const [showQueuedModal, setShowQueuedModal] = useState(false);
+  const [buildError, setBuildError] = useState<string | null>(null);
+  const mapAreaRef = useRef<View>(null);
+  const mapAreaWindowRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     if (gameState === null) {
@@ -206,9 +448,42 @@ export default function GameScreen() {
     }
   }, [gameState, navigation]);
 
+  const localHumanPlayerId = useMemo(
+    () => (gameState !== null ? getLocalHumanPlayerId(gameState) : undefined),
+    [gameState],
+  );
+
+  useEffect(() => {
+    if (gameState === null || localHumanPlayerId === undefined) {
+      return;
+    }
+    if (selectedPlanetId !== null) {
+      const p = gameState.map.planets.find((pl) => pl.id === selectedPlanetId);
+      if (p === undefined || p.owner !== localHumanPlayerId) {
+        selectPlanet(null);
+      }
+    }
+    if (dragOriginPlanetId !== null) {
+      const p = gameState.map.planets.find((pl) => pl.id === dragOriginPlanetId);
+      if (p === undefined || p.owner !== localHumanPlayerId) {
+        setDragOriginPlanetId(null);
+        setDragFingerLocal(null);
+      }
+    }
+  }, [
+    gameState,
+    localHumanPlayerId,
+    selectedPlanetId,
+    dragOriginPlanetId,
+    selectPlanet,
+  ]);
+
   const humanPlayer = useMemo(
-    () => gameState?.players.find((p) => !p.isAI),
-    [gameState?.players],
+    () =>
+      localHumanPlayerId !== undefined
+        ? gameState?.players.find((p) => p.id === localHumanPlayerId)
+        : undefined,
+    [gameState?.players, localHumanPlayerId],
   );
 
   const selectedPlanet = useMemo(
@@ -216,64 +491,473 @@ export default function GameScreen() {
     [gameState?.map.planets, selectedPlanetId],
   );
 
-  useEffect(() => {
-    setDestPlanetId(null);
-    setShipCount(1);
-  }, [selectedPlanetId]);
+  const pendingOriginPlanet = useMemo(
+    () => gameState?.map.planets.find((p) => p.id === pendingFleet?.fromPlanetId),
+    [gameState?.map.planets, pendingFleet?.fromPlanetId],
+  );
 
-  const destinationOptions = useMemo(() => {
-    if (gameState === null || selectedPlanet === undefined) {
-      return [];
+  const pendingDestPlanet = useMemo(
+    () => gameState?.map.planets.find((p) => p.id === pendingFleet?.toPlanetId),
+    [gameState?.map.planets, pendingFleet?.toPlanetId],
+  );
+
+  const pendingTransitInfo = useMemo(() => {
+    if (
+      pendingOriginPlanet === undefined ||
+      pendingDestPlanet === undefined ||
+      humanPlayer === undefined
+    ) {
+      return null;
     }
-    return gameState.map.planets
-      .filter((p) => p.id !== selectedPlanet.id)
-      .map((dest) => ({
-        planet: dest,
-        turns: computeTurnsInTransit(selectedPlanet.position, dest.position),
-        ownerName: getOwnerName(dest.owner, gameState.players),
-      }))
-      .sort((a, b) => a.turns - b.turns);
-  }, [gameState, selectedPlanet]);
+    const clickDist = computeClickDistance(
+      pendingOriginPlanet.position,
+      pendingDestPlanet.position,
+    );
+    const turnsInTransit = computeTurnsInTransit(
+      pendingOriginPlanet.position,
+      pendingDestPlanet.position,
+      effectiveSpeed(humanPlayer.techLevel),
+    );
+    return {
+      clickDistLabel: clickDist.toFixed(1),
+      turnsInTransit,
+    };
+  }, [humanPlayer, pendingDestPlanet, pendingOriginPlanet]);
 
-  const fleetsByDestination = useMemo(() => {
-    const grouped = new Map<string, Fleet[]>();
-    if (gameState === null) {
-      return grouped;
+  const selectedPlanetFactories = useMemo(
+    () =>
+      selectedPlanet?.buildings.filter((building) => building.type === 'factory').length ?? 0,
+    [selectedPlanet],
+  );
+  const selectedPlanetActiveFactories = useMemo(
+    () =>
+      selectedPlanet?.buildings.filter(
+        (building) =>
+          building.type === 'factory' && building.builtOnRound < (gameState?.roundNumber ?? -1),
+      ).length ?? 0,
+    [gameState?.roundNumber, selectedPlanet],
+  );
+  const selectedPlanetLiveTroopsPerTurn = useMemo(() => {
+    if (selectedPlanet === undefined) {
+      return 0;
     }
-    for (const fleet of gameState.fleets) {
-      const list = grouped.get(fleet.destinationPlanetId) ?? [];
-      list.push(fleet);
-      grouped.set(fleet.destinationPlanetId, list);
+    const sliderValue = selectedPlanet.productionSlider;
+    return (
+      selectedPlanetActiveFactories *
+      (FACTORY_TROOP_OUTPUT[selectedPlanet.class] ?? 0) *
+      sliderValue
+    );
+  }, [selectedPlanet, selectedPlanetActiveFactories]);
+  const selectedPlanetLiveGoldPerTurn = useMemo(() => {
+    if (selectedPlanet === undefined) {
+      return 0;
     }
-    return grouped;
-  }, [gameState]);
+    const sliderValue = selectedPlanet.productionSlider;
+    return (
+      selectedPlanetActiveFactories *
+      (FACTORY_GOLD_OUTPUT[selectedPlanet.class] ?? 0) *
+      (1 - sliderValue)
+    );
+  }, [selectedPlanet, selectedPlanetActiveFactories]);
+  const selectedRoundNumber = gameState?.roundNumber ?? -1;
+  const selectedPlanetCommittedBuildings = useMemo(
+    () =>
+      selectedPlanet?.buildings.filter(
+        (building) => building.builtOnRound < selectedRoundNumber,
+      ).length ?? 0,
+    [selectedPlanet, selectedRoundNumber],
+  );
+  const selectedPlanetQueuedBuildsThisRound = useMemo(
+    () =>
+      selectedPlanet?.buildings.filter(
+        (building) => building.builtOnRound === selectedRoundNumber,
+      ).length ?? 0,
+    [selectedPlanet, selectedRoundNumber],
+  );
+  const availableSlots = useMemo(() => {
+    if (selectedPlanet === undefined) {
+      return 0;
+    }
+    return (
+      selectedPlanet.buildingSlots -
+      selectedPlanetCommittedBuildings -
+      selectedPlanetQueuedBuildsThisRound
+    );
+  }, [
+    selectedPlanet,
+    selectedPlanetCommittedBuildings,
+    selectedPlanetQueuedBuildsThisRound,
+  ]);
+  const noBuildSlotsRemaining = availableSlots <= 0;
+  const currentResearchThreshold = humanPlayer
+    ? researchThreshold(humanPlayer.techLevel)
+    : researchThreshold(0);
+  const activeResearchLabCount =
+    gameState && localHumanPlayerId !== undefined
+      ? gameState.map.planets.reduce((count, planet) => {
+          if (planet.owner !== localHumanPlayerId) {
+            return count;
+          }
+          return (
+            count +
+            planet.buildings.filter(
+              (building) =>
+                building.type === 'researchLab' && building.builtOnRound < gameState.roundNumber,
+            ).length
+          );
+        }, 0)
+      : 0;
+  const projectedTurnsToNextLevel =
+    humanPlayer && humanPlayer.techLevel >= MAX_TECH_LEVEL
+      ? null
+      : activeResearchLabCount === 0
+        ? '∞'
+        : String(
+            Math.ceil(
+              Math.max(0, currentResearchThreshold - (humanPlayer?.researchPoints ?? 0)) /
+                activeResearchLabCount,
+            ),
+          );
 
-  if (gameState === null || humanPlayer === undefined) {
-    return <View style={styles.root} />;
-  }
+  const queuedShipsPerPlanet = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const order of queuedOrders) {
+      map[order.fromPlanetId] = (map[order.fromPlanetId] ?? 0) + order.shipCount;
+    }
+    return map;
+  }, [queuedOrders]);
 
-  const { map, players, fleets, turnNumber, currentPlayerId, status, winnerId } = gameState;
-  const mapPixelWidth = map.width * CELL_SIZE;
-  const mapPixelHeight = map.height * CELL_SIZE;
-  const isHumanTurn = status === 'active' && currentPlayerId === humanPlayer.id;
-  const humanShips = sumOwnedShips(map, humanPlayer.id);
-  const humanWon = status === 'finished' && winnerId === humanPlayer.id;
-  const humanLost = status === 'finished' && winnerId !== null && winnerId !== humanPlayer.id;
-
-  const maxSend =
-    selectedPlanet !== undefined && selectedPlanet.owner === humanPlayer.id
-      ? Math.max(1, selectedPlanet.shipCount - 1)
+  const shipsAlreadyQueued = queuedOrders
+    .filter((o) => o.fromPlanetId === pendingFleet?.fromPlanetId)
+    .reduce((sum, o) => sum + o.shipCount, 0);
+  const modalMaxShips =
+    pendingOriginPlanet !== undefined
+      ? Math.max(1, pendingOriginPlanet.shipCount - 1 - shipsAlreadyQueued)
       : 1;
 
-  const handleSendFleet = () => {
-    if (selectedPlanetId === null || destPlanetId === null) {
+  const scale = useSharedValue(0.6);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedScale = useSharedValue(0.6);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+  const pinchFocalX = useSharedValue(0);
+  const pinchFocalY = useSharedValue(0);
+  const pinchStartScale = useSharedValue(1);
+  const pinchStartTranslateX = useSharedValue(0);
+  const pinchStartTranslateY = useSharedValue(0);
+  const panStartTranslateX = useSharedValue(0);
+  const panStartTranslateY = useSharedValue(0);
+  const viewportWidth = useSharedValue(0);
+  const viewportHeight = useSharedValue(0);
+  const mapWidthSV = useSharedValue(1);
+  const mapHeightSV = useSharedValue(1);
+  const isFleetDragging = useSharedValue(false);
+
+  const measureMapArea = useCallback(() => {
+    mapAreaRef.current?.measureInWindow((x, y) => {
+      mapAreaWindowRef.current = { x, y };
+    });
+  }, []);
+
+  const absoluteToMapLocal = useCallback((absoluteX: number, absoluteY: number) => {
+    const { x: winX, y: winY } = mapAreaWindowRef.current;
+    return { x: absoluteX - winX, y: absoluteY - winY };
+  }, []);
+
+  useEffect(() => {
+    if (!outOfRangeMessage) {
       return;
     }
-    // MVP: one fleet dispatch per human turn — sendFleet resolves the full turn (and AI turns) immediately.
-    sendFleet(selectedPlanetId, destPlanetId, shipCount);
+    const timer = setTimeout(() => setOutOfRangeMessage(false), 1500);
+    return () => clearTimeout(timer);
+  }, [outOfRangeMessage]);
+
+  useEffect(() => {
+    if (buildError === null) {
+      return;
+    }
+    const timer = setTimeout(() => setBuildError(null), 2000);
+    return () => clearTimeout(timer);
+  }, [buildError]);
+
+  useEffect(() => {
+    if (selectedPlanetId === null) {
+      setBuildError(null);
+    }
+  }, [selectedPlanetId]);
+
+  useEffect(() => {
+    if (gameState === null) {
+      return;
+    }
+    mapWidthSV.value = gameState.map.width * CELL_SIZE;
+    mapHeightSV.value = gameState.map.height * CELL_SIZE;
+    scale.value = 0.6;
+    translateX.value = 0;
+    translateY.value = 0;
+    savedScale.value = 0.6;
+    savedTranslateX.value = 0;
+    savedTranslateY.value = 0;
+  }, [gameState?.map.width, gameState?.map.height]);
+
+  const pinch = Gesture.Pinch()
+    .onStart((event) => {
+      pinchFocalX.value = event.focalX;
+      pinchFocalY.value = event.focalY;
+      pinchStartScale.value = scale.value;
+      pinchStartTranslateX.value = translateX.value;
+      pinchStartTranslateY.value = translateY.value;
+    })
+    .onUpdate((event) => {
+      const newScale = Math.min(4, Math.max(0.4, pinchStartScale.value * event.scale));
+      const fx = pinchFocalX.value;
+      const fy = pinchFocalY.value;
+      const newTx =
+        fx -
+        (fx - pinchStartTranslateX.value) * (newScale / pinchStartScale.value);
+      const newTy =
+        fy -
+        (fy - pinchStartTranslateY.value) * (newScale / pinchStartScale.value);
+      const clamped = clampTranslation(
+        newTx,
+        newTy,
+        newScale,
+        mapWidthSV.value,
+        mapHeightSV.value,
+        viewportWidth.value,
+        viewportHeight.value,
+      );
+      scale.value = newScale;
+      translateX.value = clamped.x;
+      translateY.value = clamped.y;
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const pan = Gesture.Pan()
+    .minDistance(8)
+    .onStart(() => {
+      panStartTranslateX.value = translateX.value;
+      panStartTranslateY.value = translateY.value;
+    })
+    .onUpdate((event) => {
+      if (isFleetDragging.value) {
+        return;
+      }
+      const clamped = clampTranslation(
+        panStartTranslateX.value + event.translationX,
+        panStartTranslateY.value + event.translationY,
+        scale.value,
+        mapWidthSV.value,
+        mapHeightSV.value,
+        viewportWidth.value,
+        viewportHeight.value,
+      );
+      translateX.value = clamped.x;
+      translateY.value = clamped.y;
+    })
+    .onEnd(() => {
+      if (isFleetDragging.value) {
+        return;
+      }
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    // Keep logical map transform as: screen = map * scale + translate.
+    // We explicitly compensate for default center-based scaling so this
+    // holds regardless of transformOrigin support.
+    transform: [
+      {
+        translateX:
+          translateX.value + (mapWidthSV.value * (scale.value - 1)) / 2,
+      },
+      {
+        translateY:
+          translateY.value + (mapHeightSV.value * (scale.value - 1)) / 2,
+      },
+      { scale: scale.value },
+    ],
+  }));
+
+  const cancelDrag = useCallback(() => {
+    fleetDragActivatedRef.current = false;
+    setDragOriginPlanetId(null);
+    setDragFingerLocal(null);
+    runOnUI(() => {
+      'worklet';
+      isFleetDragging.value = false;
+    })();
+  }, []);
+
+  const handleDragStart = useCallback(
+    (localX: number, localY: number, s: number, tx: number, ty: number) => {
+      if (gameState === null || localHumanPlayerId === undefined) {
+        return;
+      }
+      const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+      const planet = findPlanetAtMapCoords(mapPoint.x, mapPoint.y, gameState.map.planets);
+      if (planet === undefined || planet.owner !== localHumanPlayerId) {
+        return;
+      }
+      measureMapArea();
+      setDragOriginPlanetId(planet.id);
+      setDragFingerLocal(null);
+      runOnUI(() => {
+        'worklet';
+        isFleetDragging.value = true;
+      })();
+    },
+    [gameState, localHumanPlayerId, measureMapArea],
+  );
+
+  const handleFleetPanUpdate = useCallback(
+    (
+      localX: number,
+      localY: number,
+      absoluteX: number,
+      absoluteY: number,
+      s: number,
+      tx: number,
+      ty: number,
+    ) => {
+      if (!fleetDragActivatedRef.current) {
+        fleetDragActivatedRef.current = true;
+        handleDragStart(localX, localY, s, tx, ty);
+      }
+      setDragFingerLocal(absoluteToMapLocal(absoluteX, absoluteY));
+    },
+    [absoluteToMapLocal, handleDragStart],
+  );
+
+  const handleDragEnd = useCallback(
+    (absoluteX: number, absoluteY: number, s: number, tx: number, ty: number) => {
+      if (gameState === null || humanPlayer === undefined || dragOriginPlanetId === null) {
+        cancelDrag();
+        return;
+      }
+
+      const originPlanet = gameState.map.planets.find((p) => p.id === dragOriginPlanetId);
+      if (originPlanet === undefined) {
+        cancelDrag();
+        return;
+      }
+
+      const fingerLocal = absoluteToMapLocal(absoluteX, absoluteY);
+      const mapPoint = screenToMapCoords(fingerLocal.x, fingerLocal.y, s, tx, ty);
+      const destPlanet = findPlanetAtMapCoords(
+        mapPoint.x,
+        mapPoint.y,
+        gameState.map.planets,
+      );
+
+      const fromPlanetId = dragOriginPlanetId;
+      cancelDrag();
+
+      if (destPlanet === undefined || destPlanet.id === fromPlanetId) {
+        return;
+      }
+
+      const range = effectiveRange(humanPlayer.techLevel);
+      if (!isInRange(originPlanet.position, destPlanet.position, range)) {
+        setOutOfRangeMessage(true);
+        return;
+      }
+
+      setPendingFleet({
+        fromPlanetId,
+        toPlanetId: destPlanet.id,
+        shipCount: 1,
+      });
+    },
+    [
+      absoluteToMapLocal,
+      cancelDrag,
+      dragOriginPlanetId,
+      gameState,
+      humanPlayer,
+      setPendingFleet,
+    ],
+  );
+
+  const handleMapTap = useCallback(
+    (localX: number, localY: number, s: number, tx: number, ty: number) => {
+      const store = useGameStore.getState();
+      const record = store.getActiveRecord();
+      if (record === null) {
+        return;
+      }
+      const freshHumanId = getLocalHumanPlayerId(record.state);
+      if (freshHumanId === undefined) {
+        return;
+      }
+      const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+      const planet = findPlanetAtMapCoords(
+        mapPoint.x,
+        mapPoint.y,
+        record.state.map.planets,
+      );
+      if (planet === undefined || planet.owner !== freshHumanId) {
+        return;
+      }
+      store.selectPlanet(planet.id);
+    },
+    [],
+  );
+
+  const planetTap = Gesture.Tap()
+    .maxDuration(300)
+    .onEnd((event) => {
+      runOnJS(handleMapTap)(
+        event.x,
+        event.y,
+        scale.value,
+        translateX.value,
+        translateY.value,
+      );
+    });
+
+  const fleetDrag = Gesture.Pan()
+    .minDistance(10)
+    .onUpdate((event) => {
+      runOnJS(handleFleetPanUpdate)(
+        event.x,
+        event.y,
+        event.absoluteX,
+        event.absoluteY,
+        scale.value,
+        translateX.value,
+        translateY.value,
+      );
+    })
+    .onEnd((event) => {
+      runOnJS(handleDragEnd)(
+        event.absoluteX,
+        event.absoluteY,
+        scale.value,
+        translateX.value,
+        translateY.value,
+      );
+    })
+    .onFinalize(() => {
+      isFleetDragging.value = false;
+      panStartTranslateX.value = translateX.value;
+      panStartTranslateY.value = translateY.value;
+    });
+
+  const composed = Gesture.Simultaneous(pinch, pan);
+  // Last gesture has highest priority — planetTap must win stationary taps over fleetDrag.
+  const planetFleet = Gesture.Exclusive(fleetDrag, planetTap);
+  const mapGesture = Gesture.Simultaneous(composed, planetFleet);
+
+  const handleConfirmFleet = () => {
+    confirmPendingFleet();
     selectPlanet(null);
-    setDestPlanetId(null);
-    setShipCount(1);
   };
 
   const handleNewGame = () => {
@@ -281,156 +965,478 @@ export default function GameScreen() {
     navigation.replace('Home');
   };
 
-  const canSend =
-    status === 'active' &&
-    isHumanTurn &&
-    selectedPlanet !== undefined &&
-    selectedPlanet.owner === humanPlayer.id &&
-    destPlanetId !== null &&
-    shipCount >= 1 &&
-    shipCount <= maxSend;
+  const handleBuildChipPress = (type: 'factory' | 'researchLab') => {
+    if (selectedPlanet === undefined || noBuildSlotsRemaining) {
+      return;
+    }
+    const result = queueBuildOrder(selectedPlanet.id, type);
+    if (result === 'insufficient_gold') {
+      setBuildError('Not enough gold');
+    }
+  };
+
+  const handleFilledBuildingSlotPress = (slotIndex: number) => {
+    if (selectedPlanet === undefined) {
+      return;
+    }
+    const building = selectedPlanet.buildings[slotIndex];
+    if (building === undefined) {
+      return;
+    }
+    if (building.builtOnRound === selectedRoundNumber) {
+      cancelBuildOrder(selectedPlanet.id, slotIndex);
+      return;
+    }
+    if (building.builtOnRound < selectedRoundNumber) {
+      Alert.alert(
+        'Demolish building?',
+        'This cannot be undone. You will not receive your gold back.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Demolish',
+            style: 'destructive',
+            onPress: () => demolishBuilding(selectedPlanet.id, slotIndex),
+          },
+        ],
+      );
+    }
+  };
+
+  if (gameState === null || humanPlayer === undefined || localHumanPlayerId === undefined) {
+    return <View style={styles.root} />;
+  }
+
+  const { map, players, fleets, roundNumber, currentPlayerId, status, winnerId } = gameState;
+  const mapPixelWidth = map.width * CELL_SIZE;
+  const mapPixelHeight = map.height * CELL_SIZE;
+  const isHumanTurn = status === 'active' && currentPlayerId === humanPlayer.id;
+  const humanWon = status === 'finished' && winnerId === humanPlayer.id;
+  const humanLost = status === 'finished' && winnerId !== null && winnerId !== humanPlayer.id;
+
+  const dragOriginPlanet =
+    dragOriginPlanetId !== null
+      ? map.planets.find((p) => p.id === dragOriginPlanetId)
+      : undefined;
+
+  const dragLineStart =
+    dragOriginPlanet !== undefined
+      ? (() => {
+          const center = planetCenterPx(dragOriginPlanet);
+          const s = scale.value;
+          const tx = translateX.value;
+          const ty = translateY.value;
+          return { x: center.x * s + tx, y: center.y * s + ty };
+        })()
+      : null;
 
   return (
     <View style={styles.root}>
       <View style={[styles.statusBar, { paddingTop: insets.top + 8 }]}>
         <Text style={styles.statusMain}>
-          Turn {turnNumber} · {isHumanTurn ? 'Your turn' : "AI's turn"}
+          Turn {roundNumber} · {isHumanTurn ? 'Your turn' : "AI's turn"}
         </Text>
         <Text style={styles.statusSub}>
-          Ships {humanShips} · Resources {humanPlayer.resources}
+          Gold {humanPlayer.gold} · Tech Level {humanPlayer.techLevel}
         </Text>
       </View>
 
-      <View style={styles.mapArea}>
-        <ScrollView horizontal scrollEnabled showsHorizontalScrollIndicator={false}>
-          <ScrollView scrollEnabled showsVerticalScrollIndicator={false}>
-            <View style={{ width: mapPixelWidth, height: mapPixelHeight }}>
+      <View
+        ref={mapAreaRef}
+        style={styles.mapArea}
+        onLayout={(e) => {
+          viewportWidth.value = e.nativeEvent.layout.width;
+          viewportHeight.value = e.nativeEvent.layout.height;
+          measureMapArea();
+        }}
+      >
+        {dragLineStart !== null && dragFingerLocal !== null && (
+          <DragLine
+            startX={dragLineStart.x}
+            startY={dragLineStart.y}
+            endX={dragFingerLocal.x}
+            endY={dragFingerLocal.y}
+          />
+        )}
+        {outOfRangeMessage && (
+          <View style={styles.outOfRangeOverlay} pointerEvents="none">
+            <Text style={styles.outOfRangeText}>Out of range</Text>
+          </View>
+        )}
+        <GestureDetector gesture={mapGesture}>
+          <View style={styles.mapGestureHost}>
+            <Animated.View
+              style={[
+                {
+                  width: mapPixelWidth,
+                  height: mapPixelHeight,
+                },
+                animatedStyle,
+              ]}
+            >
               {map.planets.map((planet) => (
                 <PlanetNode
                   key={planet.id}
                   planet={planet}
-                  color={getPlayerColor(planet.owner, humanPlayer.id, players)}
+                  color={getPlanetColor(planet, localHumanPlayerId)}
+                  isOwned={planet.owner === localHumanPlayerId}
                   isSelected={planet.id === selectedPlanetId}
-                  isHome={planet.isHomePlanet}
-                  onPress={() =>
-                    selectPlanet(planet.id === selectedPlanetId ? null : planet.id)
-                  }
+                  isDragOrigin={planet.id === dragOriginPlanetId}
+                  adjustedShipCount={Math.max(
+                    0,
+                    planet.shipCount - (queuedShipsPerPlanet[planet.id] ?? 0),
+                  )}
                 />
               ))}
-              {fleets.map((fleet) => {
-                const destPlanet = map.planets.find((p) => p.id === fleet.destinationPlanetId);
-                if (destPlanet === undefined) {
-                  return null;
+              <FleetLayer
+                fleets={fleets}
+                planets={map.planets}
+                queuedOrders={queuedOrders}
+                humanPlayerId={humanPlayer.id}
+                players={players}
+                mapPixelWidth={mapPixelWidth}
+                mapPixelHeight={mapPixelHeight}
+              />
+            </Animated.View>
+          </View>
+        </GestureDetector>
+      </View>
+
+      <Modal
+        visible={pendingFleet !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPendingFleet(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Send Fleet</Text>
+            {pendingOriginPlanet !== undefined && pendingDestPlanet !== undefined && (
+              <Text style={styles.modalRoute}>
+                {formatPlanetId(pendingOriginPlanet.id)} →{' '}
+                {formatPlanetId(pendingDestPlanet.id)}
+              </Text>
+            )}
+            {pendingTransitInfo !== null && (
+              <Text style={styles.modalRouteInfo}>
+                Distance: {pendingTransitInfo.clickDistLabel} clicks · ETA:{' '}
+                {pendingTransitInfo.turnsInTransit} turn
+                {pendingTransitInfo.turnsInTransit === 1 ? '' : 's'}
+              </Text>
+            )}
+            <View style={styles.stepperRow}>
+              <Text style={styles.sectionHint}>Ships</Text>
+              <View style={styles.stepperControls}>
+                <Pressable
+                  style={styles.stepperBtn}
+                  onPress={() =>
+                    pendingFleet !== null &&
+                    setPendingFleet({
+                      ...pendingFleet,
+                      shipCount: Math.max(1, pendingFleet.shipCount - 1),
+                    })
+                  }
+                  disabled={pendingFleet === null || pendingFleet.shipCount <= 1}
+                >
+                  <Text style={styles.stepperBtnText}>−</Text>
+                </Pressable>
+                <Text style={styles.stepperValue}>{pendingFleet?.shipCount ?? 1}</Text>
+                <Pressable
+                  style={styles.stepperBtn}
+                  onPress={() =>
+                    pendingFleet !== null &&
+                    setPendingFleet({
+                      ...pendingFleet,
+                      shipCount: Math.min(modalMaxShips, pendingFleet.shipCount + 1),
+                    })
+                  }
+                  disabled={
+                    pendingFleet === null || pendingFleet.shipCount >= modalMaxShips
+                  }
+                >
+                  <Text style={styles.stepperBtnText}>+</Text>
+                </Pressable>
+                <Text style={styles.stepperMax}>max {modalMaxShips}</Text>
+              </View>
+            </View>
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalBtn, styles.modalBtnSecondary]}
+                onPress={() => setPendingFleet(null)}
+              >
+                <Text style={styles.modalBtnSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleConfirmFleet}>
+                <Text style={styles.primaryButtonText}>Confirm</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={
+          selectedPlanet !== undefined && selectedPlanet.owner === localHumanPlayerId
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={() => selectPlanet(null)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => selectPlanet(null)}
+        >
+          <Pressable style={styles.planetDetailCard} onPress={() => {}}>
+            <View style={styles.planetDetailHeader}>
+              <View style={styles.planetDetailHeaderSpacer} />
+              <Text style={styles.planetDetailName}>{selectedPlanet?.name}</Text>
+              <Pressable
+                onPress={() => selectPlanet(null)}
+                hitSlop={12}
+                style={styles.planetDetailHeaderClose}
+              >
+                <Text style={styles.planetDetailClose}>✕</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.planetInfoRow}>
+              <View style={styles.planetClassTile}>
+                <Text style={styles.planetClassTileText}>{selectedPlanet?.class}</Text>
+              </View>
+              <View style={styles.troopsSummary}>
+                <Text style={styles.troopsSummaryValue}>{selectedPlanet?.shipCount ?? 0}</Text>
+                <Text style={styles.troopsSummaryLabel}>troops</Text>
+              </View>
+            </View>
+
+            <View style={styles.buildChipRow}>
+              <Pressable
+                style={[
+                  styles.buildChip,
+                  noBuildSlotsRemaining && styles.buildChipDisabled,
+                ]}
+                onPress={() => handleBuildChipPress('factory')}
+                disabled={noBuildSlotsRemaining}
+              >
+                <Text
+                  style={[
+                    styles.buildChipText,
+                    noBuildSlotsRemaining && styles.buildChipTextDisabled,
+                  ]}
+                >
+                  Factory
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.buildChip,
+                  noBuildSlotsRemaining && styles.buildChipDisabled,
+                ]}
+                onPress={() => handleBuildChipPress('researchLab')}
+                disabled={noBuildSlotsRemaining}
+              >
+                <Text
+                  style={[
+                    styles.buildChipText,
+                    noBuildSlotsRemaining && styles.buildChipTextDisabled,
+                  ]}
+                >
+                  Research Lab
+                </Text>
+              </Pressable>
+            </View>
+
+            {buildError !== null && (
+              <Text style={styles.buildErrorLabel}>{buildError}</Text>
+            )}
+
+            <View style={styles.buildingSlotsGrid}>
+              {Array.from({ length: selectedPlanet?.buildingSlots ?? 0 }).map((_, slotIndex) => {
+                const building = selectedPlanet?.buildings[slotIndex];
+                const slotFilled = building !== undefined;
+                const slotStyle = [
+                  styles.buildingSlotTile,
+                  slotFilled ? styles.buildingSlotFilled : styles.buildingSlotEmpty,
+                  slotFilled &&
+                    building.builtOnRound === gameState.roundNumber &&
+                    styles.buildingSlotUnderConstruction,
+                ];
+                if (!slotFilled) {
+                  return <View key={`building-slot-${slotIndex}`} style={slotStyle} />;
                 }
-                const siblings = fleetsByDestination.get(fleet.destinationPlanetId) ?? [];
-                const index = siblings.findIndex((f) => f.id === fleet.id);
                 return (
-                  <FleetMarker
-                    key={fleet.id}
-                    fleet={fleet}
-                    destPlanet={destPlanet}
-                    color={getPlayerColor(fleet.ownerId, humanPlayer.id, players)}
-                    index={index}
-                  />
+                  <Pressable
+                    key={`building-slot-${slotIndex}`}
+                    style={slotStyle}
+                    onPress={() => handleFilledBuildingSlotPress(slotIndex)}
+                  >
+                    <Text style={styles.buildingSlotLabel}>
+                      {building.type === 'factory' ? '🏭' : '🔬'}
+                    </Text>
+                  </Pressable>
                 );
               })}
             </View>
-          </ScrollView>
-        </ScrollView>
-      </View>
 
-      <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 12 }]}>
-        {status === 'finished' ? (
-          <>
-            <Text
-              style={[
-                styles.banner,
-                humanWon ? styles.bannerVictory : styles.bannerDefeat,
-              ]}
-            >
-              {humanWon ? 'Victory' : humanLost ? 'Defeat' : 'Game Over'}
-            </Text>
-            <Pressable style={styles.primaryButton} onPress={handleNewGame}>
-              <Text style={styles.primaryButtonText}>New Game</Text>
-            </Pressable>
-          </>
-        ) : selectedPlanet === undefined ? (
-          <Text style={styles.mutedHint}>Tap a planet to select it</Text>
-        ) : (
-          <>
-            <Text style={styles.planetTitle}>{formatPlanetId(selectedPlanet.id)}</Text>
-            <View style={styles.metaRow}>
-              <Text style={styles.classBadge}>Class {selectedPlanet.class}</Text>
-              <Text style={styles.metaText}>
-                {getOwnerName(selectedPlanet.owner, players)} · {selectedPlanet.shipCount} ships
-              </Text>
-            </View>
-
-            {selectedPlanet.owner === humanPlayer.id && isHumanTurn && (
-              <View style={styles.sendSection}>
-                <Text style={styles.sectionLabel}>Send Fleet</Text>
-                <Text style={styles.sectionHint}>Destination</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.destScroll}
-                  contentContainerStyle={styles.destScrollContent}
-                >
-                  {destinationOptions.map(({ planet, turns, ownerName }) => {
-                    const selected = destPlanetId === planet.id;
-                    return (
-                      <Pressable
-                        key={planet.id}
-                        style={[styles.destChip, selected && styles.destChipSelected]}
-                        onPress={() => setDestPlanetId(planet.id)}
-                      >
-                        <Text
-                          style={[styles.destChipTitle, selected && styles.destChipTitleSelected]}
-                        >
-                          {formatPlanetId(planet.id)}
-                        </Text>
-                        <Text style={styles.destChipMeta}>
-                          {ownerName} · {turns} turn{turns === 1 ? '' : 's'}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-
-                <View style={styles.stepperRow}>
-                  <Text style={styles.sectionHint}>Ships</Text>
-                  <View style={styles.stepperControls}>
-                    <Pressable
-                      style={styles.stepperBtn}
-                      onPress={() => setShipCount((c) => Math.max(1, c - 1))}
-                      disabled={shipCount <= 1}
-                    >
-                      <Text style={styles.stepperBtnText}>−</Text>
-                    </Pressable>
-                    <Text style={styles.stepperValue}>{shipCount}</Text>
-                    <Pressable
-                      style={styles.stepperBtn}
-                      onPress={() => setShipCount((c) => Math.min(maxSend, c + 1))}
-                      disabled={shipCount >= maxSend}
-                    >
-                      <Text style={styles.stepperBtnText}>+</Text>
-                    </Pressable>
-                    <Text style={styles.stepperMax}>max {maxSend}</Text>
-                  </View>
-                </View>
-
-                <Pressable
-                  style={[styles.primaryButton, !canSend && styles.primaryButtonDisabled]}
-                  onPress={handleSendFleet}
-                  disabled={!canSend}
-                >
-                  <Text style={styles.primaryButtonText}>Send</Text>
-                </Pressable>
+            {selectedPlanetFactories > 0 && (
+              <View style={styles.productionSliderSection}>
+                <Slider
+                  minimumValue={0}
+                  maximumValue={1}
+                  value={selectedPlanet?.productionSlider ?? 0.5}
+                  onValueChange={(value) => {
+                    if (selectedPlanet !== undefined) {
+                      setProductionSlider(selectedPlanet.id, value);
+                    }
+                  }}
+                  minimumTrackTintColor={COLORS.accent}
+                  maximumTrackTintColor={COLORS.border}
+                  thumbTintColor={COLORS.accent}
+                />
+                <Text style={styles.productionSplitLabel}>
+                  {Math.round((selectedPlanet?.productionSlider ?? 0.5) * 100)}% troops /{' '}
+                  {100 - Math.round((selectedPlanet?.productionSlider ?? 0.5) * 100)}% gold
+                </Text>
+                <Text style={styles.productionOutputLabel}>
+                  ⚔ {selectedPlanetLiveTroopsPerTurn.toFixed(1)} troops/turn · 💰{' '}
+                  {selectedPlanetLiveGoldPerTurn.toFixed(1)} gold/turn
+                </Text>
               </View>
             )}
-          </>
-        )}
-      </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showResearchModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowResearchModal(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowResearchModal(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <View style={styles.researchHeader}>
+              <Text style={styles.modalTitle}>Research Status</Text>
+              <Pressable
+                onPress={() => setShowResearchModal(false)}
+                hitSlop={12}
+                style={styles.researchCloseButton}
+              >
+                <Text style={styles.planetDetailClose}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.researchLine}>Tech Level {humanPlayer.techLevel}</Text>
+            <Text style={styles.researchLine}>
+              {humanPlayer.researchPoints} / {currentResearchThreshold} research points
+            </Text>
+            <Text style={styles.researchLine}>Active research labs: {activeResearchLabCount}</Text>
+            {humanPlayer.techLevel >= MAX_TECH_LEVEL ? (
+              <Text style={styles.researchProjection}>Maximum tech level reached</Text>
+            ) : (
+              <Text style={styles.researchProjection}>
+                Turns to next level: {projectedTurnsToNextLevel}
+              </Text>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showQueuedModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowQueuedModal(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowQueuedModal(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <View style={styles.researchHeader}>
+              <Text style={styles.modalTitle}>Queued Orders</Text>
+              <Pressable
+                onPress={() => setShowQueuedModal(false)}
+                hitSlop={12}
+                style={styles.researchCloseButton}
+              >
+                <Text style={styles.planetDetailClose}>✕</Text>
+              </Pressable>
+            </View>
+            {queuedOrders.length === 0 ? (
+              <Text style={styles.queuedEmptyText}>No orders queued</Text>
+            ) : (
+              queuedOrders.map((order, index) => {
+                const originPlanet = map.planets.find((p) => p.id === order.fromPlanetId);
+                const destPlanet = map.planets.find((p) => p.id === order.toPlanetId);
+                const originLabel = originPlanet?.name ?? formatPlanetId(order.fromPlanetId);
+                const destLabel = destPlanet?.name ?? formatPlanetId(order.toPlanetId);
+                return (
+                  <View
+                    key={`${order.fromPlanetId}-${order.toPlanetId}-${index}`}
+                    style={styles.queuedModalRow}
+                  >
+                    <Text style={styles.queuedModalText} numberOfLines={1}>
+                      {originLabel} → {destLabel} · {order.shipCount}
+                    </Text>
+                    <Pressable onPress={() => cancelQueuedOrder(index)} hitSlop={8}>
+                      <Text style={styles.queueOverlayCancelText}>✕</Text>
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {status === 'finished' && (
+        <View style={styles.gameOverOverlay}>
+          <Text style={[styles.banner, humanWon ? styles.bannerVictory : styles.bannerDefeat]}>
+            {humanWon ? 'Victory' : humanLost ? 'Defeat' : 'Game Over'}
+          </Text>
+          <Pressable style={styles.primaryButton} onPress={handleNewGame}>
+            <Text style={styles.primaryButtonText}>New Game</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {isHumanTurn && status === 'active' && (
+        <Pressable
+          style={[styles.researchButton, { bottom: insets.bottom + 128 }]}
+          onPress={() => setShowQueuedModal(true)}
+        >
+          <Text style={styles.researchButtonText}>Queued ({queuedOrders.length})</Text>
+        </Pressable>
+      )}
+
+      {isHumanTurn && status === 'active' && (
+        <Pressable
+          style={[styles.researchButton, { bottom: insets.bottom + 72 }]}
+          onPress={() => setShowResearchModal(true)}
+        >
+          <Text style={styles.researchButtonText}>R&D</Text>
+        </Pressable>
+      )}
+
+      {isHumanTurn && status === 'active' && (
+        <Pressable
+          style={[styles.endTurnButton, { bottom: insets.bottom + 16 }]}
+          onPress={() => {
+            cancelDrag();
+            endTurn();
+            selectPlanet(null);
+          }}
+        >
+          <Text style={styles.endTurnButtonText}>End Turn</Text>
+        </Pressable>
+      )}
+
+      {showingLockScreen && (
+        <Pressable
+          style={[styles.lockScreen, { paddingTop: insets.top }]}
+          onPress={dismissLockScreen}
+        >
+          <Text style={styles.lockTitle}>Pass the device</Text>
+          <Text style={styles.lockSub}>Tap anywhere to continue</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -462,19 +1468,68 @@ const styles = StyleSheet.create({
   mapArea: {
     flex: 1,
     backgroundColor: '#060612',
+    overflow: 'hidden',
+  },
+  mapGestureHost: {
+    flex: 1,
+  },
+  dragLine: {
+    position: 'absolute',
+    height: 2,
+    backgroundColor: COLORS.accent,
+    opacity: 0.9,
+    zIndex: 10,
+    transformOrigin: 'left center',
+  },
+  outOfRangeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  outOfRangeText: {
+    color: COLORS.defeat,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 1,
+    backgroundColor: 'rgba(10, 10, 26, 0.85)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   planetTouchTarget: {
     position: 'absolute',
+    width: PLANET_SIZE_SELECTED,
+    height: PLANET_SIZE_SELECTED,
     alignItems: 'center',
-    width: CELL_SIZE,
-  },
-  homeRing: {
-    position: 'absolute',
-    borderWidth: 2,
-    borderColor: '#ffffff',
+    justifyContent: 'center',
   },
   planetCircle: {
     zIndex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planetNameLabel: {
+    position: 'absolute',
+    top: -11,
+    width: 48,
+    marginLeft: -(48 - CELL_SIZE) / 2,
+    textAlign: 'center',
+    color: '#c8c8e8',
+    fontSize: 7,
+  },
+  planetNameLabelFogged: {
+    color: '#666688',
+  },
+  planetClassLabel: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 7,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  planetClassLabelFogged: {
+    color: 'rgba(180, 180, 200, 0.5)',
   },
   shipCountLabel: {
     color: COLORS.text,
@@ -484,40 +1539,10 @@ const styles = StyleSheet.create({
     width: CELL_SIZE * 2,
     marginLeft: -CELL_SIZE / 2,
   },
-  fleetMarker: {
+  fleetLayer: {
     position: 'absolute',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    zIndex: 0,
-  },
-  fleetArrow: {
-    color: COLORS.textMuted,
-    fontSize: 8,
-  },
-  fleetDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  fleetShips: {
-    color: COLORS.textMuted,
-    fontSize: 8,
-  },
-  bottomPanel: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    backgroundColor: COLORS.panel,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    maxHeight: '42%',
-  },
-  mutedHint: {
-    color: COLORS.textMuted,
-    fontSize: 14,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    paddingVertical: 8,
+    top: 0,
+    left: 0,
   },
   planetTitle: {
     color: COLORS.text,
@@ -547,56 +1572,88 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 13,
   },
-  sendSection: {
+  dragHint: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontStyle: 'italic',
     marginTop: 4,
   },
-  sectionLabel: {
+  gameOverOverlay: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 80,
+    backgroundColor: 'rgba(18, 18, 42, 0.95)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 20,
+    zIndex: 10,
+    alignItems: 'center',
+  },
+  queuedEmptyText: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  queuedModalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 10,
+  },
+  queuedModalText: {
     color: COLORS.text,
     fontSize: 13,
-    fontWeight: '600',
+    flex: 1,
+  },
+  queueOverlayCancelText: {
+    color: COLORS.defeat,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  endTurnButton: {
+    position: 'absolute',
+    right: 16,
+    backgroundColor: COLORS.accent,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    zIndex: 10,
+  },
+  endTurnButtonText: {
+    color: COLORS.background,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  researchButton: {
+    position: 'absolute',
+    right: 16,
+    backgroundColor: COLORS.accent,
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    zIndex: 10,
+  },
+  researchButtonText: {
+    color: COLORS.background,
+    fontSize: 11,
+    fontWeight: '700',
     letterSpacing: 1,
     textTransform: 'uppercase',
-    marginBottom: 6,
+  },
+  planetSection: {
+    marginBottom: 12,
   },
   sectionHint: {
     color: COLORS.textMuted,
     fontSize: 11,
     marginBottom: 4,
     letterSpacing: 0.5,
-  },
-  destScroll: {
-    maxHeight: 72,
-    marginBottom: 10,
-  },
-  destScrollContent: {
-    gap: 8,
-    paddingRight: 8,
-  },
-  destChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    minWidth: 120,
-  },
-  destChipSelected: {
-    borderColor: COLORS.accent,
-    backgroundColor: '#1a2a4a',
-  },
-  destChipTitle: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  destChipTitleSelected: {
-    color: COLORS.accent,
-  },
-  destChipMeta: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 2,
   },
   stepperRow: {
     marginBottom: 10,
@@ -637,9 +1694,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 4,
   },
-  primaryButtonDisabled: {
-    opacity: 0.4,
-  },
   primaryButtonText: {
     color: COLORS.background,
     fontSize: 15,
@@ -660,5 +1714,267 @@ const styles = StyleSheet.create({
   },
   bannerDefeat: {
     color: COLORS.defeat,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: COLORS.panel,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 20,
+  },
+  modalTitle: {
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  researchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  researchCloseButton: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: 28,
+    alignItems: 'flex-end',
+  },
+  researchLine: {
+    color: COLORS.text,
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  researchProjection: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  modalRoute: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  modalRouteInfo: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  modalBtn: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalBtnPrimary: {
+    backgroundColor: COLORS.accent,
+  },
+  modalBtnSecondary: {
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  modalBtnSecondaryText: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  planetDetailCard: {
+    width: '90%',
+    maxWidth: 360,
+    backgroundColor: COLORS.panel,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 20,
+  },
+  planetDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  planetDetailHeaderSpacer: {
+    width: 28,
+  },
+  planetDetailHeaderClose: {
+    width: 28,
+    alignItems: 'flex-end',
+  },
+  planetDetailName: {
+    color: COLORS.text,
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    flex: 1,
+    textAlign: 'center',
+  },
+  planetDetailClose: {
+    color: COLORS.textMuted,
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  planetInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  planetClassTile: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a1a34',
+  },
+  planetClassTileText: {
+    color: COLORS.text,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  troopsSummary: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  troopsSummaryValue: {
+    color: COLORS.text,
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 32,
+  },
+  troopsSummaryLabel: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    textTransform: 'lowercase',
+  },
+  buildChipRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  buildChip: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 18,
+    paddingVertical: 8,
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  buildChipDisabled: {
+    opacity: 0.45,
+  },
+  buildChipActive: {
+    borderColor: COLORS.accent,
+    backgroundColor: '#1a2a44',
+  },
+  buildChipText: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  buildChipTextDisabled: {
+    color: '#5c5c7c',
+  },
+  buildChipTextActive: {
+    color: COLORS.text,
+  },
+  buildErrorLabel: {
+    color: COLORS.defeat,
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  buildingSlotsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  buildingSlotTile: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buildingSlotEmpty: {
+    borderColor: COLORS.border,
+    backgroundColor: 'transparent',
+  },
+  buildingSlotFilled: {
+    borderColor: '#2d4e7c',
+    backgroundColor: '#243c5f',
+  },
+  buildingSlotUnderConstruction: {
+    opacity: 0.35,
+  },
+  buildingSlotLabel: {
+    color: COLORS.text,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  productionSliderSection: {
+    marginTop: 4,
+  },
+  productionSplitLabel: {
+    color: COLORS.text,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  productionOutputLabel: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  lockScreen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 100,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: COLORS.text,
+    letterSpacing: 2,
+    marginBottom: 16,
+  },
+  lockSub: {
+    fontSize: 15,
+    color: COLORS.textMuted,
+    fontStyle: 'italic',
   },
 });

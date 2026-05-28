@@ -54,6 +54,13 @@ Ties favor the defender (`>=`).
 ## Home Planet Capture
 When combat or neutral capture changes `planet.owner` away from a player's id on their home planet, `turnEngine` marks that player eliminated on the same turn (after production). Eliminated players' other planets becoming neutral is not handled in combat yet.
 
+## Planet Ownership
+
+- A planet remains owned until an enemy fleet wins combat there
+- `shipCount = 0` on an owned planet does NOT revert ownership
+- A fleet arriving at a 0-garrison owned planet wins automatically (defender strength = 0)
+
 ## Changelog
+- 2026-05-27: Task 15 — documented that ownership persists at 0 garrison; confirmed auto-capture rule
 - 2026-05-27: Implemented `resolveArrival` with three arrival scenarios, deterministic combat, and exported constants.
 - 2026-05-27: File created. System not yet implemented.

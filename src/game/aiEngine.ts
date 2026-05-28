@@ -1,9 +1,34 @@
 import { DEFENSE_BONUS } from './combatEngine';
-import { computeTurnsInTransit } from './movementEngine';
+import { computeTurnsInTransit, effectiveRange, isInRange } from './movementEngine';
 import type { TurnInput } from './turnEngine';
 import type { Fleet, GameMap, GameState, Planet, Player, Position } from './types';
 
 export type AiDifficulty = 'easy' | 'normal';
+
+const AI_NAMES = [
+  'Aria', 'Cael', 'Dax', 'Lyra', 'Rex', 'Nova', 'Zara', 'Finn', 'Mira', 'Jax',
+  'Sable', 'Kira', 'Oryn', 'Vex', 'Tala', 'Cyrus', 'Nira', 'Brax', 'Lena', 'Orin',
+  'Zoe', 'Dane', 'Mace', 'Sera', 'Kael', 'Lux', 'Ryn', 'Thea', 'Beck', 'Vera',
+  'Ashe', 'Cole', 'Faye', 'Gwen', 'Hale', 'Ivy', 'Jude', 'Kade', 'Lane', 'Mae',
+  'Nash', 'Pax', 'Quinn', 'Rue', 'Sage', 'Tess', 'Uma', 'Vale', 'Wren', 'Xen',
+];
+
+export function generateAiName(rng: () => number, usedNames: Set<string>): string {
+  const shuffled = [...AI_NAMES];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  const usedLower = new Set(Array.from(usedNames, (name) => name.toLowerCase()));
+  for (const name of shuffled) {
+    if (!usedLower.has(name.toLowerCase())) {
+      return name;
+    }
+  }
+
+  return `AI ${usedNames.size + 1}`;
+}
 
 function findPlanet(map: GameMap, planetId: string): Planet | undefined {
   return map.planets.find((p) => p.id === planetId);
@@ -27,7 +52,7 @@ function nearestOwnedPlanet(
   map: GameMap,
   ownerId: string,
   target: Position,
-  options: { minShipCount: number; excludeIds: Set<string> },
+  options: { minShipCount: number; excludeIds: Set<string>; rangeClicks?: number },
 ): Planet | undefined {
   let best: Planet | undefined;
   let bestDistance = Infinity;
@@ -37,6 +62,9 @@ function nearestOwnedPlanet(
       continue;
     }
     if (planet.shipCount <= options.minShipCount) {
+      continue;
+    }
+    if (options.rangeClicks !== undefined && !isInRange(planet.position, target, options.rangeClicks)) {
       continue;
     }
 
@@ -78,6 +106,7 @@ function tryReinforceHome(
   state: GameState,
   player: Player,
   usedSources: Set<string>,
+  rangeClicks: number,
 ): TurnInput | null {
   const home = findPlanet(state.map, player.homePlanetId);
   if (home === undefined || home.owner !== player.id) {
@@ -97,6 +126,7 @@ function tryReinforceHome(
   const source = nearestOwnedPlanet(state.map, player.id, home.position, {
     minShipCount: 5,
     excludeIds: usedSources,
+    rangeClicks,
   });
   if (source === undefined) {
     return null;
@@ -126,6 +156,7 @@ function tryAttackWeakestEnemy(
   state: GameState,
   playerId: string,
   usedSources: Set<string>,
+  rangeClicks: number,
 ): TurnInput | null {
   const enemies = state.map.planets.filter(
     (p) => p.owner !== 'neutral' && p.owner !== playerId,
@@ -146,6 +177,7 @@ function tryAttackWeakestEnemy(
     const source = nearestOwnedPlanet(state.map, playerId, target.position, {
       minShipCount: 6,
       excludeIds: usedSources,
+      rangeClicks,
     });
     if (source === undefined) {
       continue;
@@ -171,6 +203,7 @@ function tryExpandToNeutral(
   state: GameState,
   playerId: string,
   usedSources: Set<string>,
+  rangeClicks: number,
 ): TurnInput | null {
   const neutrals = state.map.planets.filter((p) => p.owner === 'neutral');
   if (neutrals.length === 0) {
@@ -189,6 +222,9 @@ function tryExpandToNeutral(
   for (const target of neutrals) {
     for (const source of owned) {
       if (usedSources.has(source.id) || source.shipCount <= 4) {
+        continue;
+      }
+      if (!isInRange(source.position, target.position, rangeClicks)) {
         continue;
       }
 
@@ -234,18 +270,19 @@ export function computeAiTurn(state: GameState, playerId: string): TurnInput {
   }
 
   const usedSources = new Set<string>();
+  const rangeClicks = effectiveRange(player.techLevel);
 
-  const reinforce = tryReinforceHome(state, player, usedSources);
+  const reinforce = tryReinforceHome(state, player, usedSources, rangeClicks);
   if (reinforce !== null) {
     return reinforce;
   }
 
-  const attack = tryAttackWeakestEnemy(state, playerId, usedSources);
+  const attack = tryAttackWeakestEnemy(state, playerId, usedSources, rangeClicks);
   if (attack !== null) {
     return attack;
   }
 
-  const expand = tryExpandToNeutral(state, playerId, usedSources);
+  const expand = tryExpandToNeutral(state, playerId, usedSources, rangeClicks);
   if (expand !== null) {
     return expand;
   }

@@ -19,6 +19,14 @@ npx expo start
 ```
 Then press `i` to open in iOS Simulator, or scan the QR code with Expo Go on iPhone.
 
+After changing `metro.config.js` or adding Reanimated/Worklets, clear the Metro cache once:
+```bash
+npx expo start --clear
+```
+
+## Metro / Reanimated
+`metro.config.js` sets `inlineRequires: true`. Expo’s default (`false`) breaks Reanimated 4 / Worklets init and causes `[runtime not ready]: Exception in HostFunction` on launch. `react-native-worklets` is a direct dependency (Expo SDK 54 peer of `react-native-reanimated`).
+
 ## TypeScript Check
 ```bash
 npx tsc --noEmit

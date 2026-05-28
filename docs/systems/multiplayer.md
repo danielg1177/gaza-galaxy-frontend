@@ -6,6 +6,15 @@
 ## Overview
 Async turn-based multiplayer via a Laravel backend. Players submit turns independently.
 
+## Play Modes
+
+Matches store a `playMode` on `GameState` (set from `GameConfig` at creation):
+
+| Value | UI label | Description |
+|-------|----------|-------------|
+| `passAndPlay` | Pass & Play | Multiple humans share one device; turns hand off on the same screen. Default for new campaigns. |
+| `asyncMultiplayer` | Async Multiplayer | Each player uses their own device; turns submit independently when it is their turn. Requires the Laravel backend (Phase 4). **Not yet functional** — selectable in setup for future wiring only. |
+
 ## Architecture
 - Backend is authoritative source of truth
 - Clients submit intended actions; backend computes resulting state
@@ -40,4 +49,5 @@ Async turn-based multiplayer via a Laravel backend. Players submit turns indepen
 | turns         | id, game_id, player_id, turn_number, submitted_actions_json, resulting_state_json |
 
 ## Changelog
+- 2026-05-27: Task 21 — PlayMode type added; mode selector in setup form.
 - 2026-05-27: File created. Not yet in scope.

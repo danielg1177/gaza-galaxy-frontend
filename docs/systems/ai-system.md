@@ -50,9 +50,38 @@ Return `{ actions: [{ type: 'END_TURN' }], playerId }`.
 |------|----------|
 | Garrison | Never sends all ships; send count is clamped to `source.shipCount - 1` |
 | One dispatch per source | Each planet may be the origin of at most one `SEND_FLEET` per AI turn (`usedSources` set) |
-| Distance | All distances use `computeTurnsInTransit` from `movementEngine` |
+| Distance | Transit scoring uses `computeTurnsInTransit`; fleet dispatch must also satisfy click-range via `effectiveRange(player.techLevel)` and `isInRange` (same cap as human `processSendFleet`) |
 | Randomness | **None** — same `GameState` + `playerId` always yields the same `TurnInput` |
 | Turn resolution | AI only returns `TurnInput`; `resolveTurn` in `turnEngine` applies actions |
+
+## AI Player Names
+
+At game creation, each AI player now receives a **single short first-name** (for example, `Aria`, `Dax`, `Quinn`) from a fixed name pool in `aiEngine.ts`.
+
+`generateAiName(rng, usedNames)` shuffles the pool deterministically with the provided RNG, then returns the first name that is not already in `usedNames` (case-insensitive check). The store tracks names as players are built, so AI names cannot duplicate:
+
+- any human player name already assigned in the same game
+- any earlier AI name assigned in the same game
+
+If all names in the pool are exhausted, naming falls back to `AI {n}` where `n = usedNames.size + 1`.
+
+The game store seeds a dedicated `mulberry32(config.seed + 2)` instance for AI names so assignment stays deterministic per match seed and does not share state with spawn placement (`seed + 1`) or planet naming (map generator uses `config.seed` directly).
+
+Human player names now come from `GameConfig.playerSlots[index].name` in the setup form. At game creation, the store trims each human slot name and falls back to `Player N` where `N` is the 1-based index among human slots only.
+
+## New-game player slots
+
+`GameConfig.playerSlots` defines 2–8 participants before map generation:
+
+| Field | Meaning |
+|-------|---------|
+| `type: 'human' \| 'ai'` | Slot 0 must be human (local player); slots 1+ may toggle |
+| `name?: string` | Optional display name for human slots; trimmed at start with fallback naming if blank |
+| `difficulty?: AiDifficulty` | Only for AI slots; defaults to `'normal'` in the store |
+
+`HomeScreen` provides a slot builder: fixed “You · Human” on slot 0, Human/AI toggle and Easy/Normal difficulty chips on other slots, Add Player (max 8), Remove on the last slot (min 2).
+
+Each AI `Player` created in `buildPlayers` stores `difficulty` from its slot. `computeAiTurn` does not read `player.difficulty` yet — both levels use the same heuristic until difficulty tuning is implemented.
 
 ## Architecture constraints
 - AI logic lives entirely in `aiEngine.ts` — no AI logic in UI or turn engine
@@ -66,5 +95,10 @@ Return `{ actions: [{ type: 'END_TURN' }], playerId }`.
 - Building and research decisions
 
 ## Changelog
+- 2026-05-28: Task 75 — AI source/target selection now filters with `effectiveRange` + `isInRange` so `SEND_FLEET` actions never exceed the player's click-range cap (transit-turn distance alone is insufficient).
+- 2026-05-27: Task 33 — AI naming changed from `[Name] [Epithet]` to unique short first-names with human/AI collision avoidance and `AI {n}` fallback.
+- 2026-05-27: Task 32 — added optional human slot names (`PlayerSlot.name`) with trimmed `Player N` fallback in store.
+- 2026-05-27: 2–8 player slots in new-game setup; `Player.difficulty`; `GameConfig.playerSlots` replaces `aiCount`.
+- 2026-05-27: Task 18 — random AI player names added.
 - 2026-05-27: Implemented `computeAiTurn`, three-priority heuristic, `AiDifficulty` scaffolding, deterministic guarantees.
 - 2026-05-27: File created. System not yet implemented.

@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
-import { useGameStore } from '../store/gameStore';
+import type { AiDifficulty } from '../game/aiEngine';
+import { useGameStore, type GameRecord, type PlayerSlot } from '../store/gameStore';
 
 type MapSize = 'small' | 'medium' | 'large';
 
@@ -19,10 +20,15 @@ const MAP_PRESETS: Record<
   MapSize,
   { label: string; detail: string; width: number; height: number; planetCount: number }
 > = {
-  small: { label: 'Small', detail: '20 × 20 · 24 worlds', width: 20, height: 20, planetCount: 24 },
-  medium: { label: 'Medium', detail: '30 × 30 · 40 worlds', width: 30, height: 30, planetCount: 40 },
-  large: { label: 'Large', detail: '40 × 40 · 60 worlds', width: 40, height: 40, planetCount: 60 },
+  small: { label: 'Small', detail: '40 × 40 · 16 worlds', width: 40, height: 40, planetCount: 16 },
+  medium: { label: 'Medium', detail: '60 × 60 · 32 worlds', width: 60, height: 60, planetCount: 32 },
+  large: { label: 'Large', detail: '80 × 80 · 54 worlds', width: 80, height: 80, planetCount: 54 },
 };
+
+const DEFAULT_PLAYER_SLOTS: PlayerSlot[] = [
+  { type: 'human', name: 'Commander' },
+  { type: 'ai', difficulty: 'normal' },
+];
 
 const COLORS = {
   background: '#0a0a1a',
@@ -36,134 +42,393 @@ const COLORS = {
 
 type HomeNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
+function GameCard({
+  record,
+  onPress,
+}: {
+  record: GameRecord;
+  onPress: () => void;
+}) {
+  const { state } = record;
+  const humanPlayer = state.players.find((p) => !p.isAI);
+  const humanId = humanPlayer?.id;
+  const isHumanTurn =
+    humanId !== undefined && state.currentPlayerId === humanId && state.status === 'active';
+  const currentPlayer = state.players.find((p) => p.id === state.currentPlayerId);
+  const playerNames = state.players.map((p) => p.name).join(' · ');
+
+  let outcomeLabel: string | null = null;
+  if (state.status === 'finished' && humanId !== undefined) {
+    outcomeLabel = state.winnerId === humanId ? 'VICTORY' : 'DEFEAT';
+  }
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.gameCard, pressed && styles.gameCardPressed]}
+      onPress={onPress}
+    >
+      <Text style={styles.gameCardName}>{record.name}</Text>
+      <Text style={styles.gameCardPlayers}>{playerNames}</Text>
+      <View style={styles.gameCardFooter}>
+        {state.status === 'active' && currentPlayer !== undefined && (
+          <Text style={styles.gameCardTurn}>
+            {currentPlayer.name}
+            {isHumanTurn && <Text style={styles.yourTurnBadge}> · YOUR TURN</Text>}
+          </Text>
+        )}
+        {outcomeLabel !== null && (
+          <Text style={styles.gameCardOutcome}>{outcomeLabel}</Text>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
 export default function HomeScreen() {
   const navigation = useNavigation<HomeNavigationProp>();
+  const games = useGameStore((s) => s.games);
   const startNewGame = useGameStore((s) => s.startNewGame);
+  const loadGame = useGameStore((s) => s.loadGame);
 
-  const [playerName, setPlayerName] = useState('Commander');
-  const [aiCount, setAiCount] = useState(1);
-  const [seedText, setSeedText] = useState(() => String(Date.now() % 99999));
+  const [isCreating, setIsCreating] = useState(false);
+  const [playerSlots, setPlayerSlots] = useState<PlayerSlot[]>(DEFAULT_PLAYER_SLOTS);
+  const [playMode, setPlayMode] = useState<'passAndPlay' | 'asyncMultiplayer'>('passAndPlay');
   const [mapSize, setMapSize] = useState<MapSize>('medium');
 
-  const adjustAiCount = (delta: number) => {
-    setAiCount((prev) => Math.min(3, Math.max(1, prev + delta)));
+  const addPlayerSlot = () => {
+    setPlayerSlots((prev) =>
+      prev.length >= 8 ? prev : [...prev, { type: 'ai', difficulty: 'normal' }],
+    );
+  };
+
+  const removeLastSlot = () => {
+    setPlayerSlots((prev) => (prev.length <= 2 ? prev : prev.slice(0, -1)));
+  };
+
+  const setSlotType = (index: number, type: 'human' | 'ai') => {
+    setPlayerSlots((prev) =>
+      prev.map((slot, i) => {
+        if (i !== index) return slot;
+        if (type === 'human') {
+          return { type: 'human', name: slot.name };
+        }
+        return { type: 'ai', difficulty: slot.difficulty ?? 'normal' };
+      }),
+    );
+  };
+
+  const setSlotName = (index: number, name: string) => {
+    setPlayerSlots((prev) =>
+      prev.map((slot, i) =>
+        i === index && slot.type === 'human' ? { ...slot, name } : slot,
+      ),
+    );
+  };
+
+  const setSlotDifficulty = (index: number, difficulty: AiDifficulty) => {
+    setPlayerSlots((prev) =>
+      prev.map((slot, i) => (i === index ? { type: 'ai', difficulty } : slot)),
+    );
   };
 
   const handleLaunch = () => {
     const preset = MAP_PRESETS[mapSize];
-    const parsedSeed = parseInt(seedText, 10);
-    const seed = Number.isFinite(parsedSeed) ? parsedSeed : Date.now() % 99999;
 
     startNewGame({
-      playerName: playerName.trim() || 'Commander',
-      aiCount,
-      seed,
+      playerName: (playerSlots[0]?.name ?? '').trim() || 'Commander',
+      playerSlots,
       mapWidth: preset.width,
       mapHeight: preset.height,
       planetCount: preset.planetCount,
+      playMode,
     });
     navigation.navigate('Game');
   };
 
+  const handleResume = (id: string) => {
+    loadGame(id);
+    navigation.navigate('Game');
+  };
+
+  if (isCreating) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Pressable
+            style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+            onPress={() => setIsCreating(false)}
+          >
+            <Text style={styles.backButtonText}>← Back</Text>
+          </Pressable>
+
+          <View style={styles.header}>
+            <Text style={styles.eyebrow}>NEW CAMPAIGN</Text>
+            <Text style={styles.title}>Launch{'\n'}Campaign</Text>
+            <View style={styles.titleRule} />
+            <Text style={styles.subtitle}>Configure your campaign before entering the galaxy.</Text>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Players ({playerSlots.length})</Text>
+            <View style={styles.slotList}>
+              {playerSlots.map((slot, index) => (
+                <View key={index} style={styles.slotRow}>
+                  <View style={styles.slotHeader}>
+                    <Text style={styles.slotNumber}>Slot {index + 1}</Text>
+                    {index === 0 ? (
+                      <Text style={styles.slotLabel}>You · Human</Text>
+                    ) : (
+                      <View style={styles.slotTypeToggle}>
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.slotTypeChip,
+                            slot.type === 'human' && styles.slotTypeChipSelected,
+                            pressed && slot.type !== 'human' && styles.slotTypeChipPressed,
+                          ]}
+                          onPress={() => setSlotType(index, 'human')}
+                        >
+                          <Text
+                            style={[
+                              styles.slotTypeChipText,
+                              slot.type === 'human' && styles.slotTypeChipTextSelected,
+                            ]}
+                          >
+                            Human
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.slotTypeChip,
+                            slot.type === 'ai' && styles.slotTypeChipSelected,
+                            pressed && slot.type !== 'ai' && styles.slotTypeChipPressed,
+                          ]}
+                          onPress={() => setSlotType(index, 'ai')}
+                        >
+                          <Text
+                            style={[
+                              styles.slotTypeChipText,
+                              slot.type === 'ai' && styles.slotTypeChipTextSelected,
+                            ]}
+                          >
+                            AI
+                          </Text>
+                        </Pressable>
+                      </View>
+                    )}
+                  </View>
+                  {slot.type === 'human' && (
+                    <TextInput
+                      style={styles.slotNameInput}
+                      placeholder="Player name"
+                      placeholderTextColor={COLORS.textMuted}
+                      value={slot.name ?? ''}
+                      onChangeText={(text) => setSlotName(index, text)}
+                      autoCapitalize="words"
+                      autoCorrect={false}
+                      multiline={false}
+                    />
+                  )}
+                  {slot.type === 'ai' && (
+                    <View style={styles.difficultyRow}>
+                      <Text style={styles.difficultyLabel}>Difficulty</Text>
+                      <View style={styles.difficultyToggle}>
+                        {(['easy', 'normal'] as const).map((level) => (
+                          <Pressable
+                            key={level}
+                            style={({ pressed }) => [
+                              styles.difficultyChip,
+                              (slot.difficulty ?? 'normal') === level &&
+                                styles.difficultyChipSelected,
+                              pressed &&
+                                (slot.difficulty ?? 'normal') !== level &&
+                                styles.difficultyChipPressed,
+                            ]}
+                            onPress={() => setSlotDifficulty(index, level)}
+                          >
+                            <Text
+                              style={[
+                                styles.difficultyChipText,
+                                (slot.difficulty ?? 'normal') === level &&
+                                  styles.difficultyChipTextSelected,
+                              ]}
+                            >
+                              {level === 'easy' ? 'Easy' : 'Normal'}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+            <View style={styles.slotActionsRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.addPlayerButton,
+                  pressed && styles.addPlayerButtonPressed,
+                  playerSlots.length >= 8 && styles.addPlayerButtonDisabled,
+                ]}
+                onPress={addPlayerSlot}
+                disabled={playerSlots.length >= 8}
+              >
+                <Text
+                  style={[
+                    styles.addPlayerButtonText,
+                    playerSlots.length >= 8 && styles.addPlayerButtonTextDisabled,
+                  ]}
+                >
+                  Add Player
+                </Text>
+              </Pressable>
+              {playerSlots.length > 2 && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.removePlayerButton,
+                    pressed && styles.removePlayerButtonPressed,
+                  ]}
+                  onPress={removeLastSlot}
+                >
+                  <Text style={styles.removePlayerButtonText}>Remove</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Play mode</Text>
+            <View style={styles.playModeRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.playModeCard,
+                  playMode === 'passAndPlay' && styles.playModeCardSelected,
+                  pressed && playMode !== 'passAndPlay' && styles.playModeCardPressed,
+                ]}
+                onPress={() => setPlayMode('passAndPlay')}
+              >
+                <Text
+                  style={[
+                    styles.playModeTitle,
+                    playMode === 'passAndPlay' && styles.playModeTitleSelected,
+                  ]}
+                >
+                  Pass & Play
+                </Text>
+                <Text
+                  style={[
+                    styles.playModeSubtitle,
+                    playMode === 'passAndPlay' && styles.playModeSubtitleSelected,
+                  ]}
+                >
+                  Share one device
+                </Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.playModeCard,
+                  styles.playModeCardComingSoon,
+                  playMode === 'asyncMultiplayer' && styles.playModeCardSelected,
+                  pressed && playMode !== 'asyncMultiplayer' && styles.playModeCardPressed,
+                ]}
+                onPress={() => setPlayMode('asyncMultiplayer')}
+              >
+                <Text
+                  style={[
+                    styles.playModeTitle,
+                    styles.playModeTitleComingSoon,
+                    playMode === 'asyncMultiplayer' && styles.playModeTitleSelected,
+                  ]}
+                >
+                  Async Multiplayer
+                </Text>
+                <Text style={[styles.playModeSubtitle, styles.playModeSubtitleComingSoon]}>
+                  Separate devices (coming soon)
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Map size</Text>
+            <View style={styles.mapSizeRow}>
+              {(Object.keys(MAP_PRESETS) as MapSize[]).map((size) => {
+                const preset = MAP_PRESETS[size];
+                const selected = mapSize === size;
+                return (
+                  <Pressable
+                    key={size}
+                    style={({ pressed }) => [
+                      styles.mapSizeButton,
+                      selected && styles.mapSizeButtonSelected,
+                      pressed && !selected && styles.mapSizeButtonPressed,
+                    ]}
+                    onPress={() => setMapSize(size)}
+                  >
+                    <Text style={[styles.mapSizeLabel, selected && styles.mapSizeLabelSelected]}>
+                      {preset.label}
+                    </Text>
+                    <Text style={[styles.mapSizeDetail, selected && styles.mapSizeDetailSelected]}>
+                      {preset.detail}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <Pressable
+            style={({ pressed }) => [styles.launchButton, pressed && styles.launchButtonPressed]}
+            onPress={handleLaunch}
+          >
+            <Text style={styles.launchButtonText}>Launch Campaign</Text>
+          </Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Text style={styles.eyebrow}>PRIVATE REMAKE · TURN-BASED</Text>
-          <Text style={styles.title}>Strategic{'\n'}Commander</Text>
-          <View style={styles.titleRule} />
-          <Text style={styles.subtitle}>Configure your campaign before entering the galaxy.</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.label}>Your name</Text>
-          <TextInput
-            style={styles.input}
-            value={playerName}
-            onChangeText={setPlayerName}
-            placeholder="Commander"
-            placeholderTextColor={COLORS.textMuted}
-            autoCapitalize="words"
-            autoCorrect={false}
-          />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.label}>AI opponents</Text>
-          <View style={styles.stepperRow}>
-            <Pressable
-              style={({ pressed }) => [styles.stepperButton, pressed && styles.stepperPressed]}
-              onPress={() => adjustAiCount(-1)}
-              disabled={aiCount <= 1}
-            >
-              <Text style={[styles.stepperSymbol, aiCount <= 1 && styles.stepperDisabled]}>−</Text>
-            </Pressable>
-            <View style={styles.stepperValueBox}>
-              <Text style={styles.stepperValue}>{aiCount}</Text>
-              <Text style={styles.stepperHint}>admirals</Text>
-            </View>
-            <Pressable
-              style={({ pressed }) => [styles.stepperButton, pressed && styles.stepperPressed]}
-              onPress={() => adjustAiCount(1)}
-              disabled={aiCount >= 3}
-            >
-              <Text style={[styles.stepperSymbol, aiCount >= 3 && styles.stepperDisabled]}>+</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.label}>Map seed</Text>
-          <TextInput
-            style={styles.input}
-            value={seedText}
-            onChangeText={setSeedText}
-            keyboardType="number-pad"
-            placeholder="Galaxy seed"
-            placeholderTextColor={COLORS.textMuted}
-          />
-          <Text style={styles.hint}>Same seed yields the same star chart.</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.label}>Map size</Text>
-          <View style={styles.mapSizeRow}>
-            {(Object.keys(MAP_PRESETS) as MapSize[]).map((size) => {
-              const preset = MAP_PRESETS[size];
-              const selected = mapSize === size;
-              return (
-                <Pressable
-                  key={size}
-                  style={({ pressed }) => [
-                    styles.mapSizeButton,
-                    selected && styles.mapSizeButtonSelected,
-                    pressed && !selected && styles.mapSizeButtonPressed,
-                  ]}
-                  onPress={() => setMapSize(size)}
-                >
-                  <Text style={[styles.mapSizeLabel, selected && styles.mapSizeLabelSelected]}>
-                    {preset.label}
-                  </Text>
-                  <Text style={[styles.mapSizeDetail, selected && styles.mapSizeDetailSelected]}>
-                    {preset.detail}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        <Pressable
-          style={({ pressed }) => [styles.launchButton, pressed && styles.launchButtonPressed]}
-          onPress={handleLaunch}
+      <View style={styles.lobbyContainer}>
+        <ScrollView
+          contentContainerStyle={styles.lobbyScrollContent}
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.launchButtonText}>Launch Game</Text>
-        </Pressable>
-      </ScrollView>
+          <View style={styles.header}>
+            <Text style={styles.eyebrow}>STRATEGIC COMMANDER</Text>
+            <Text style={styles.title}>Command{'\n'}Center</Text>
+            <View style={styles.titleRule} />
+            <Text style={styles.subtitle}>Select a campaign or launch a new one.</Text>
+          </View>
+
+          {games.length === 0 ? (
+            <Text style={styles.emptyMessage}>No active campaigns.{'\n'}Start a new one below.</Text>
+          ) : (
+            <View style={styles.gameList}>
+              {games.map((record) => (
+                <GameCard
+                  key={record.id}
+                  record={record}
+                  onPress={() => handleResume(record.id)}
+                />
+              ))}
+            </View>
+          )}
+        </ScrollView>
+
+        <View style={styles.lobbyFooter}>
+          <Pressable
+            style={({ pressed }) => [styles.newCampaignButton, pressed && styles.launchButtonPressed]}
+            onPress={() => setIsCreating(true)}
+          >
+            <Text style={styles.launchButtonText}>New Campaign</Text>
+          </Pressable>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -172,6 +437,19 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  lobbyContainer: {
+    flex: 1,
+  },
+  lobbyScrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+  },
+  lobbyFooter: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    paddingTop: 8,
   },
   scrollContent: {
     flexGrow: 1,
@@ -206,6 +484,77 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 14,
     lineHeight: 20,
+    letterSpacing: 0.5,
+  },
+  emptyMessage: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginTop: 48,
+    letterSpacing: 0.5,
+  },
+  gameList: {
+    gap: 12,
+  },
+  gameCard: {
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    padding: 16,
+  },
+  gameCardPressed: {
+    borderColor: COLORS.accent,
+  },
+  gameCardName: {
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  gameCardPlayers: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  gameCardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  gameCardTurn: {
+    color: COLORS.text,
+    fontSize: 13,
+    letterSpacing: 0.5,
+  },
+  yourTurnBadge: {
+    color: COLORS.accent,
+    fontWeight: '600',
+  },
+  gameCardOutcome: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  backButton: {
+    marginTop: 8,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingRight: 12,
+  },
+  backButtonPressed: {
+    opacity: 0.7,
+  },
+  backButtonText: {
+    color: COLORS.accent,
+    fontSize: 16,
     letterSpacing: 0.5,
   },
   section: {
@@ -282,6 +631,211 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginTop: 2,
   },
+  slotList: {
+    gap: 10,
+  },
+  slotRow: {
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    padding: 12,
+    gap: 10,
+  },
+  slotHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  slotNumber: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  slotLabel: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+  },
+  slotTypeToggle: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  slotTypeChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.background,
+  },
+  slotTypeChipSelected: {
+    backgroundColor: COLORS.accentDim,
+    borderColor: COLORS.accent,
+  },
+  slotTypeChipPressed: {
+    borderColor: COLORS.textMuted,
+  },
+  slotTypeChipText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  slotTypeChipTextSelected: {
+    color: COLORS.accent,
+  },
+  slotNameInput: {
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 6,
+    color: COLORS.text,
+    fontSize: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    letterSpacing: 0.3,
+  },
+  difficultyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  difficultyLabel: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  difficultyToggle: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  difficultyChip: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.background,
+  },
+  difficultyChipSelected: {
+    backgroundColor: COLORS.accentDim,
+    borderColor: COLORS.accent,
+  },
+  difficultyChipPressed: {
+    borderColor: COLORS.textMuted,
+  },
+  difficultyChipText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  difficultyChipTextSelected: {
+    color: COLORS.accent,
+  },
+  slotActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  addPlayerButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    alignItems: 'center',
+  },
+  addPlayerButtonPressed: {
+    backgroundColor: COLORS.accentDim,
+  },
+  addPlayerButtonDisabled: {
+    borderColor: COLORS.border,
+    opacity: 0.5,
+  },
+  addPlayerButtonText: {
+    color: COLORS.accent,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
+  addPlayerButtonTextDisabled: {
+    color: COLORS.border,
+  },
+  removePlayerButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+  },
+  removePlayerButtonPressed: {
+    borderColor: COLORS.textMuted,
+  },
+  removePlayerButtonText: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  playModeRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  playModeCard: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  playModeCardComingSoon: {
+    opacity: 0.65,
+  },
+  playModeCardSelected: {
+    backgroundColor: COLORS.accentDim,
+    borderColor: COLORS.accent,
+    opacity: 1,
+  },
+  playModeCardPressed: {
+    borderColor: COLORS.textMuted,
+  },
+  playModeTitle: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  playModeTitleComingSoon: {
+    color: COLORS.textMuted,
+  },
+  playModeTitleSelected: {
+    color: COLORS.accent,
+  },
+  playModeSubtitle: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 6,
+    lineHeight: 15,
+    letterSpacing: 0.3,
+  },
+  playModeSubtitleComingSoon: {
+    color: COLORS.border,
+  },
+  playModeSubtitleSelected: {
+    color: COLORS.text,
+  },
   mapSizeRow: {
     gap: 10,
   },
@@ -317,6 +871,12 @@ const styles = StyleSheet.create({
   },
   mapSizeDetailSelected: {
     color: COLORS.text,
+  },
+  newCampaignButton: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    paddingVertical: 16,
+    alignItems: 'center',
   },
   launchButton: {
     marginTop: 8,

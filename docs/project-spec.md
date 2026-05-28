@@ -148,19 +148,30 @@ Each planet has:
 
 ## Planet Classes
 
-Original game used classes:
+Planet classes run **A through P** (16 grades). A is the best, P is the weakest.
 
-* A
-* B
-* C
-* etc.
+Each step down reduces troop output by 1/16 and gold output by 50/16 (3.125) per factory per turn:
 
-Better planets:
+| Class | Troops/factory/turn | Gold/factory/turn |
+|-------|--------------------|--------------------|
+| A | 1.0 | 50.0 |
+| B | 0.9375 | 46.875 |
+| C | 0.875 | 43.75 |
+| D | 0.8125 | 40.625 |
+| E | 0.75 | 37.5 |
+| F | 0.6875 | 34.375 |
+| G | 0.625 | 31.25 |
+| H | 0.5625 | 28.125 |
+| I | 0.5 | 25.0 |
+| J | 0.4375 | 21.875 |
+| K | 0.375 | 18.75 |
+| L | 0.3125 | 15.625 |
+| M | 0.25 | 12.5 |
+| N | 0.1875 | 9.375 |
+| O | 0.125 | 6.25 |
+| P | 0.0625 | 3.125 |
 
-* produce faster
-* generate more resources
-
-Research speed was NOT affected by planet class in the original game.
+Better planets produce faster and generate more resources. Research speed is NOT affected by planet class.
 
 ---
 

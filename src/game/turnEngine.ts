@@ -1,5 +1,12 @@
 import { resolveArrival } from './combatEngine';
-import { advanceFleets, computeTurnsInTransit, createFleet } from './movementEngine';
+import {
+  advanceFleets,
+  computeTurnsInTransit,
+  createFleet,
+  effectiveRange,
+  effectiveSpeed,
+  isInRange,
+} from './movementEngine';
 import { runProduction } from './productionEngine';
 import type { Fleet, GameMap, GameState, Planet, Player } from './types';
 
@@ -45,7 +52,9 @@ function processSendFleet(
   fleets: Fleet[],
   action: Extract<PlayerAction, { type: 'SEND_FLEET' }>,
   playerId: string,
+  players: Player[],
   turnNumber: number,
+  roundNumber: number,
   fleetIndex: number,
 ): { map: GameMap; fleets: Fleet[] } {
   const origin = findPlanet(map, action.fromPlanetId);
@@ -58,9 +67,9 @@ function processSendFleet(
   if (action.shipCount < 1) {
     throw new Error('shipCount must be at least 1');
   }
-  if (action.shipCount >= origin.shipCount) {
+  if (action.shipCount > origin.shipCount) {
     throw new Error(
-      `Cannot send ${action.shipCount} ships from ${action.fromPlanetId}; must keep at least 1 ship on the planet`,
+      `Cannot send ${action.shipCount} ships from ${action.fromPlanetId}; planet only has ${origin.shipCount} ships`,
     );
   }
 
@@ -72,7 +81,17 @@ function processSendFleet(
     throw new Error('Origin and destination planets must be different');
   }
 
-  const turnsRemaining = computeTurnsInTransit(origin.position, destination.position);
+  const player = players.find((p) => p.id === playerId);
+  const range = effectiveRange(player?.techLevel ?? 0);
+  const speed = effectiveSpeed(player?.techLevel ?? 0);
+
+  if (!isInRange(origin.position, destination.position, range)) {
+    throw new Error(
+      `Destination planet ${action.toPlanetId} is out of range (max ${range} clicks)`,
+    );
+  }
+
+  const turnsRemaining = computeTurnsInTransit(origin.position, destination.position, speed);
 
   const updatedMap: GameMap = {
     ...map,
@@ -91,6 +110,7 @@ function processSendFleet(
     turnsRemaining,
     turnNumber,
     fleetIndex,
+    roundNumber,
   );
 
   return { map: updatedMap, fleets: [...fleets, fleet] };
@@ -110,6 +130,23 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
   let fleets: Fleet[] = state.fleets.map((f) => ({ ...f }));
   let players: Player[] = state.players.map((p) => ({ ...p }));
 
+  const eligibleArrivals: Fleet[] = [];
+  const stillInTransit: Fleet[] = [];
+
+  for (const fleet of fleets) {
+    if (fleet.turnsRemaining <= 0 && fleet.dispatchedInRound < state.roundNumber) {
+      eligibleArrivals.push(fleet);
+    } else {
+      stillInTransit.push(fleet);
+    }
+  }
+
+  for (const fleet of eligibleArrivals) {
+    map = resolveArrival(fleet, map);
+  }
+
+  fleets = stillInTransit;
+
   const sendFleetActions = input.actions.filter(
     (action): action is Extract<PlayerAction, { type: 'SEND_FLEET' }> => action.type === 'SEND_FLEET',
   );
@@ -120,23 +157,14 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
       fleets,
       action,
       input.playerId,
+      players,
       state.turnNumber,
+      state.roundNumber,
       index,
     );
     map = result.map;
     fleets = result.fleets;
   });
-
-  const { inTransit, arrived: arrivedFleets } = advanceFleets(fleets);
-  fleets = inTransit;
-
-  for (const fleet of arrivedFleets) {
-    map = resolveArrival(fleet, map);
-  }
-
-  const { map: newMap, players: newPlayers } = runProduction(map, players);
-  map = newMap;
-  players = newPlayers;
 
   players = players.map((player) => {
     const home = findPlanet(map, player.homePlanetId);
@@ -158,13 +186,43 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
       ? nextNonEliminatedPlayerId(players, state.currentPlayerId)
       : state.currentPlayerId;
 
+  const currentPlayerIndex = state.players.findIndex((p) => p.id === state.currentPlayerId);
+  const nextPlayerIndex = players.findIndex((p) => p.id === currentPlayerId);
+  // One turn = one player's action batch. One round = one full cycle of all non-eliminated players.
+  // Round-gated simulation (fleet transit + production) ticks only when player order wraps back
+  // to the start of the cycle, never on every individual player turn.
+  const isRoundWrap = status === 'active' && nextPlayerIndex <= currentPlayerIndex;
+
+  if (isRoundWrap) {
+    const { inTransit, arrived: justArrived } = advanceFleets(fleets);
+    fleets = inTransit;
+    for (const fleet of justArrived) {
+      map = resolveArrival(fleet, map);
+    }
+
+    const { map: newMap, players: newPlayers } = runProduction(
+      map,
+      players,
+      state.roundNumber,
+    );
+    map = newMap;
+    players = newPlayers;
+  }
+
+  let roundNumber = state.roundNumber;
+  if (isRoundWrap) {
+    roundNumber += 1;
+  }
+
   return {
     map,
     players,
     fleets,
     turnNumber: state.turnNumber + 1,
+    roundNumber,
     currentPlayerId,
     seed: state.seed,
+    playMode: state.playMode,
     status,
     winnerId,
   };

@@ -1,4 +1,4 @@
-import type { GameMap, Planet, Position } from './types';
+import type { GameMap, Planet, PlanetClass, Position } from './types';
 
 const CANDIDATE_ASSIGNMENT_COUNT = 200;
 const INITIAL_HOME_SHIP_COUNT = 5;
@@ -6,6 +6,19 @@ const INITIAL_HOME_SHIP_COUNT = 5;
 const SCORE_WEIGHT_DISTANCE = 0.5;
 const SCORE_WEIGHT_VARIANCE = 0.3;
 const SCORE_WEIGHT_CENTER = 0.2;
+export const HOME_PLANET_CLASS_CONFIG: Record<
+  string,
+  { startingGold: number; buildingSlots: number }
+> = {
+  A: { startingGold: 1000, buildingSlots: 5 },
+  B: { startingGold: 1100, buildingSlots: 6 },
+  C: { startingGold: 1200, buildingSlots: 6 },
+  D: { startingGold: 1300, buildingSlots: 7 },
+  E: { startingGold: 1400, buildingSlots: 7 },
+  F: { startingGold: 1500, buildingSlots: 8 },
+  G: { startingGold: 1600, buildingSlots: 8 },
+};
+const HOME_PLANET_CLASSES = Object.keys(HOME_PLANET_CLASS_CONFIG) as PlanetClass[];
 
 interface AssignmentMetrics {
   minPairwiseDistance: number;
@@ -16,6 +29,11 @@ interface AssignmentMetrics {
 interface ScoredAssignment {
   planetIndices: number[];
   metrics: AssignmentMetrics;
+}
+
+export interface SpawnPlacementResult {
+  map: GameMap;
+  homePlanetClassByPlayerId: Record<string, PlanetClass>;
 }
 
 function euclideanDistance(a: Position, b: Position): number {
@@ -174,10 +192,15 @@ function applyAssignment(
   map: GameMap,
   planetIndices: number[],
   playerIds: string[],
-): GameMap {
+  rng: () => number,
+): SpawnPlacementResult {
   const homeByPlanetIndex = new Map<number, string>();
+  const homePlanetClassByPlayerId: Record<string, PlanetClass> = {};
   for (let i = 0; i < planetIndices.length; i++) {
-    homeByPlanetIndex.set(planetIndices[i], playerIds[i]);
+    const playerId = playerIds[i];
+    homeByPlanetIndex.set(planetIndices[i], playerId);
+    const classIndex = Math.floor(rng() * HOME_PLANET_CLASSES.length);
+    homePlanetClassByPlayerId[playerId] = HOME_PLANET_CLASSES[classIndex];
   }
 
   const planets = map.planets.map((planet, index) => {
@@ -185,22 +208,33 @@ function applyAssignment(
     if (owner === undefined) {
       return { ...planet };
     }
+    const homePlanetClass = homePlanetClassByPlayerId[owner];
+    const classConfig = HOME_PLANET_CLASS_CONFIG[homePlanetClass];
     return {
       ...planet,
+      class: homePlanetClass,
+      buildingSlots: classConfig.buildingSlots,
       isHomePlanet: true,
       owner,
       shipCount: INITIAL_HOME_SHIP_COUNT,
     };
   });
 
-  return { width: map.width, height: map.height, planets };
+  return {
+    map: { width: map.width, height: map.height, planets },
+    homePlanetClassByPlayerId,
+  };
 }
 
 /**
  * Assigns one fair home planet per player on an existing map using scored random search.
  * Returns a new map; the input is not mutated.
  */
-export function placeSpawns(map: GameMap, playerIds: string[], rng: () => number): GameMap {
+export function placeSpawns(
+  map: GameMap,
+  playerIds: string[],
+  rng: () => number,
+): SpawnPlacementResult {
   if (playerIds.length > map.planets.length) {
     throw new Error(
       `Cannot place ${playerIds.length} spawns on a map with only ${map.planets.length} planets`,
@@ -208,7 +242,10 @@ export function placeSpawns(map: GameMap, playerIds: string[], rng: () => number
   }
 
   if (playerIds.length === 0) {
-    return { width: map.width, height: map.height, planets: map.planets.map((p) => ({ ...p })) };
+    return {
+      map: { width: map.width, height: map.height, planets: map.planets.map((p) => ({ ...p })) },
+      homePlanetClassByPlayerId: {},
+    };
   }
 
   const nearbyRadius = Math.min(map.width, map.height) * 0.25;
@@ -226,5 +263,5 @@ export function placeSpawns(map: GameMap, playerIds: string[], rng: () => number
   }
 
   const best = pickBestAssignment(candidates);
-  return applyAssignment(map, best.planetIndices, playerIds);
+  return applyAssignment(map, best.planetIndices, playerIds, rng);
 }
