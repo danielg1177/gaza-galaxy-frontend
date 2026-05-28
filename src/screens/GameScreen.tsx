@@ -44,10 +44,13 @@ import {
 
 type GameNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Game'>;
 
-const CELL_SIZE = 18;
+const CELL_SIZE = 11;
 const PLANET_HIT_RADIUS = CELL_SIZE * 2.5;
-const PLANET_SIZE = 14;
-const PLANET_SIZE_SELECTED = 16;
+// Visual sizes scaled from prior CELL_SIZE=18 baseline (~61% spacing)
+const PLANET_SIZE = Math.round((14 / 18) * CELL_SIZE);
+const PLANET_SIZE_SELECTED = Math.round((16 / 18) * CELL_SIZE);
+const PLANET_NAME_LABEL_WIDTH = Math.round((48 / 18) * CELL_SIZE);
+const PLANET_NAME_LABEL_TOP = Math.round((-11 / 18) * CELL_SIZE);
 const HUMAN_COLOR = '#4a9eff';
 const NEUTRAL_COLOR = '#444466';
 const AI_COLORS = ['#ff4a4a', '#4aff7a', '#ff9e4a', '#c04aff'] as const;
@@ -116,6 +119,16 @@ function screenToMapCoords(
     x: (localX - rawTx) / scale,
     y: (localY - rawTy) / scale,
   };
+}
+
+function mapPixelPointToPosition(mapX: number, mapY: number): { x: number; y: number } {
+  return { x: mapX / CELL_SIZE, y: mapY / CELL_SIZE };
+}
+
+function formatDragDistanceLabel(origin: Planet, mapPixelX: number, mapPixelY: number): string {
+  const fingerPosition = mapPixelPointToPosition(mapPixelX, mapPixelY);
+  const clicks = computeClickDistance(origin.position, fingerPosition);
+  return `${clicks.toFixed(1)} clicks`;
 }
 
 function findPlanetAtMapCoords(
@@ -301,7 +314,7 @@ function PlanetNode({
   );
 }
 
-const PENDING_DEPARTURE_OFFSET_PX = 18;
+const PENDING_DEPARTURE_OFFSET_PX = CELL_SIZE;
 
 function FleetLayer({
   fleets,
@@ -431,10 +444,17 @@ export default function GameScreen() {
   const resetGame = useGameStore((s) => s.resetGame);
 
   const [dragOriginPlanetId, setDragOriginPlanetId] = useState<string | null>(null);
+  const [measureDragOriginPlanetId, setMeasureDragOriginPlanetId] = useState<string | null>(
+    null,
+  );
   const [dragFingerLocal, setDragFingerLocal] = useState<{ x: number; y: number } | null>(
     null,
   );
+  const [dragDistanceLabel, setDragDistanceLabel] = useState<string | null>(null);
   const fleetDragActivatedRef = useRef(false);
+  const measureDragActivatedRef = useRef(false);
+  const fleetDragOriginPlanetRef = useRef<Planet | null>(null);
+  const measureOriginPlanetRef = useRef<Planet | null>(null);
   const [outOfRangeMessage, setOutOfRangeMessage] = useState(false);
   const [showResearchModal, setShowResearchModal] = useState(false);
   const [showQueuedModal, setShowQueuedModal] = useState(false);
@@ -635,10 +655,10 @@ export default function GameScreen() {
       ? Math.max(1, pendingOriginPlanet.shipCount - 1 - shipsAlreadyQueued)
       : 1;
 
-  const scale = useSharedValue(0.6);
+  const scale = useSharedValue(1);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
-  const savedScale = useSharedValue(0.6);
+  const savedScale = useSharedValue(1);
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
   const pinchFocalX = useSharedValue(0);
@@ -646,8 +666,15 @@ export default function GameScreen() {
   const pinchStartScale = useSharedValue(1);
   const pinchStartTranslateX = useSharedValue(0);
   const pinchStartTranslateY = useSharedValue(0);
-  const panStartTranslateX = useSharedValue(0);
-  const panStartTranslateY = useSharedValue(0);
+  // isPinching blocks the pan gesture while a pinch is in progress, preventing
+  // the two gestures from fighting over translateX and causing viewport jumps.
+  const isPinching = useSharedValue(false);
+  // Delta-based pan tracking: pan moves by the increment since the last frame
+  // rather than accumulating from a fixed onStart baseline. This means the pan
+  // self-corrects after a pinch modifies translateX without needing an explicit
+  // baseline resync.
+  const panPrevTranslationX = useSharedValue(0);
+  const panPrevTranslationY = useSharedValue(0);
   const viewportWidth = useSharedValue(0);
   const viewportHeight = useSharedValue(0);
   const mapWidthSV = useSharedValue(1);
@@ -693,16 +720,17 @@ export default function GameScreen() {
     }
     mapWidthSV.value = gameState.map.width * CELL_SIZE;
     mapHeightSV.value = gameState.map.height * CELL_SIZE;
-    scale.value = 0.6;
+    scale.value = 1;
     translateX.value = 0;
     translateY.value = 0;
-    savedScale.value = 0.6;
+    savedScale.value = 1;
     savedTranslateX.value = 0;
     savedTranslateY.value = 0;
   }, [gameState?.map.width, gameState?.map.height]);
 
   const pinch = Gesture.Pinch()
     .onStart((event) => {
+      isPinching.value = true;
       pinchFocalX.value = event.focalX;
       pinchFocalY.value = event.focalY;
       pinchStartScale.value = scale.value;
@@ -713,44 +741,60 @@ export default function GameScreen() {
       const newScale = Math.min(4, Math.max(0.4, pinchStartScale.value * event.scale));
       const fx = pinchFocalX.value;
       const fy = pinchFocalY.value;
+      // Correct focal-point formula: map point under the focal stays fixed.
+      // screen = mapCoord * scale + translate  →  translate = screen - mapCoord * scale
+      // mapCoord = (focalX - startTx) / startScale  (focal in map space at gesture start)
       const newTx =
-        fx -
-        (fx - pinchStartTranslateX.value) * (newScale / pinchStartScale.value);
+        fx - (fx - pinchStartTranslateX.value) * (newScale / pinchStartScale.value);
       const newTy =
-        fy -
-        (fy - pinchStartTranslateY.value) * (newScale / pinchStartScale.value);
+        fy - (fy - pinchStartTranslateY.value) * (newScale / pinchStartScale.value);
+      // Do NOT clamp here. Clamping every frame fights the focal-point formula
+      // at map edges, creating the "wall" where zooming near an edge jumps the
+      // viewport away. Clamp once when the gesture ends instead.
+      scale.value = newScale;
+      translateX.value = newTx;
+      translateY.value = newTy;
+    })
+    .onEnd(() => {
+      isPinching.value = false;
       const clamped = clampTranslation(
-        newTx,
-        newTy,
-        newScale,
+        translateX.value,
+        translateY.value,
+        scale.value,
         mapWidthSV.value,
         mapHeightSV.value,
         viewportWidth.value,
         viewportHeight.value,
       );
-      scale.value = newScale;
       translateX.value = clamped.x;
       translateY.value = clamped.y;
-    })
-    .onEnd(() => {
       savedScale.value = scale.value;
-      savedTranslateX.value = translateX.value;
-      savedTranslateY.value = translateY.value;
+      savedTranslateX.value = clamped.x;
+      savedTranslateY.value = clamped.y;
     });
 
   const pan = Gesture.Pan()
     .minDistance(8)
     .onStart(() => {
-      panStartTranslateX.value = translateX.value;
-      panStartTranslateY.value = translateY.value;
+      panPrevTranslationX.value = 0;
+      panPrevTranslationY.value = 0;
     })
     .onUpdate((event) => {
-      if (isFleetDragging.value) {
+      // Compute the delta since the last handled frame so the pan is
+      // self-correcting after a pinch changes translateX mid-gesture.
+      const dtx = event.translationX - panPrevTranslationX.value;
+      const dty = event.translationY - panPrevTranslationY.value;
+      panPrevTranslationX.value = event.translationX;
+      panPrevTranslationY.value = event.translationY;
+      // Bail out without writing translateX while a fleet drag or pinch is
+      // active (pinch owns translate during zoom; allowing pan to write
+      // simultaneously is the primary cause of the zoom-jump bug).
+      if (isFleetDragging.value || isPinching.value) {
         return;
       }
       const clamped = clampTranslation(
-        panStartTranslateX.value + event.translationX,
-        panStartTranslateY.value + event.translationY,
+        translateX.value + dtx,
+        translateY.value + dty,
         scale.value,
         mapWidthSV.value,
         mapHeightSV.value,
@@ -787,8 +831,10 @@ export default function GameScreen() {
 
   const cancelDrag = useCallback(() => {
     fleetDragActivatedRef.current = false;
+    fleetDragOriginPlanetRef.current = null;
     setDragOriginPlanetId(null);
     setDragFingerLocal(null);
+    setDragDistanceLabel(null);
     runOnUI(() => {
       'worklet';
       isFleetDragging.value = false;
@@ -803,9 +849,11 @@ export default function GameScreen() {
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
       const planet = findPlanetAtMapCoords(mapPoint.x, mapPoint.y, gameState.map.planets);
       if (planet === undefined || planet.owner !== localHumanPlayerId) {
+        fleetDragOriginPlanetRef.current = null;
         return;
       }
       measureMapArea();
+      fleetDragOriginPlanetRef.current = planet;
       setDragOriginPlanetId(planet.id);
       setDragFingerLocal(null);
       runOnUI(() => {
@@ -831,14 +879,97 @@ export default function GameScreen() {
         handleDragStart(localX, localY, s, tx, ty);
       }
       setDragFingerLocal(absoluteToMapLocal(absoluteX, absoluteY));
+      const originPlanet = fleetDragOriginPlanetRef.current;
+      if (originPlanet !== null) {
+        const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+        setDragDistanceLabel(formatDragDistanceLabel(originPlanet, mapPoint.x, mapPoint.y));
+      }
     },
     [absoluteToMapLocal, handleDragStart],
   );
 
+  const handleMeasureDragStart = useCallback(
+    (localX: number, localY: number, s: number, tx: number, ty: number) => {
+      if (gameState === null || localHumanPlayerId === undefined) {
+        return;
+      }
+      const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+      const planet = findPlanetAtMapCoords(mapPoint.x, mapPoint.y, gameState.map.planets);
+      if (planet === undefined || planet.owner === localHumanPlayerId) {
+        measureOriginPlanetRef.current = null;
+        return;
+      }
+      measureMapArea();
+      measureOriginPlanetRef.current = planet;
+      setMeasureDragOriginPlanetId(planet.id);
+      setDragFingerLocal(null);
+      runOnUI(() => {
+        'worklet';
+        isFleetDragging.value = true;
+      })();
+    },
+    [gameState, localHumanPlayerId, measureMapArea],
+  );
+
+  const handleMeasureDragUpdate = useCallback(
+    (
+      localX: number,
+      localY: number,
+      absoluteX: number,
+      absoluteY: number,
+      s: number,
+      tx: number,
+      ty: number,
+    ) => {
+      const originPlanet = measureOriginPlanetRef.current;
+      if (originPlanet === null) {
+        return;
+      }
+      setDragFingerLocal(absoluteToMapLocal(absoluteX, absoluteY));
+      const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+      setDragDistanceLabel(formatDragDistanceLabel(originPlanet, mapPoint.x, mapPoint.y));
+    },
+    [absoluteToMapLocal],
+  );
+
+  const handleMeasurePanUpdate = useCallback(
+    (
+      localX: number,
+      localY: number,
+      absoluteX: number,
+      absoluteY: number,
+      s: number,
+      tx: number,
+      ty: number,
+    ) => {
+      if (!measureDragActivatedRef.current) {
+        measureDragActivatedRef.current = true;
+        handleMeasureDragStart(localX, localY, s, tx, ty);
+      }
+      handleMeasureDragUpdate(localX, localY, absoluteX, absoluteY, s, tx, ty);
+    },
+    [handleMeasureDragStart, handleMeasureDragUpdate],
+  );
+
+  const handleMeasureDragFinalize = useCallback(() => {
+    measureDragActivatedRef.current = false;
+    measureOriginPlanetRef.current = null;
+    setMeasureDragOriginPlanetId(null);
+    if (fleetDragOriginPlanetRef.current === null) {
+      setDragFingerLocal(null);
+      setDragDistanceLabel(null);
+    }
+  }, []);
+
   const handleDragEnd = useCallback(
     (absoluteX: number, absoluteY: number, s: number, tx: number, ty: number) => {
       if (gameState === null || humanPlayer === undefined || dragOriginPlanetId === null) {
-        cancelDrag();
+        fleetDragActivatedRef.current = false;
+        setDragFingerLocal(null);
+        runOnUI(() => {
+          'worklet';
+          isFleetDragging.value = false;
+        })();
         return;
       }
 
@@ -946,14 +1077,30 @@ export default function GameScreen() {
     })
     .onFinalize(() => {
       isFleetDragging.value = false;
-      panStartTranslateX.value = translateX.value;
-      panStartTranslateY.value = translateY.value;
+    });
+
+  const measureDrag = Gesture.Pan()
+    .minDistance(10)
+    .onUpdate((event) => {
+      runOnJS(handleMeasurePanUpdate)(
+        event.x,
+        event.y,
+        event.absoluteX,
+        event.absoluteY,
+        scale.value,
+        translateX.value,
+        translateY.value,
+      );
+    })
+    .onFinalize(() => {
+      isFleetDragging.value = false;
+      runOnJS(handleMeasureDragFinalize)();
     });
 
   const composed = Gesture.Simultaneous(pinch, pan);
   // Last gesture has highest priority — planetTap must win stationary taps over fleetDrag.
   const planetFleet = Gesture.Exclusive(fleetDrag, planetTap);
-  const mapGesture = Gesture.Simultaneous(composed, planetFleet);
+  const mapGesture = Gesture.Simultaneous(composed, planetFleet, measureDrag);
 
   const handleConfirmFleet = () => {
     confirmPendingFleet();
@@ -1019,10 +1166,17 @@ export default function GameScreen() {
       ? map.planets.find((p) => p.id === dragOriginPlanetId)
       : undefined;
 
+  const measureDragOriginPlanet =
+    measureDragOriginPlanetId !== null
+      ? map.planets.find((p) => p.id === measureDragOriginPlanetId)
+      : undefined;
+
+  const dragLineOriginPlanet = dragOriginPlanet ?? measureDragOriginPlanet;
+
   const dragLineStart =
-    dragOriginPlanet !== undefined
+    dragLineOriginPlanet !== undefined
       ? (() => {
-          const center = planetCenterPx(dragOriginPlanet);
+          const center = planetCenterPx(dragLineOriginPlanet);
           const s = scale.value;
           const tx = translateX.value;
           const ty = translateY.value;
@@ -1428,6 +1582,15 @@ export default function GameScreen() {
         </Pressable>
       )}
 
+      {dragDistanceLabel !== null && (
+        <View
+          style={[styles.dragDistancePill, { bottom: insets.bottom + 120 }]}
+          pointerEvents="none"
+        >
+          <Text style={styles.dragDistancePillText}>{dragDistanceLabel}</Text>
+        </View>
+      )}
+
       {showingLockScreen && (
         <Pressable
           style={[styles.lockScreen, { paddingTop: insets.top }]}
@@ -1512,19 +1675,19 @@ const styles = StyleSheet.create({
   },
   planetNameLabel: {
     position: 'absolute',
-    top: -11,
-    width: 48,
-    marginLeft: -(48 - CELL_SIZE) / 2,
+    top: PLANET_NAME_LABEL_TOP,
+    width: PLANET_NAME_LABEL_WIDTH,
+    marginLeft: -(PLANET_NAME_LABEL_WIDTH - CELL_SIZE) / 2,
     textAlign: 'center',
     color: '#c8c8e8',
-    fontSize: 7,
+    fontSize: 4,
   },
   planetNameLabelFogged: {
     color: '#666688',
   },
   planetClassLabel: {
     color: 'rgba(255,255,255,0.85)',
-    fontSize: 7,
+    fontSize: 4,
     fontWeight: '700',
     letterSpacing: 0,
   },
@@ -1533,8 +1696,8 @@ const styles = StyleSheet.create({
   },
   shipCountLabel: {
     color: COLORS.text,
-    fontSize: 9,
-    marginTop: 2,
+    fontSize: 6,
+    marginTop: 1,
     textAlign: 'center',
     width: CELL_SIZE * 2,
     marginLeft: -CELL_SIZE / 2,
@@ -1976,5 +2139,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.textMuted,
     fontStyle: 'italic',
+  },
+  dragDistancePill: {
+    position: 'absolute',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    zIndex: 15,
+  },
+  dragDistancePillText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

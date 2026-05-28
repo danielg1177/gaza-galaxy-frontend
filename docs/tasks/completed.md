@@ -1,5 +1,33 @@
 # Completed Tasks
 
+## Task 82 — Fix planet label text sizes (too large after CELL_SIZE reduction)
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — scaled map-canvas planet label typography by 11/18: `planetNameLabel` and `planetClassLabel` `fontSize` 7→4, `shipCountLabel` `fontSize` 9→6 and `marginTop` 2→1; `PLANET_NAME_LABEL_WIDTH` / `PLANET_NAME_LABEL_TOP` left as Task 79 `(value/18)*CELL_SIZE` constants; modals, status bar, HUD, and distance pill unchanged.
+**Notes:** Fleet SVG overlay labels (`fontSize` 8) not planet-node labels — untouched. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 81 — Fix map pan during non-owned drag + draw measurement line
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `measureDrag` sets `isFleetDragging` via `runOnUI` when a non-owned origin is confirmed in `handleMeasureDragStart`; `measureDrag.onFinalize` clears flag and resets `panStartTranslateX/Y` like `fleetDrag`; `measureDragOriginPlanetId` + `dragFingerLocal` (absolute coords in `handleMeasureDragUpdate`) feed the existing `DragLine` overlay (same accent style; separate state avoids `dragOriginPlanetId` ownership effect clearing non-owned origins).
+**Notes:** Fleet dispatch, distance pill, and owned-planet drag behaviour unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 80 — Show live click-distance label while dragging a fleet
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `dragDistanceLabel` state + bottom-center pill UI; owned-planet `handleFleetPanUpdate` updates label via `computeClickDistance` (finger map pixels → grid position); `measureDrag` `Gesture.Pan()` composed `Gesture.Simultaneous` with map gestures for non-owned planet measurement only (no `handleDragStart`, modal, or queue); `handleDragEnd` early path no longer calls full `cancelDrag` so measurement label survives non-owned drags.
+**Notes:** `formatDragDistanceLabel` shows one decimal (`X.X clicks`). Fleet dispatch behaviour for owned planets unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 79 — Reduce visual planet spacing to ~60% of current
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `CELL_SIZE` 18→11; `PLANET_SIZE` / `PLANET_SIZE_SELECTED` / name-label width and top offset scaled from prior 18px baseline; `PLANET_HIT_RADIUS` stays `CELL_SIZE * 2.5`; pending-departure offset `CELL_SIZE`; default pinch scale 0.6→1.0 (min/max clamp 0.4–4 unchanged).
+**Notes:** Rendering-only; `screenToMapCoords`, pan clamp, fleet SVG, and hit tests all use the same `CELL_SIZE` lever. `computeClickDistance`, `isInRange`, `effectiveRange`, and `movementEngine.ts` untouched. `npx tsc --noEmit` passes clean.
+
+---
+
 ## Task 78 — Fix turn counter: show shared round number
 **Completed:** 2026-05-28
 **Files modified:** `src/screens/GameScreen.tsx` — HUD turn line now displays `roundNumber` directly (`Turn {roundNumber}`) instead of `(roundNumber - 1) * playerCount + playerIndex + 1`; removed unused `numberOfPlayers` / `currentPlayerIndex` / `humanTurn` locals.

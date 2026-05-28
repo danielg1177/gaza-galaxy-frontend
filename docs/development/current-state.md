@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-05-28
+2026-05-28 (Task 83)
 
 ## Overall Status
 **Phase 10 complete (Tasks 68–72 complete). Phase 11 in progress (Tasks 73–75 complete).** Phase 7 complete (Tasks 56–61 complete). Phase 6 complete (Tasks 47–55 complete). Phase 3 UI/UX overhaul complete (Tasks 19–28). Phase 2 complete (Tasks 11–18). Core game engine (tasks 2–9) and playable local client (task 10) are implemented. Backend not started.
@@ -78,6 +78,10 @@
 - Task 76: Garrison constraint removed — `processSendFleet` allows `shipCount === origin.shipCount`; players may send all ships off an owned planet without engine error
 - Task 77: Building placement simplified — Factory/Research Lab chips call `queueBuildOrder` directly (single tap); slot grid empty tiles are display-only; cancel/demolish on filled slots unchanged
 - Task 78: Turn counter displays `roundNumber` directly — all players see Turn 1, Turn 2, etc. on each shared round (reverts Task 63 per-player formula)
+- Task 79: Visual planet spacing reduced — `CELL_SIZE` 18→11 (~61% on-screen grid spacing); planet node sizes and label offsets scale with `CELL_SIZE`; `PLANET_HIT_RADIUS` remains `CELL_SIZE * 2.5`; default map scale 0.6→1.0 so launch zoom stays comfortable; movement/click math unchanged
+- Task 80: Live click-distance label while dragging — `dragDistanceLabel` HUD pill (bottom-center, above End Turn area) updates during fleet drag from owned planets and via separate `measureDrag` pan from any non-owned planet; `computeClickDistance` from origin grid position to finger grid position; no fleet dispatch from measurement drags
+- Task 81: Measurement drag pan block + drag line — `measureDrag` sets/clears `isFleetDragging` and pan baselines like `fleetDrag`; `measureDragOriginPlanetId` + shared `dragFingerLocal` drive the same `DragLine` overlay as owned fleet drags (no `dragOriginPlanetId` on non-owned — ownership effect would clear it)
+- Task 82: Planet label text sizes scaled for `CELL_SIZE` 11 — map-canvas name/class/troop `fontSize` and troop `marginTop` scaled by 11/18 (~61%); `PLANET_NAME_LABEL_*` containers unchanged (already scaled in Task 79); modals/HUD/pill labels untouched
 
 ## In Progress
 _None._
@@ -95,13 +99,14 @@ _None._
 
 ## What Works Right Now
 - **Home → Game flow:** configure match on HomeScreen, launch into full game view
-- **GameScreen:** 2D pannable map (`CELL_SIZE` 18), fog-aware planet tinting (any owned planet green via `owner ===` local human id, neutral very dim, enemy gray), class/name/troop labels on owned planets (non-owned labels muted, troops hidden), owned-planet white fade selection pulse (no blue), drag-origin white ring accent, in-transit fleet markers at destinations (→ + dot)
+- **GameScreen:** 2D pannable map (`CELL_SIZE` 11, default scale 1.0), fog-aware planet tinting (any owned planet green via `owner ===` local human id, neutral very dim, enemy gray), class/name/troop labels on owned planets (non-owned labels muted, troops hidden), owned-planet white fade selection pulse (no blue), drag-origin white ring accent, in-transit fleet markers at destinations (→ + dot)
 - **Owned planet modal:** redesigned card with centered header + close button, class tile + large troop counter, Factory/Research Lab build chips (single tap places into next available slot), display-only empty slot grid plus tappable filled tiles (`🏭`/`🔬`), and factory-gated production slider label (`XX% troops / YY% gold`)
 - **Production split feedback:** planet modal slider now also shows live projected output (`⚔ X.X troops/turn · 💰 Y.Y gold/turn`) that updates continuously while dragging
 - **Build-order validation and economy feedback:** tapping Factory/Lab chips places immediately (no slot pick step), deducts gold instantly in the status bar, and build chips gray out when no slots remain; insufficient-gold chip taps show a brief red **Not enough gold** label in the planet modal (between build chips and slot grid)
 - **Construction feedback:** buildings placed this round are shown dimmed in the slot grid and do not produce troops/gold/research until the next round; tapping a dimmed slot cancels the build and refunds gold immediately (no prompt); tapping an active (prior-round) filled slot prompts demolition confirmation with no gold refund
 - **Status bar:** turn line unchanged; sub-line shows gold balance and tech level only (no aggregate ship count)
 - **Fleet dispatch:** touch-and-drag immediately from owned planets (no hold); owned-planet tap opens modal (`handleMapTap` reads fresh state from `useGameStore.getState()`); fleet drag blocks map pan only after confirmed owned-planet drag start; pinch always available; ship-count modal confirms each order; queued orders immediately reduce displayed origin troop counts and show pending departure markers on the map; **Queued (N)** button (above R&D) opens a modal to review/cancel queued orders; **End Turn** batches all queued `SEND_FLEET` actions + `END_TURN`, then AI turns run until human again
+- **Distance measurement:** dragging from any planet shows a live bottom-center pill (`X.X clicks`) from origin to finger and the same accent drag line as fleet dispatch; works on owned planets (alongside fleet drag) and non-owned planets (measurement-only, no dispatch); non-owned measurement drags block map pan like fleet drag
 - **Zoom/pan math:** at every zoom level, pan can reach all map edges; gesture/tap transforms use a consistent top-left-anchored formula (`screen = map * scale + translate`) without relying on `transformOrigin`
 - **End game:** victory/defeat banner, New Game returns to Home
 - **Pass-and-play:** after End Turn, lock screen ("Pass the device") until tap to dismiss; map stays mounted underneath
@@ -130,6 +135,11 @@ _None._
 | `App.tsx` | Navigation root (`SafeAreaProvider`, stack navigator) |
 
 ## Changelog
+- 2026-05-28: Task 83 complete — Fixed two pinch-zoom bugs in `GameScreen`: (1) zoom jump/teleport caused by `Gesture.Simultaneous(pinch, pan)` allowing the pan gesture to overwrite `translateX` mid-pinch — fixed by `isPinching` shared value that blocks pan's `onUpdate`/`onEnd` while pinch is active; (2) edge "wall" when zooming near map boundaries caused by `clampTranslation` running every `pinch.onUpdate` frame and clamping to the old scale's valid range, fighting the focal-point formula — fixed by removing clamp from `onUpdate` and applying it once in `onEnd`. Pan switched to delta-per-frame approach (`panPrevTranslationX/Y`) so it self-corrects after a pinch changes `translateX` without needing an explicit baseline resync. Removed now-unused `panStartTranslateX/Y` shared values.
+- 2026-05-28: Task 82 complete — `GameScreen` planet node labels scaled for `CELL_SIZE` 11: name/class `fontSize` 7→4, troop count 9→6, troop `marginTop` 2→1; label container width/offset constants unchanged (Task 79 formula); modal/HUD/distance-pill text untouched
+- 2026-05-28: Task 81 complete — `GameScreen` `measureDrag` sets/clears `isFleetDragging` and pan baselines on finalize (blocks map pan during non-owned measurement); `measureDragOriginPlanetId` + `dragFingerLocal` feed shared `DragLine` overlay (same accent style as owned fleet drag)
+- 2026-05-28: Task 80 complete — `GameScreen` live drag distance pill (`dragDistanceLabel`); owned-planet fleet drag updates label in `handleFleetPanUpdate`; `measureDrag` pan (Simultaneous with map gestures) measures from any non-owned planet without dispatch; finger position converted from map pixels to grid for `computeClickDistance`
+- 2026-05-28: Task 79 complete — `GameScreen` `CELL_SIZE` reduced 18→11 (~61% visual grid spacing); planet diameters, label offsets, hit radius, fleet/pending SVG positions, and pan clamp map dimensions all derive from `CELL_SIZE`; default zoom scale raised 0.6→1.0; `computeClickDistance` / `movementEngine` unchanged
 - 2026-05-28: Task 78 complete — turn counter now displays `roundNumber` directly; all players see Turn 1, Turn 2, etc. on each shared round
 - 2026-05-28: Task 77 complete — building placement simplified to single-tap chip; slot grid is now display-only (empty slots not tappable); filled under-construction/active slots still support cancel/demolish
 - 2026-05-28: Task 76 complete — garrison constraint removed; players can now send all ships off an owned planet without an error

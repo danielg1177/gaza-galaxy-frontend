@@ -1009,6 +1009,150 @@ The intended rule is that a planet is permanently owned once captured — it doe
 
 ---
 
+## Phase 13 — Vision Alignment Round 6
+
+These tasks address visual and interaction improvements identified by the product owner after Phase 12. They are independent and can be worked in either order, but Task 79 (visual spacing) should be validated carefully before Task 80 to confirm gesture math is intact.
+
+---
+
+### ~~Task 79 — Reduce visual planet spacing to 3/5 of current distance~~ ✅ 2026-05-28
+
+**Problem:** A planet that is 4 clicks away looks much further than it should. The visual distance between planets on screen is too large — the map feels sparse and distances feel exaggerated relative to their click cost. The product owner wants adjacent planets to feel closer.
+
+**Goal:** Planets should appear at 3/5 (~60%) of their current on-screen distance without changing any game logic, click distances, ranges, or movement rules.
+
+**Background / Risk:** Previous attempts to adjust planet visual spacing caused regressions in planet tap hit-detection, fleet drag targeting, pan clamping, and zoom anchor math. The coordinate system (`screen = mapCoord * CELL_SIZE * scale + translate`) must stay internally consistent.
+
+**Requirements:**
+1. Identify the constant that controls how many screen pixels one grid cell occupies (currently `CELL_SIZE = 18` in `GameScreen.tsx` or equivalent). Reducing this is the primary lever — do **not** change planet coordinate values or click-distance math in `movementEngine.ts`.
+2. Reduce the effective on-screen pixel size per cell to approximately 60% of the current value (e.g. if `CELL_SIZE = 18`, target `≈ 11`). Use the closest clean integer or half-integer value that gives consistent rendering.
+3. All derived layout values that depend on `CELL_SIZE` (planet node size, label offsets, hit radius, fleet SVG positions, pan clamp bounds) must scale with it — audit every usage and update accordingly.
+4. `screenToMapCoords` and `mapToScreenCoords` (or equivalent) must remain mathematically correct after the change — verify that planet tap hit-detection and fleet drag drop-targeting still resolve to the correct planet at all zoom levels.
+5. Pan clamping bounds (`-(mapWidth * scale - viewportWidth)` etc.) use `MAP_COLS * CELL_SIZE` (or equivalent) for map pixel dimensions — these must also update to the new cell size so the player can still reach all map edges.
+6. Do **not** change `computeClickDistance`, `isInRange`, `effectiveRange`, or any movement/engine constant — the game rules are unchanged. Only visual layout is affected.
+7. After the change, do a sanity check: a planet 4 clicks away should look noticeably closer than before (roughly "nearly touching" at default zoom rather than half a screen apart).
+8. The existing default zoom scale (currently `0.6`) may need to be adjusted slightly if the new cell size causes the map to appear too zoomed-in at start; use judgment and document the choice.
+
+**Files to read:** `src/screens/GameScreen.tsx`, `src/game/movementEngine.ts`, `docs/systems/movement.md`, `docs/development/current-state.md`
+**Files to modify:** `src/screens/GameScreen.tsx` (primary); possibly constants in other files if `CELL_SIZE` is defined there
+**Docs to update:** `docs/development/current-state.md`, `docs/tasks/backlog.md`, `docs/tasks/completed.md`
+
+---
+
+### ~~Task 80 — Show live click-distance label while dragging a fleet~~ ✅ 2026-05-28
+
+**Problem:** When planning moves the player has no way to measure distances on the map. They must mentally estimate how far a destination is before committing a fleet order, which makes planning ahead difficult.
+
+**Goal:** As soon as the player begins dragging from any planet (whether they own it or not), a floating label displays the current drag distance in clicks, updating live as the finger moves. This lets players measure distances freely without committing a fleet order.
+
+**Requirements:**
+1. During an active fleet drag (while `fleetDrag` pan gesture `onUpdate` is firing), compute the click distance from the drag origin planet's position to the current finger position converted to map coordinates. Use `computeClickDistance(originPlanet.position, currentMapCoords)` from `movementEngine.ts`.
+2. Display the distance as a compact floating label (e.g. `"4.2 clicks"` or `"≈ 4 clicks"` rounded to one decimal) near the drag cursor — either attached to the drag line near the finger tip or in a fixed HUD position (bottom-center or top-center, away from UI buttons). Choose whichever is clearest without obscuring the map.
+3. The label must be visible and updating on every frame of the drag (no debouncing needed — use the existing `onUpdate` firing cadence).
+4. **Drag from non-owned planets must be supported for measurement purposes.** If the current implementation ignores drags that originate from non-owned planets (because `handleDragStart` returns early for non-owned), add a separate lightweight measurement-only drag path that does not trigger fleet dispatch but does activate the distance label. The measurement drag should activate from any planet, not just owned ones.
+5. When the drag ends (finger lifted, regardless of whether a fleet was dispatched), the distance label disappears immediately.
+6. If the drag origin is not over any planet (drag started on empty space), no label is shown — measurement requires a planet origin.
+7. The distance label should not interfere with existing fleet drag behaviour for owned planets (dispatch flow, ship-count modal, range checks, etc.) — it is additive only.
+8. Changes confined to `src/screens/GameScreen.tsx` (label render + gesture logic); `computeClickDistance` is already exported from `src/game/movementEngine.ts`.
+
+**Files to read:** `src/screens/GameScreen.tsx`, `src/game/movementEngine.ts`, `docs/systems/movement.md`, `docs/development/current-state.md`
+**Files to modify:** `src/screens/GameScreen.tsx`
+**Docs to update:** `docs/development/current-state.md`, `docs/tasks/backlog.md`, `docs/tasks/completed.md`
+
+---
+
+## Phase 14 — Polish Round 1
+
+Follow-up fixes and improvements identified after Phase 13 testing.
+
+---
+
+### ~~Task 81 — Fix map pan during non-owned drag + draw measurement line~~ *(completed 2026-05-28)*
+
+**Problem:** Two issues with the non-owned planet measurement drag introduced in Task 80:
+1. When the player starts a `measureDrag` from a non-owned planet, the map pans simultaneously — the board slides under the finger making measurement useless.
+2. There is no visual line drawn from the origin planet to the current finger position during a measurement drag. The owned-planet fleet drag already draws such a line; the measurement drag should show the same visual.
+
+**Goal:** Non-owned measurement drags block map pan (matching owned-planet fleet drag behaviour), and a line is drawn from the origin planet to the finger during any active drag (both owned and non-owned).
+
+**Requirements:**
+1. **Block pan during measurement drag:** When `measureDrag` activates from a non-owned planet, set the same `isFleetDragging` worklet flag that the owned-planet `fleetDrag` sets, so the pan gesture's `enabled(...)` guard blocks scrolling for the duration of the measurement drag. Clear the flag in `measureDrag`'s `onFinalize`.
+2. **Draw measurement line:** The existing `FleetLayer` SVG (or equivalent overlay) already draws a line from drag origin to finger during an owned-planet fleet drag. Extend this so that when `measureDrag` is active (non-owned origin), the same style of line is drawn from the measurement origin planet to the current finger map position. Reuse the existing line/dot style — do not introduce a new visual style.
+3. Both fixes confined to `src/screens/GameScreen.tsx`.
+
+**Files to read:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`
+**Files to modify:** `src/screens/GameScreen.tsx`
+**Docs to update:** `docs/development/current-state.md`, `docs/tasks/backlog.md`, `docs/tasks/completed.md`
+
+---
+
+### ~~Task 82 — Fix planet label text sizes (too large after CELL_SIZE reduction)~~ *(completed 2026-05-28)*
+
+~~**Problem:** After `CELL_SIZE` was reduced from 18 to 11 in Task 79, planet label font sizes were not scaled down proportionally. Planet names, class letters, and troop counts now appear too large relative to the planet circles and the overall map density.~~
+
+~~**Goal:** All text rendered on the map (planet name, class letter, troop count) is scaled to be proportionate to the new `CELL_SIZE = 11` baseline.~~
+
+~~**Requirements:**~~
+~~1. Audit every `fontSize` value in `GameScreen.tsx` used for planet node labels (name above, class inside, troop count below). These were likely set as fixed pixel values calibrated for `CELL_SIZE = 18`.~~
+~~2. Scale each font size by the ratio `11/18` (~0.61) from its original value, rounding to the nearest integer. For example, a `fontSize: 9` label (designed for CELL_SIZE 18) should become `fontSize: 5` or `6`.~~
+~~3. Adjust any `lineHeight`, `marginTop`, `marginBottom`, or label container sizing that accompanies these text elements if they also look mismatched at the new scale.~~
+~~4. Do not change any font sizes used in modals, the status bar, HUD buttons, or other non-map UI — only map-canvas planet labels are affected.~~
+~~5. Changes confined to `src/screens/GameScreen.tsx`.~~
+
+~~**Files to read:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`~~
+~~**Files to modify:** `src/screens/GameScreen.tsx`~~
+~~**Docs to update:** `docs/development/current-state.md`, `docs/tasks/backlog.md`, `docs/tasks/completed.md`~~
+
+---
+
+## Phase 15 — Vision Alignment Round 7
+
+These tasks address interaction and feel issues reported by the product owner after Phase 14.
+
+---
+
+### ~~Task 83 — Fix zoom gesture: jump/teleport on pinch + edge-clamping blocks focal-point anchoring~~ ✅ 2026-05-28
+
+**Problem:** Two related issues with the pinch-to-zoom gesture:
+
+1. **Zoom jump / teleport:** While pinching to zoom, the view sometimes snaps to a noticeably more-zoomed-in level and simultaneously shifts away from the intended focal point. The zoom does not feel continuous — there is a visible pop or jump mid-gesture.
+
+2. **Edge wall blocks zooming:** When the player tries to pinch-zoom while positioned near the edge of the map (top, bottom, left, or right), an invisible wall prevents the zoom from feeling natural. The pan clamping fires during the pinch gesture and kicks the viewport away from the focal point, making it impossible to zoom into edge areas without first panning to the centre and then scrolling back.
+
+**Suspected causes:**
+- The pinch `onStart` snapshot may not be capturing the live shared values atomically, causing a frame of stale baseline being used during accumulation.
+- The focal-point translate compensation (`newTx = pinchStartTranslateX + (focalX - focalX * scaleRatio)` or equivalent) may have an off-by-one in how it accounts for the existing translate, causing it to over-correct on each frame.
+- The pan clamp is applied unconditionally in `onUpdate` during pinch, so as scale grows the clamp immediately caps translate values — this fights the focal-point math and produces the "wall" effect at edges. The clamp should only commit on `onEnd` (or be made aware that the pinch may legitimately shift translate to a value that is valid at the new scale but invalid at the old scale).
+- `saved*` values may not be flushed to shared values consistently between gesture sessions, causing the first few frames of a new pinch to start from a wrong baseline.
+
+**Goal:** Pinch-to-zoom anchors smoothly and continuously to the focal point under both fingers at every zoom level and at every position on the map, including the edges. No jumps, snaps, or teleports at any point during or after a pinch gesture.
+
+**Requirements:**
+1. Audit the pinch `onStart` / `onUpdate` / `onEnd` handlers in `GameScreen.tsx`. Confirm that `pinchStartScale`, `pinchStartTranslateX`, `pinchStartTranslateY`, `pinchFocalX`, and `pinchFocalY` are all snapshotted from live shared values in `onStart` and never touched again until the next `onStart`.
+2. Verify the focal-point translate formula. The correct relationship is:
+   ```
+   newScale = clamp(pinchStartScale * event.scale, MIN_SCALE, MAX_SCALE)
+   scaleDelta = newScale / pinchStartScale
+   newTx = pinchFocalX - scaleDelta * (pinchFocalX - pinchStartTranslateX)
+   newTy = pinchFocalY - scaleDelta * (pinchFocalY - pinchStartTranslateY)
+   ```
+   Any deviation from this (e.g. applying an additional center-compensation term during pinch `onUpdate`) is likely the source of drift.
+3. **Do not apply pan clamping during pinch `onUpdate`.** Let the translate values track the focal-point formula freely during the gesture. Apply clamping only in pinch `onEnd` (and pan `onEnd`), after the final scale is committed. This removes the "edge wall" mid-gesture.
+4. After pinch `onEnd`, commit `savedScale`, `savedTranslateX`, `savedTranslateY` from the clamped final values. The pan `onStart` must subsequently snapshot from these committed saved values so there is no jump on the next pan.
+5. Verify `screenToMapCoords` still produces correct planet hit coordinates after the fix (the center-compensation term in the inverse transform is unrelated to pinch math and must remain).
+6. Test the following scenarios before marking complete:
+   - Pinch-zoom in the centre of the map: view stays anchored under fingers throughout.
+   - Pinch-zoom near the top-left corner of the map: view does not jump; zoom anchors as close to the focal point as clamping allows.
+   - Pinch-zoom near the right edge: no wall effect; the view zooms naturally until the clamp limit is reached.
+   - Pan after zoom: no position jump on the first frame of the subsequent pan.
+7. Changes confined to `src/screens/GameScreen.tsx`.
+
+**Files to read:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`
+**Files to modify:** `src/screens/GameScreen.tsx`
+**Docs to update:** `docs/development/current-state.md`, `docs/tasks/backlog.md`, `docs/tasks/completed.md`
+
+---
+
 ## Phase 4 — Async Multiplayer & Notifications
 
 These tasks require backend infrastructure (Laravel API) and cannot be completed in local-only mode.
@@ -1054,6 +1198,13 @@ Persist game state to the Laravel backend so players on different devices share 
 ---
 
 ## Changelog
+- 2026-05-28: Task 83 complete — zoom jump fixed (isPinching flag blocks pan from fighting pinch over translateX); edge wall fixed (clamp removed from pinch onUpdate, applied once on onEnd); pan switched to delta-per-frame tracking.
+- 2026-05-28: Phase 15 tasks added (Task 83) — fix pinch-zoom jump/teleport during gesture and edge-wall that prevents zooming near board edges.
+- 2026-05-28: Task 81 complete — `measureDrag` blocks map pan via `isFleetDragging`; measurement drags draw the same `DragLine` as fleet drag (`measureDragOriginPlanetId` + `dragFingerLocal`).
+- 2026-05-28: Task 82 complete — planet name/class/troop map label font sizes scaled 11/18 for `CELL_SIZE` 11; troop label `marginTop` scaled; label containers already proportional from Task 79.
+- 2026-05-28: Phase 14 tasks added (Tasks 81–82) — fix map pan + draw measurement line during non-owned drag (Task 81), fix planet label text sizes after CELL_SIZE reduction (Task 82).
+- 2026-05-28: Task 80 complete — live click-distance pill while dragging from any planet; owned planets use fleet-drag `onUpdate`, non-owned use `measureDrag` (no dispatch).
+- 2026-05-28: Phase 13 tasks added (Tasks 79–80) — reduce visual planet spacing to 3/5 of current (Task 79), show live click-distance label while dragging a fleet from any planet (Task 80).
 - 2026-05-28: Phase 12 tasks added (Tasks 76–78) — remove garrison constraint (can send all ships), simplify building placement to single-tap chip, fix turn counter to show roundNumber.
 - 2026-05-28: Task 75 complete — AI fleet selection respects click-range cap (`effectiveRange` + `isInRange`); fixes intermittent out-of-range `SEND_FLEET` from AI turns.
 - 2026-05-28: Task 74 complete — fleet arrivals at round wrap resolve immediately via `resolveArrival` (no extra turn delay before capture).
