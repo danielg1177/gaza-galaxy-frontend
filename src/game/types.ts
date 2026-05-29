@@ -28,9 +28,34 @@ export type PlanetClass =
 export type BuildingType = 'factory' | 'researchLab';
 
 /**
+ * A notable event emitted during turn resolution for the turn report UI.
+ */
+export type TurnEvent =
+  | { kind: 'fleet_arrived'; planetName: string; attackerName: string; shipCount: number }
+  | {
+      kind: 'combat';
+      planetName: string;
+      attackerName: string;
+      defenderName: string;
+      attackerWon: boolean;
+      attackerLost: number;
+      defenderLost: number;
+      attackerShipsBefore: number;
+      defenderShipsBefore: number;
+      remainingShips: number;
+      isHomePlanetConquest?: boolean;
+    }
+  | { kind: 'research_levelup'; playerName: string; newLevel: number }
+  | { kind: 'build_complete'; planetName: string; buildingType: 'factory' | 'researchLab' };
+
+/**
  * How a match is played: shared device (pass-and-play) or async across devices.
  */
 export type PlayMode = 'passAndPlay' | 'asyncMultiplayer';
+
+export type GalaxyShape = 'scattered' | 'arms' | 'dense_core' | 'ring';
+
+export type MapSize = 'small' | 'medium' | 'large';
 
 /**
  * Identity of who controls a planet or fleet: a player id string, or `'neutral'` for unowned territory.
@@ -130,6 +155,31 @@ export interface GameMap {
 }
 
 /**
+ * What an AI player last observed about a specific planet.
+ * Stale when lastSeenRound < currentRound and the planet is outside observation range.
+ */
+export interface AiPlanetMemory {
+  lastSeenRound: number;
+  lastSeenOwner: OwnerId;
+  lastSeenShipCount: number;
+  /** True once the AI has ever observed this planet. False = unexplored (position known, details unknown). */
+  isExplored: boolean;
+}
+
+/**
+ * Persistent brain state for a single AI player.
+ * Stored inside GameState so it serialises with state_json when the backend is added.
+ */
+export interface AiPlayerState {
+  /** Keyed by planet id. Entries for unexplored planets may be absent. */
+  planetMemory: Record<string, AiPlanetMemory>;
+  /** Planet ids of enemy home planets that have been confirmed through observation. */
+  knownEnemyHomePlanetIds: string[];
+  /** Current strategic focus — transitions happen inside computeAiTurn. */
+  strategicPhase: 'expand' | 'build' | 'strike' | 'defend';
+}
+
+/**
  * Full authoritative snapshot of an in-progress or finished match.
  */
 export interface GameState {
@@ -143,4 +193,6 @@ export interface GameState {
   playMode: PlayMode;
   status: 'active' | 'finished';
   winnerId: string | null;
+  /** Persistent fog-of-war brain state for each AI player. Keyed by player id. */
+  aiStates?: Record<string, AiPlayerState>;
 }

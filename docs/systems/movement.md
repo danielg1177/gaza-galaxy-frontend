@@ -116,8 +116,8 @@ For each fleet in `gameState.fleets`:
    - `progress = totalTurns > 0 ? 1 - (turnsRemaining / totalTurns) : 1`
    - Pixel center: origin planet center + (destination − origin) × `CELL_SIZE` × `progress`
 3. Draw a dashed `<Line>` from the interpolated point to the destination planet center (owner color, opacity 0.6).
-4. Draw a `<Circle>` at the interpolated point (radius 4, owner fill).
-5. Draw ship count as `<SvgText>` offset from the dot.
+4. Draw a filled arrow-head `<Polygon>` at the interpolated point, tip pointing toward the destination (owner fill).
+5. Draw ship count as `<SvgText>` offset from the marker, using the same owner color as the arrow.
 
 `Fleet.totalTurns` is set in `createFleet` to the initial `turnsRemaining` at dispatch so the UI can compute progress without recomputing transit time. ~~Destination-cluster markers (arrow + dot below target planet)~~ removed 2026-05-27 (Task 25).
 
@@ -131,6 +131,7 @@ No randomness. Same positions and fleet list always produce the same transit tim
 
 ## Changelog
 
+- 2026-05-28: In-transit and queued-departure fleet markers use arrow-head polygons (tip toward destination) instead of circles; ship-count labels use owner color (same as marker).
 - 2026-05-28: Task 76 — removed minimum 1-ship garrison on dispatch; `shipCount` may equal `origin.shipCount`.
 - 2026-05-28: Task 74 — round-wrap `advanceFleets` arrivals resolved immediately in `turnEngine`; updated `advanceFleets` comment.
 - 2026-05-28: Task 57 — documented round-wrap fleet ticking cadence (one transit decrement per full player cycle) and explicit ETA-2 arrival timing (start of round 3 when dispatched in round 1).

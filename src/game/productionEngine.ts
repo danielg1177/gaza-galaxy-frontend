@@ -1,4 +1,4 @@
-import type { GameMap, Planet, PlanetClass, Player } from './types';
+import type { GameMap, Planet, PlanetClass, Player, TurnEvent } from './types';
 
 export const FACTORY_GOLD_COST = 200;
 export const RESEARCH_LAB_GOLD_COST = 250;
@@ -6,13 +6,15 @@ export const STARTING_GOLD = 500;
 export const RESEARCH_LAB_POINTS_PER_TURN = 1;
 export const MAX_TECH_LEVEL = 15;
 
+export const RESEARCH_THRESHOLDS: readonly number[] = [
+  10, 23, 38, 58, 82, 113, 151, 198, 258, 333, 426, 542, 688, 869, 1097,
+];
+
 /**
  * Research points required to advance from `level` to `level + 1`.
- * level 0→1: 10, level 1→2: 15, level 2→3: 22, level 3→4: 34, …
- * Formula: Math.round(10 * Math.pow(1.5, level))
  */
 export function researchThreshold(level: number): number {
-  return Math.round(10 * Math.pow(1.5, level));
+  return RESEARCH_THRESHOLDS[level] ?? Infinity;
 }
 
 export const FACTORY_TROOP_OUTPUT: Record<PlanetClass, number> = {
@@ -67,10 +69,25 @@ export function runProduction(
   map: GameMap,
   players: Player[],
   currentRound: number,
+  events?: TurnEvent[],
 ): { map: GameMap; players: Player[] } {
   const playerById = new Map(players.map((player) => [player.id, player]));
   const goldTotals = new Map(players.map((player) => [player.id, player.gold]));
   const researchTotals = new Map(players.map((player) => [player.id, player.researchPoints]));
+
+  if (events !== undefined) {
+    for (const planet of map.planets) {
+      for (const building of planet.buildings) {
+        if (building.builtOnRound === currentRound) {
+          events.push({
+            kind: 'build_complete',
+            planetName: planet.name,
+            buildingType: building.type,
+          });
+        }
+      }
+    }
+  }
 
   const planets = map.planets.map((planet) => {
     if (planet.owner === 'neutral') {
@@ -118,8 +135,12 @@ export function runProduction(
       updatedPlayer.researchPoints >= researchThreshold(updatedPlayer.techLevel) &&
       updatedPlayer.techLevel < MAX_TECH_LEVEL
     ) {
-      updatedPlayer.researchPoints -= researchThreshold(updatedPlayer.techLevel);
       updatedPlayer.techLevel += 1;
+      events?.push({
+        kind: 'research_levelup',
+        playerName: player.name,
+        newLevel: updatedPlayer.techLevel,
+      });
     }
 
     return updatedPlayer;

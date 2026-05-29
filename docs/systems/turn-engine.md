@@ -24,8 +24,8 @@ Orchestrates the resolution of a single player turn. Applies that player's fleet
 }
 ```
 
-### `resolveTurn(state, input): GameState`
-Single entry point for turn resolution. Throws if `input.playerId !== state.currentPlayerId` or `state.status !== 'active'`.
+### `resolveTurn(state, input): ResolveTurnResult`
+Single entry point for turn resolution. Returns `GameState` fields plus `events: TurnEvent[]` collected during resolution. Throws if `input.playerId !== state.currentPlayerId` or `state.status !== 'active'`.
 
 ## Round vs turn
 
@@ -47,7 +47,7 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
 
 ## Turn Resolution Order
 1. **Validate** — current player and active game status.
-2. **Resolve eligible arrivals** — split `state.fleets` into fleets with `turnsRemaining <= 0` and `dispatchedInRound < roundNumber` vs still in transit; for each eligible fleet, `combatEngine.resolveArrival(fleet, map)`; keep only still-in-transit fleets. (Safety net under normal play — round-wrap resolution handles fleets that hit zero on the prior wrap.)
+2. **Resolve eligible arrivals** — split `state.fleets` into fleets with `turnsRemaining <= 0` and `dispatchedInRound < roundNumber` vs still in transit; for each eligible fleet, `combatEngine.resolveArrival(rng, fleet, map, events, players, stillInTransit)`; apply optional `players` / `fleets` updates from `ResolveArrivalResult`; keep only still-in-transit fleets. (Safety net under normal play — round-wrap resolution handles fleets that hit zero on the prior wrap.)
 3. **Process `SEND_FLEET` actions** (in submission order):
    - Origin planet exists and is owned by `input.playerId`.
    - `shipCount >= 1` and `shipCount <= origin.shipCount` (may send entire garrison; ownership does not require ships on planet).
@@ -55,25 +55,29 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
    - `turnsRemaining` from `movementEngine.computeTurnsInTransit` (Euclidean distance, `Math.ceil`, minimum 1).
    - Deduct `shipCount` from origin; append fleet via `movementEngine.createFleet` with `dispatchedInRound: state.roundNumber` (`fleet-{turnNumber}-{index}`).
 4. ~~**Advance fleets** per player turn~~ — removed with Task 57; fleet transit advances only on round wrap (step 8).
-5. **Elimination/Victory** — a player is eliminated when their `homePlanetId` planet is missing or not owned by them (`isEliminated` updated). If exactly one non-eliminated player remains, set `status: 'finished'` and `winnerId` to that player.
+5. **Elimination/Victory** — a player is eliminated when their home planet is conquered (`combatEngine` sets `isEliminated` and forfeits planets) or when their `homePlanetId` planet is not owned by them (safety-net re-check after fleet dispatches). If exactly one non-eliminated player remains, set `status: 'finished'` and `winnerId` to that player.
 6. **Advance turn** — `turnNumber += 1`; if still `active`, `currentPlayerId` moves to the next non-eliminated player in `state.players` array order (wrap around).
 7. **Round-wrap check** — compute whether turn order wrapped (`nextPlayerIndex <= currentPlayerIndex`).
 8. **Round tick (wrap only)** — on wrap only:
    - `movementEngine.advanceFleets` decrements all fleet `turnsRemaining` by 1
-   - For each fleet in `arrived`, `combatEngine.resolveArrival`; keep only `inTransit` in `fleets`
-   - `productionEngine.runProduction(map, players, state.roundNumber)` runs once for the completed round
+   - For each fleet in `arrived`, `combatEngine.resolveArrival(rng, fleet, map, events, players, fleets)`; apply optional `players` / `fleets` updates; keep only `inTransit` in `fleets`
+   - `productionEngine.runProduction(map, players, state.roundNumber, events)` runs once for the completed round
 9. **Advance round** — if wrap occurred, `roundNumber += 1`.
 
 ## Turn Order Logic
 - Players are ordered by their index in `state.players`.
 - After each resolved turn, the engine scans forward from the current player's index (wrapping) and selects the first player with `isEliminated === false`.
-- Eliminated players are skipped for the remainder of the match.
+- Eliminated players are skipped for normal gameplay turns.
+- **Pass-and-play knockout (Task 126):** when a human is eliminated mid-cycle, `gameStore.endTurn` temporarily sets `currentPlayerId` to that player so they see the knockout battle report; `acknowledgeKnockout()` then calls `advanceToNextNonEliminatedPlayer` and runs AI turns until the next human.
+
+## Victory
+When exactly one player has `isEliminated !== true`, `status` becomes `'finished'` and `winnerId` is set. `GameScreen` shows a **Victory** modal for the winning local human ("You are the last commander standing!") or a **Game Over** modal naming the winner otherwise; both dismiss to Home via `resetGame`.
 
 ## Stub Integration Points
 | Module | Function | Contract |
 |--------|----------|----------|
-| `combatEngine.ts` | `resolveArrival(fleet, map)` | Returns updated `GameMap` after battle/capture at destination. |
-| `productionEngine.ts` | `runProduction(map, players)` | Returns updated `map` and `players` after ship/resource generation. |
+| `combatEngine.ts` | `resolveArrival(rng, fleet, map, events?, players?, fleets?)` | Returns `ResolveArrivalResult` with updated `map`; optional `players` / `fleets` on home-planet elimination. |
+| `productionEngine.ts` | `runProduction(map, players, currentRound, events?)` | Returns updated `map` and `players`; optionally appends turn-report events. |
 | `movementEngine.ts` | `computeTurnsInTransit`, `createFleet`, `advanceFleets` | Transit time, fleet records, and per-turn fleet advance. See `docs/systems/movement.md`. |
 
 ## Determinism
@@ -82,9 +86,11 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
 
 ## Client turn commit (Task 27)
 
-The Zustand store (`src/store/gameStore.ts`) keeps human fleet dispatches in **`queuedOrders`** (`PendingFleet[]`) until **`endTurn()`**. Each confirm in the ship-count modal calls **`queueOrder`** only (no `GameState` mutation). **`endTurn()`** builds one `TurnInput`: all queued orders as `SEND_FLEET` actions (in queue order), then `{ type: 'END_TURN' }`, calls **`resolveTurn`**, then **`runAiTurnsUntilHuman`**, saves state, and clears **`queuedOrders`**. **`cancelQueuedOrder(index)`** removes a queued row without touching the engine.
+The Zustand store (`src/store/gameStore.ts`) keeps human fleet dispatches in **`queuedOrders`** (`PendingFleet[]`) until **`endTurn()`**. Each confirm in the ship-count modal calls **`queueOrder`** only (no `GameState` mutation). **`endTurn()`** builds one `TurnInput`: all queued orders as `SEND_FLEET` actions (in queue order), then `{ type: 'END_TURN' }`, calls **`resolveTurn`**, then **`runAiTurnsUntilHuman`**, saves state, sets **`turnReport`** from aggregated `events`, and clears **`queuedOrders`**. **`cancelQueuedOrder(index)`** removes a queued row without touching the engine.
 
 ## Changelog
+- 2026-05-29: **Task 126** — home-planet conquest elimination in `combatEngine`; `ResolveArrivalResult`; pass-and-play knockout via `eliminatedPlayerPendingKnockout` / `acknowledgeKnockout`; victory when one non-eliminated player remains.
+- 2026-05-28: **Task 104** — `resolveTurn` returns `ResolveTurnResult` with `events: TurnEvent[]`; store `turnReport` populated on `endTurn`.
 - 2026-05-28: **Task 76** — `processSendFleet` allows `shipCount === origin.shipCount`; removed minimum 1-ship garrison on origin.
 - 2026-05-28: **Task 74** — round-wrap `advanceFleets` arrivals now resolve immediately via `resolveArrival`; only `inTransit` fleets remain in state after wrap.
 - 2026-05-28: **Task 57** — corrected round semantics: fleet transit advance and production now run once per full player cycle (on turn-order wrap), and `roundNumber` increments only on that wrap.

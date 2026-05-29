@@ -1,4 +1,6 @@
+import { updateAiObservation } from './aiEngine';
 import { resolveArrival } from './combatEngine';
+import { mulberry32 } from './mapGenerator';
 import {
   advanceFleets,
   computeTurnsInTransit,
@@ -7,11 +9,16 @@ import {
   effectiveSpeed,
   isInRange,
 } from './movementEngine';
+import { FACTORY_GOLD_COST, RESEARCH_LAB_GOLD_COST } from './productionEngine';
 import { runProduction } from './productionEngine';
-import type { Fleet, GameMap, GameState, Planet, Player } from './types';
+import type { BuildingType, Fleet, GameMap, GameState, Planet, Player, TurnEvent } from './types';
+
+export type ResolveTurnResult = GameState & { events: TurnEvent[] };
 
 export type PlayerAction =
   | { type: 'SEND_FLEET'; fromPlanetId: string; toPlanetId: string; shipCount: number }
+  | { type: 'BUILD'; planetId: string; buildingType: BuildingType }
+  | { type: 'SET_PRODUCTION_SLIDER'; planetId: string; value: number }
   | { type: 'END_TURN' };
 
 export interface TurnInput {
@@ -28,6 +35,13 @@ function cloneMap(map: GameMap): GameMap {
     width: map.width,
     height: map.height,
     planets: map.planets.map((p) => ({ ...p, buildings: [...p.buildings] })),
+  };
+}
+
+export function advanceToNextNonEliminatedPlayer(state: GameState): GameState {
+  return {
+    ...state,
+    currentPlayerId: nextNonEliminatedPlayerId(state.players, state.currentPlayerId),
   };
 }
 
@@ -116,7 +130,71 @@ function processSendFleet(
   return { map: updatedMap, fleets: [...fleets, fleet] };
 }
 
-export function resolveTurn(state: GameState, input: TurnInput): GameState {
+function processBuild(
+  map: GameMap,
+  players: Player[],
+  action: Extract<PlayerAction, { type: 'BUILD' }>,
+  playerId: string,
+  roundNumber: number,
+): { map: GameMap; players: Player[] } {
+  const planet = map.planets.find((p) => p.id === action.planetId);
+  if (planet === undefined) {
+    throw new Error(`Planet not found: ${action.planetId}`);
+  }
+  if (planet.owner !== playerId) {
+    throw new Error(`Planet ${action.planetId} is not owned by player ${playerId}`);
+  }
+
+  const activeAndPending = planet.buildings.length;
+  if (activeAndPending >= planet.buildingSlots) {
+    throw new Error(`No building slots available on planet ${action.planetId}`);
+  }
+
+  const cost = action.buildingType === 'factory' ? FACTORY_GOLD_COST : RESEARCH_LAB_GOLD_COST;
+  const player = players.find((p) => p.id === playerId);
+  if (player === undefined || player.gold < cost) {
+    throw new Error(`Insufficient gold to build on planet ${action.planetId}`);
+  }
+
+  const updatedPlayers = players.map((p) =>
+    p.id === playerId ? { ...p, gold: p.gold - cost } : p,
+  );
+
+  const updatedMap: GameMap = {
+    ...map,
+    planets: map.planets.map((p) =>
+      p.id === action.planetId
+        ? { ...p, buildings: [...p.buildings, { type: action.buildingType, builtOnRound: roundNumber }] }
+        : p,
+    ),
+  };
+
+  return { map: updatedMap, players: updatedPlayers };
+}
+
+function processSetProductionSlider(
+  map: GameMap,
+  action: Extract<PlayerAction, { type: 'SET_PRODUCTION_SLIDER' }>,
+  playerId: string,
+): GameMap {
+  const planet = map.planets.find((p) => p.id === action.planetId);
+  if (planet === undefined) {
+    throw new Error(`Planet not found: ${action.planetId}`);
+  }
+  if (planet.owner !== playerId) {
+    throw new Error(`Planet ${action.planetId} is not owned by player ${playerId}`);
+  }
+
+  const value = Math.min(1, Math.max(0, action.value));
+  return {
+    ...map,
+    planets: map.planets.map((p) =>
+      p.id === action.planetId ? { ...p, productionSlider: value } : p,
+    ),
+  };
+}
+
+export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResult {
   if (input.playerId !== state.currentPlayerId) {
     throw new Error(
       `Turn player ${input.playerId} does not match current player ${state.currentPlayerId}`,
@@ -126,12 +204,14 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
     throw new Error(`Cannot resolve turn when game status is ${state.status}`);
   }
 
+  const events: TurnEvent[] = [];
   let map = cloneMap(state.map);
   let fleets: Fleet[] = state.fleets.map((f) => ({ ...f }));
   let players: Player[] = state.players.map((p) => ({ ...p }));
 
   const eligibleArrivals: Fleet[] = [];
-  const stillInTransit: Fleet[] = [];
+  let stillInTransit: Fleet[] = [];
+  let combatRngCounter = 0;
 
   for (const fleet of fleets) {
     if (fleet.turnsRemaining <= 0 && fleet.dispatchedInRound < state.roundNumber) {
@@ -142,10 +222,45 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
   }
 
   for (const fleet of eligibleArrivals) {
-    map = resolveArrival(fleet, map);
+    const combatRng = mulberry32(state.seed + state.roundNumber * 10000 + combatRngCounter * 100);
+    combatRngCounter += 1;
+    const arrivalResult = resolveArrival(
+      combatRng,
+      fleet,
+      map,
+      events,
+      players,
+      stillInTransit,
+    );
+    map = arrivalResult.map;
+    if (arrivalResult.players !== undefined) {
+      players = arrivalResult.players;
+    }
+    if (arrivalResult.fleets !== undefined) {
+      stillInTransit = arrivalResult.fleets;
+    }
   }
 
   fleets = stillInTransit;
+
+  // Process BUILD actions before fleet dispatch so gold deductions are applied first.
+  const buildActions = input.actions.filter(
+    (action): action is Extract<PlayerAction, { type: 'BUILD' }> => action.type === 'BUILD',
+  );
+  for (const action of buildActions) {
+    const result = processBuild(map, players, action, input.playerId, state.roundNumber);
+    map = result.map;
+    players = result.players;
+  }
+
+  // Process production slider adjustments.
+  const sliderActions = input.actions.filter(
+    (action): action is Extract<PlayerAction, { type: 'SET_PRODUCTION_SLIDER' }> =>
+      action.type === 'SET_PRODUCTION_SLIDER',
+  );
+  for (const action of sliderActions) {
+    map = processSetProductionSlider(map, action, input.playerId);
+  }
 
   const sendFleetActions = input.actions.filter(
     (action): action is Extract<PlayerAction, { type: 'SEND_FLEET' }> => action.type === 'SEND_FLEET',
@@ -167,6 +282,9 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
   });
 
   players = players.map((player) => {
+    if (player.isEliminated) {
+      return player;
+    }
     const home = findPlanet(map, player.homePlanetId);
     const isEliminated = home === undefined || home.owner !== player.id;
     return { ...player, isEliminated };
@@ -197,13 +315,30 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
     const { inTransit, arrived: justArrived } = advanceFleets(fleets);
     fleets = inTransit;
     for (const fleet of justArrived) {
-      map = resolveArrival(fleet, map);
+      const combatRng = mulberry32(state.seed + state.roundNumber * 10000 + combatRngCounter * 100);
+      combatRngCounter += 1;
+      const arrivalResult = resolveArrival(
+        combatRng,
+        fleet,
+        map,
+        events,
+        players,
+        fleets,
+      );
+      map = arrivalResult.map;
+      if (arrivalResult.players !== undefined) {
+        players = arrivalResult.players;
+      }
+      if (arrivalResult.fleets !== undefined) {
+        fleets = arrivalResult.fleets;
+      }
     }
 
     const { map: newMap, players: newPlayers } = runProduction(
       map,
       players,
       state.roundNumber,
+      events,
     );
     map = newMap;
     players = newPlayers;
@@ -212,6 +347,31 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
   let roundNumber = state.roundNumber;
   if (isRoundWrap) {
     roundNumber += 1;
+  }
+
+  // Update AI fog-of-war memory for the player who just took their turn.
+  // This runs after all fleet dispatches and production so the AI sees the
+  // results of its own actions before the next decision cycle.
+  const currentPlayer = players.find((p) => p.id === input.playerId);
+  let aiStates = state.aiStates ?? {};
+  if (currentPlayer?.isAI === true) {
+    const partialState: GameState = {
+      map,
+      players,
+      fleets,
+      turnNumber: state.turnNumber + 1,
+      roundNumber,
+      currentPlayerId,
+      seed: state.seed,
+      playMode: state.playMode,
+      status,
+      winnerId,
+      aiStates,
+    };
+    aiStates = {
+      ...aiStates,
+      [input.playerId]: updateAiObservation(partialState, input.playerId, aiStates[input.playerId]),
+    };
   }
 
   return {
@@ -225,5 +385,7 @@ export function resolveTurn(state: GameState, input: TurnInput): GameState {
     playMode: state.playMode,
     status,
     winnerId,
+    aiStates,
+    events,
   };
 }

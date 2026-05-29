@@ -1,11 +1,16 @@
-import type { GameMap, Planet, PlanetClass, Position } from './types';
+import type { GameMap, MapSize, Planet, PlanetClass, Position } from './types';
 
-const CANDIDATE_ASSIGNMENT_COUNT = 200;
 const INITIAL_HOME_SHIP_COUNT = 5;
+const EDGE_INNER_MARGIN = 3;
+const EDGE_BAND_DEPTH_FRACTION = 0.28;
+const HUMAN_SEPARATION_RETRY_LIMIT = 50;
 
-const SCORE_WEIGHT_DISTANCE = 0.5;
-const SCORE_WEIGHT_VARIANCE = 0.3;
-const SCORE_WEIGHT_CENTER = 0.2;
+const HUMAN_MIN_SEPARATION: Record<MapSize, number> = {
+  small: 30,
+  medium: 40,
+  large: 50,
+};
+
 export const HOME_PLANET_CLASS_CONFIG: Record<
   string,
   { startingGold: number; buildingSlots: number }
@@ -20,172 +25,243 @@ export const HOME_PLANET_CLASS_CONFIG: Record<
 };
 const HOME_PLANET_CLASSES = Object.keys(HOME_PLANET_CLASS_CONFIG) as PlanetClass[];
 
-interface AssignmentMetrics {
-  minPairwiseDistance: number;
-  nearbyCountVariance: number;
-  centerPenalty: number;
-}
-
-interface ScoredAssignment {
-  planetIndices: number[];
-  metrics: AssignmentMetrics;
-}
-
 export interface SpawnPlacementResult {
   map: GameMap;
   homePlanetClassByPlayerId: Record<string, PlanetClass>;
 }
 
-function euclideanDistance(a: Position, b: Position): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
+export interface PlaceSpawnsOptions {
+  map: GameMap;
+  humanPlayerIds: string[];
+  aiPlayerIds: string[];
+  mapSize: MapSize;
+  rng: () => number;
+}
+
+interface Zone {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+function computeClickDistance(origin: Position, destination: Position): number {
+  const dx = origin.x - destination.x;
+  const dy = origin.y - destination.y;
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-function mapCenter(width: number, height: number): Position {
-  return { x: (width - 1) / 2, y: (height - 1) / 2 };
+function fisherYatesShuffle<T>(items: T[], rng: () => number): T[] {
+  const shuffled = [...items];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
 }
 
-function maxDistanceFromCenter(width: number, height: number): number {
-  const center = mapCenter(width, height);
-  const corners: Position[] = [
-    { x: 0, y: 0 },
-    { x: width - 1, y: 0 },
-    { x: 0, y: height - 1 },
-    { x: width - 1, y: height - 1 },
+function planetInZone(planet: Planet, zone: Zone): boolean {
+  const { x, y } = planet.position;
+  return zone.minX <= x && x <= zone.maxX && zone.minY <= y && y <= zone.maxY;
+}
+
+function edgeBandDepth(map: GameMap): number {
+  return Math.round(Math.min(map.width, map.height) * EDGE_BAND_DEPTH_FRACTION);
+}
+
+function generateEdgeZones(map: GameMap): Zone[] {
+  const depth = edgeBandDepth(map);
+  const { width, height } = map;
+
+  return [
+    { minX: 0, maxX: width - 1, minY: EDGE_INNER_MARGIN, maxY: EDGE_INNER_MARGIN + depth - 1 },
+    {
+      minX: 0,
+      maxX: width - 1,
+      minY: height - EDGE_INNER_MARGIN - depth,
+      maxY: height - EDGE_INNER_MARGIN - 1,
+    },
+    { minX: EDGE_INNER_MARGIN, maxX: EDGE_INNER_MARGIN + depth - 1, minY: 0, maxY: height - 1 },
+    {
+      minX: width - EDGE_INNER_MARGIN - depth,
+      maxX: width - EDGE_INNER_MARGIN - 1,
+      minY: 0,
+      maxY: height - 1,
+    },
   ];
-  let max = 0;
-  for (const corner of corners) {
-    max = Math.max(max, euclideanDistance(center, corner));
-  }
-  return max;
 }
 
-function minPairwiseDistance(positions: Position[]): number {
-  let min = Infinity;
-  for (let i = 0; i < positions.length; i++) {
-    for (let j = i + 1; j < positions.length; j++) {
-      min = Math.min(min, euclideanDistance(positions[i], positions[j]));
-    }
+function generateInteriorZones(map: GameMap): Zone[] {
+  const depth = edgeBandDepth(map);
+  const interiorMinX = EDGE_INNER_MARGIN + depth;
+  const interiorMaxX = map.width - EDGE_INNER_MARGIN - depth - 1;
+  const interiorMinY = EDGE_INNER_MARGIN + depth;
+  const interiorMaxY = map.height - EDGE_INNER_MARGIN - depth - 1;
+
+  if (interiorMinX > interiorMaxX || interiorMinY > interiorMaxY) {
+    return [];
   }
-  return min === Infinity ? 0 : min;
+
+  const midX = Math.floor((interiorMinX + interiorMaxX) / 2);
+  const midY = Math.floor((interiorMinY + interiorMaxY) / 2);
+
+  return [
+    { minX: interiorMinX, maxX: midX, minY: interiorMinY, maxY: midY },
+    { minX: midX + 1, maxX: interiorMaxX, minY: interiorMinY, maxY: midY },
+    { minX: interiorMinX, maxX: midX, minY: midY + 1, maxY: interiorMaxY },
+    { minX: midX + 1, maxX: interiorMaxX, minY: midY + 1, maxY: interiorMaxY },
+  ];
 }
 
-function countPlanetsWithinRadius(home: Planet, planets: Planet[], radius: number): number {
-  let count = 0;
-  for (const planet of planets) {
-    if (planet.id === home.id) {
+function neutralPlanetsInZone(
+  map: GameMap,
+  zone: Zone,
+  excludedPlanetIndices: Set<number>,
+): number[] {
+  const indices: number[] = [];
+  for (let i = 0; i < map.planets.length; i++) {
+    const planet = map.planets[i];
+    if (planet.owner !== 'neutral' || excludedPlanetIndices.has(i)) {
       continue;
     }
-    if (euclideanDistance(home.position, planet.position) <= radius) {
-      count++;
+    if (planetInZone(planet, zone)) {
+      indices.push(i);
     }
   }
-  return count;
+  return indices;
 }
 
-function variance(values: number[]): number {
-  if (values.length === 0) {
-    return 0;
-  }
-  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
-  const squaredDiffs = values.map((v) => (v - mean) ** 2);
-  return squaredDiffs.reduce((sum, v) => sum + v, 0) / values.length;
+function zonesWithNeutralPlanets(map: GameMap, zones: Zone[]): Zone[] {
+  return zones.filter((zone) => neutralPlanetsInZone(map, zone, new Set()).length > 0);
 }
 
-function centerPenaltyForPlanet(planet: Planet, width: number, height: number, maxDist: number): number {
-  const center = mapCenter(width, height);
-  const dist = euclideanDistance(planet.position, center);
-  if (maxDist === 0) {
-    return 0;
-  }
-  return 1 - dist / maxDist;
-}
-
-function metricsForAssignment(
-  planetIndices: number[],
+function pickRandomPlanetInZone(
   map: GameMap,
-  nearbyRadius: number,
-  maxCenterDist: number,
-): AssignmentMetrics {
-  const homes = planetIndices.map((i) => map.planets[i]);
-  const positions = homes.map((p) => p.position);
-
-  const nearbyCounts = homes.map((home) =>
-    countPlanetsWithinRadius(home, map.planets, nearbyRadius),
-  );
-  const penalties = homes.map((home) =>
-    centerPenaltyForPlanet(home, map.width, map.height, maxCenterDist),
-  );
-
-  return {
-    minPairwiseDistance: minPairwiseDistance(positions),
-    nearbyCountVariance: variance(nearbyCounts),
-    centerPenalty: penalties.reduce((sum, p) => sum + p, 0) / penalties.length,
-  };
-}
-
-function randomPlanetIndices(planetCount: number, pickCount: number, rng: () => number): number[] {
-  const indices = Array.from({ length: planetCount }, (_, i) => i);
-  for (let i = indices.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [indices[i], indices[j]] = [indices[j], indices[i]];
+  zone: Zone,
+  excludedPlanetIndices: Set<number>,
+  rng: () => number,
+): number | undefined {
+  const candidates = neutralPlanetsInZone(map, zone, excludedPlanetIndices);
+  if (candidates.length === 0) {
+    return undefined;
   }
-  return indices.slice(0, pickCount);
+  const index = Math.floor(rng() * candidates.length);
+  return candidates[index];
 }
 
-function normalizeHigherIsBetter(values: number[], value: number): number {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (max === min) {
-    return 1;
+function nextUnusedZone(shuffledZones: Zone[], usedZones: Set<Zone>): Zone | undefined {
+  for (const zone of shuffledZones) {
+    if (!usedZones.has(zone)) {
+      return zone;
+    }
   }
-  return (value - min) / (max - min);
+  return undefined;
 }
 
-function normalizeLowerIsBetter(values: number[], value: number): number {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (max === min) {
-    return 1;
+function meetsHumanSeparation(
+  assignments: Map<string, number>,
+  map: GameMap,
+  minDistance: number,
+): boolean {
+  const positions = [...assignments.values()].map((index) => map.planets[index].position);
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = i + 1; j < positions.length; j++) {
+      if (computeClickDistance(positions[i], positions[j]) < minDistance) {
+        return false;
+      }
+    }
   }
-  return (max - value) / (max - min);
+  return true;
 }
 
-function scoreAssignment(
-  metrics: AssignmentMetrics,
-  allMetrics: AssignmentMetrics[],
-): number {
-  const distances = allMetrics.map((m) => m.minPairwiseDistance);
-  const variances = allMetrics.map((m) => m.nearbyCountVariance);
-  const penalties = allMetrics.map((m) => m.centerPenalty);
+function assignHumans(
+  map: GameMap,
+  humanPlayerIds: string[],
+  edgeZones: Zone[],
+  mapSize: MapSize,
+  rng: () => number,
+): Map<string, number> {
+  const usableEdgeZones = zonesWithNeutralPlanets(map, edgeZones);
+  const minDistance = HUMAN_MIN_SEPARATION[mapSize];
+  let lastAssignment = new Map<string, number>();
 
-  const normDistance = normalizeHigherIsBetter(distances, metrics.minPairwiseDistance);
-  const normVariance = normalizeLowerIsBetter(variances, metrics.nearbyCountVariance);
-  const normCenter = normalizeLowerIsBetter(penalties, metrics.centerPenalty);
+  for (let attempt = 0; attempt < HUMAN_SEPARATION_RETRY_LIMIT; attempt++) {
+    const shuffledZones = fisherYatesShuffle(usableEdgeZones, rng);
+    const usedZones = new Set<Zone>();
+    const assignedPlanetIndices = new Set<number>();
+    const assignment = new Map<string, number>();
+    let failed = false;
 
-  return (
-    SCORE_WEIGHT_DISTANCE * normDistance +
-    SCORE_WEIGHT_VARIANCE * normVariance +
-    SCORE_WEIGHT_CENTER * normCenter
-  );
-}
+    for (const playerId of humanPlayerIds) {
+      const zone = nextUnusedZone(shuffledZones, usedZones);
+      if (zone === undefined) {
+        failed = true;
+        break;
+      }
+      const planetIndex = pickRandomPlanetInZone(map, zone, assignedPlanetIndices, rng);
+      if (planetIndex === undefined) {
+        failed = true;
+        break;
+      }
+      usedZones.add(zone);
+      assignedPlanetIndices.add(planetIndex);
+      assignment.set(playerId, planetIndex);
+    }
 
-function pickBestAssignment(candidates: ScoredAssignment[]): ScoredAssignment {
-  const allMetrics = candidates.map((c) => c.metrics);
-  let best = candidates[0];
-  let bestScore = scoreAssignment(best.metrics, allMetrics);
+    if (failed) {
+      lastAssignment = assignment;
+      continue;
+    }
 
-  for (let i = 1; i < candidates.length; i++) {
-    const candidate = candidates[i];
-    const score = scoreAssignment(candidate.metrics, allMetrics);
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
+    lastAssignment = assignment;
+
+    if (humanPlayerIds.length <= 1 || meetsHumanSeparation(assignment, map, minDistance)) {
+      return assignment;
     }
   }
 
-  return best;
+  console.warn(
+    'Task 127: human min-separation not met after 50 attempts, using last assignment',
+  );
+  return lastAssignment;
+}
+
+function assignAis(
+  map: GameMap,
+  aiPlayerIds: string[],
+  edgeZones: Zone[],
+  interiorZones: Zone[],
+  humanAssignments: Map<string, number>,
+  rng: () => number,
+): Map<string, number> {
+  const assignedPlanetIndices = new Set(humanAssignments.values());
+  const allZones = [...interiorZones, ...edgeZones];
+  const shuffledZones = fisherYatesShuffle(allZones, rng);
+  const usedZones = new Set<Zone>();
+  const assignment = new Map<string, number>();
+
+  for (const playerId of aiPlayerIds) {
+    let placed = false;
+    for (const zone of shuffledZones) {
+      if (usedZones.has(zone)) {
+        continue;
+      }
+      const planetIndex = pickRandomPlanetInZone(map, zone, assignedPlanetIndices, rng);
+      if (planetIndex === undefined) {
+        continue;
+      }
+      usedZones.add(zone);
+      assignedPlanetIndices.add(planetIndex);
+      assignment.set(playerId, planetIndex);
+      placed = true;
+      break;
+    }
+    if (!placed) {
+      throw new Error(`Cannot place AI spawn for player ${playerId}`);
+    }
+  }
+
+  return assignment;
 }
 
 function applyAssignment(
@@ -227,14 +303,14 @@ function applyAssignment(
 }
 
 /**
- * Assigns one fair home planet per player on an existing map using scored random search.
+ * Assigns one starting planet per player on an existing map using zone-based placement.
+ * Humans draw from edge zones; AIs draw from the full zone pool after humans are placed.
  * Returns a new map; the input is not mutated.
  */
-export function placeSpawns(
-  map: GameMap,
-  playerIds: string[],
-  rng: () => number,
-): SpawnPlacementResult {
+export function placeSpawns(options: PlaceSpawnsOptions): SpawnPlacementResult {
+  const { map, humanPlayerIds, aiPlayerIds, mapSize, rng } = options;
+  const playerIds = [...humanPlayerIds, ...aiPlayerIds];
+
   if (playerIds.length > map.planets.length) {
     throw new Error(
       `Cannot place ${playerIds.length} spawns on a map with only ${map.planets.length} planets`,
@@ -248,20 +324,27 @@ export function placeSpawns(
     };
   }
 
-  const nearbyRadius = Math.min(map.width, map.height) * 0.25;
-  const maxCenterDist = maxDistanceFromCenter(map.width, map.height);
-  const planetCount = map.planets.length;
-  const pickCount = playerIds.length;
+  const edgeZones = generateEdgeZones(map);
+  const interiorZones = generateInteriorZones(map);
 
-  const candidates: ScoredAssignment[] = [];
-  for (let n = 0; n < CANDIDATE_ASSIGNMENT_COUNT; n++) {
-    const planetIndices = randomPlanetIndices(planetCount, pickCount, rng);
-    candidates.push({
-      planetIndices,
-      metrics: metricsForAssignment(planetIndices, map, nearbyRadius, maxCenterDist),
-    });
-  }
+  const humanAssignments = assignHumans(map, humanPlayerIds, edgeZones, mapSize, rng);
+  const aiAssignments = assignAis(
+    map,
+    aiPlayerIds,
+    edgeZones,
+    interiorZones,
+    humanAssignments,
+    rng,
+  );
 
-  const best = pickBestAssignment(candidates);
-  return applyAssignment(map, best.planetIndices, playerIds, rng);
+  const assignmentByPlayer = new Map([...humanAssignments, ...aiAssignments]);
+  const planetIndices = playerIds.map((id) => {
+    const index = assignmentByPlayer.get(id);
+    if (index === undefined) {
+      throw new Error(`No starting planet assigned for player ${id}`);
+    }
+    return index;
+  });
+
+  return applyAssignment(map, planetIndices, playerIds, rng);
 }

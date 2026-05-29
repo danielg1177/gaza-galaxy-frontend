@@ -4,101 +4,158 @@
 **Implemented** in `src/game/aiEngine.ts`.
 
 ## Overview
-Provides deterministic heuristic decisions for AI players. The AI returns a `TurnInput` for the turn engine; it does not call `resolveTurn` itself.
+Provides deterministic heuristic decisions for AI players. The AI returns a `TurnInput` for the turn engine; it does not call `resolveTurn` itself. Normal and Hard difficulty use a persistent fog-of-war memory stored in `GameState.aiStates`, so they only act on information they have actually observed.
 
 ## Exports
 
 ### `computeAiTurn(state: GameState, playerId: string): TurnInput`
-Builds one turn of actions for the given player from the current `GameState`. Returns at most one `SEND_FLEET` action (plus `END_TURN`), or only `END_TURN` when no move is viable.
+Builds one full turn of actions for the given player from the current `GameState`.
+Returns any combination of `BUILD`, `SET_PRODUCTION_SLIDER`, and `SEND_FLEET` actions (up to the difficulty's fleet budget), always terminated with `END_TURN`.
+
+### `updateAiObservation(state: GameState, playerId: string, existing?: AiPlayerState): AiPlayerState`
+Updates the AI's fog-of-war memory based on what is currently visible from its owned planets and in-transit fleet destinations. Called by `turnEngine.resolveTurn` at the end of each AI turn so the next decision starts with fresh intel.
 
 ### `AiDifficulty`
 ```ts
-type AiDifficulty = 'easy' | 'normal'
+type AiDifficulty = 'easy' | 'normal' | 'hard'
 ```
-Scaffolding for future difficulty tuning. Both levels currently use the same logic inside `computeAiTurn`.
 
-## Strategy (priority order)
+---
 
-The AI evaluates strategies in order and takes the first viable action.
+## Difficulty Tiers
 
-### 1. Reinforce threatened home planet
-If the AI’s home planet has fewer ships than **any** incoming enemy fleet targeting it:
-- Find the nearest friendly planet with `shipCount > 5` (not already used as a source this turn).
-- Send `min(source.shipCount - 1, maxIncomingShips - home.shipCount)` ships (at least 1), keeping at least 1 ship on the source.
+| Behaviour | Easy | Normal | Hard |
+|---|---|---|---|
+| Fog-of-war memory | No — full state access | Yes | Yes |
+| Max fleets per turn | 1 | 3 | 5 |
+| Building decisions | No | Yes | Yes |
+| Production slider management | No | Yes | Yes |
+| Strategic phases | No | Yes | Yes |
+| Scout probes into unknown territory | No | No | Yes |
+| Home-planet targeting priority | No | Opportunistic | Deliberate |
+| Attack advantage required | 1.5× | 1.35× | 1.2× |
+| Gold reserve before building | — | 400 | 300 |
+| Garrison keep ratio | 50% | 40% | 35% |
 
-### 2. Attack weakest reachable enemy planet
-Score each enemy-owned planet: `planet.shipCount / distanceToNearestAiPlanet`, where distance uses `computeTurnsInTransit`. Lowest score = easiest target (tie-break: planet id).
+---
 
-For each target in score order:
-- Use the nearest AI-owned planet with `shipCount > 6` as source.
-- Send `floor(source.shipCount * 0.6)` ships (40% garrison), capped so at least 1 ship remains on the source.
-- Skip targets where the fleet cannot win combat (`shipCount > defender.shipCount × DEFENSE_BONUS`).
+## Fog-of-War Memory (`AiPlayerState`)
 
-If no enemy planet passes the combat check, fall through to expansion.
+Each AI player's brain state is stored in `GameState.aiStates[playerId]` so it persists across turns and serialises into `state_json` when the backend is added.
 
-### 3. Expand to nearest neutral planet
-When no good attack exists (all enemies are too strong for a winning fleet from any eligible source):
-- Among pairs of AI planet + neutral planet, pick the pair with minimum transit distance (`shipCount > 4` on source).
-- Send `floor(source.shipCount * 0.5)` ships, keeping at least 1 on the source.
+```ts
+interface AiPlanetMemory {
+  lastSeenRound: number;
+  lastSeenOwner: OwnerId;
+  lastSeenShipCount: number;
+  isExplored: boolean;
+}
 
-### 4. Do nothing
-Return `{ actions: [{ type: 'END_TURN' }], playerId }`.
+interface AiPlayerState {
+  planetMemory: Record<string, AiPlanetMemory>;
+  knownEnemyHomePlanetIds: string[];
+  strategicPhase: 'expand' | 'build' | 'strike' | 'defend';
+}
+```
 
-## Rules and guarantees
+**What the AI can see each round:**
+- All planets it owns (always fresh).
+- All planets within `effectiveRange(techLevel)` of any owned planet.
+- Destinations of its own in-transit fleets.
 
-| Rule | Behavior |
-|------|----------|
-| Garrison | Never sends all ships; send count is clamped to `source.shipCount - 1` |
-| One dispatch per source | Each planet may be the origin of at most one `SEND_FLEET` per AI turn (`usedSources` set) |
-| Distance | Transit scoring uses `computeTurnsInTransit`; fleet dispatch must also satisfy click-range via `effectiveRange(player.techLevel)` and `isInRange` (same cap as human `processSendFleet`) |
-| Randomness | **None** — same `GameState` + `playerId` always yields the same `TurnInput` |
-| Turn resolution | AI only returns `TurnInput`; `resolveTurn` in `turnEngine` applies actions |
+Planets outside this visibility retain stale memory. Enemy garrison estimates for stale planets add `2 ships × staleness_rounds` to the last-seen count.
+
+---
+
+## Strategic Phases
+
+Phases are recomputed dynamically each turn and stored in `aiState.strategicPhase`.
+
+| Phase | Trigger | Focus |
+|---|---|---|
+| `expand` | Tech < 3 or owned planets < 4 | Claim neutral planets, spider-web outward |
+| `build` | Decent territory, no clear force advantage | Fill building slots, adjust sliders, limited expansion |
+| `strike` | Knows enemy location and owns 20%+ more ships | Attack weakest enemy planet, priority on known home planet |
+| `defend` | Home planet threatened (incoming > 80% garrison) | Reinforce home from nearest friendly planet; overrides all |
+
+---
+
+## Decision Priority (Normal / Hard)
+
+Each turn the AI resolves actions in this order, stopping fleet dispatch when the per-difficulty budget is exhausted:
+
+1. **Economy first** — `BUILD` actions (A-C planets → factories; D-G → 1 factory then labs; H-P → labs only). Only spends above the gold reserve threshold.
+2. **Slider adjustments** — `SET_PRODUCTION_SLIDER` for owned planets with active factories. Interior planets: 25% troops / 75% gold. Frontier planets (enemies within 2× range): 50/50. Strike phase frontiers: 75% troops. Gold emergency (< 400 gold): 10% troops everywhere.
+3. **Defend home** — Send just enough ships from the nearest source to cover the largest incoming threat.
+4. **Strike enemy home planet** — (Strike phase only) Commit a large force when ships > estimated enemy × advantage factor.
+5. **Attack weakest known enemy** — Score enemies by `estimatedShipCount / distance`; attack when fleet has the advantage.
+6. **Expand to neutrals** — Explored neutrals first (known position + class), then unexplored; prefer closer + better class.
+7. **Scout** — (Hard only) Send 3-ship probes toward the nearest unexplored planet.
+
+---
+
+## Easy AI Strategy (unchanged from original)
+
+Full state access (no fog). Single fleet per turn. Three priorities:
+1. Reinforce threatened home planet.
+2. Attack weakest reachable enemy (score = `shipCount / distance`; only attack if 60% of source > defender × 1.5).
+3. Expand to nearest neutral.
+
+---
+
+## Building Strategy (Normal / Hard)
+
+| Planet Class | Building Mix |
+|---|---|
+| A–C | All factories (high gold and troop output) |
+| D–G | 1 factory first, then research labs |
+| H–P | Research labs only |
+
+Buildings are placed one per planet per turn to spread gold investment. The AI only builds if `gold − spent ≥ reserve + cost`.
+
+---
+
+## Rules and Guarantees
+
+| Rule | Behaviour |
+|---|---|
+| Garrison | Keeps `max(5, shipCount × ratio)` ships on each source |
+| One source per fleet | Each planet is used as a source at most once per turn (`usedSourceIds` set) |
+| Range enforcement | All fleet dispatches validated against `effectiveRange(techLevel)` via `isInRange` |
+| Randomness | None — same `GameState + playerId` always yields the same `TurnInput` |
+| Turn resolution | AI returns `TurnInput`; `resolveTurn` in `turnEngine` applies all actions |
+| Memory initialisation | `gameStore.startNewGame` calls `updateAiObservation` for each AI player so their first turn starts with home-area intel |
+
+---
+
+## Architecture Constraints
+- All AI logic lives in `aiEngine.ts` — no AI logic in UI or turn engine.
+- Uses the same `PlayerAction` / `TurnInput` types as human players.
+- `BUILD` and `SET_PRODUCTION_SLIDER` actions added to `PlayerAction` and handled in `turnEngine.resolveTurn`; human store flow remains store-direct for UI feedback.
+- Designed to run identically client-side (pass-and-play today) and server-side (async multiplayer, future).
+
+---
 
 ## AI Player Names
 
-At game creation, each AI player now receives a **single short first-name** (for example, `Aria`, `Dax`, `Quinn`) from a fixed name pool in `aiEngine.ts`.
+`generateAiName(rng, usedNames)` shuffles a fixed 50-name pool deterministically, returning the first name not already used (case-insensitive). Falls back to `AI {n}`. Seeded at `seed + 2` in the store.
 
-`generateAiName(rng, usedNames)` shuffles the pool deterministically with the provided RNG, then returns the first name that is not already in `usedNames` (case-insensitive check). The store tracks names as players are built, so AI names cannot duplicate:
+---
 
-- any human player name already assigned in the same game
-- any earlier AI name assigned in the same game
+## Future Work
+- Differentiate Easy further (deliberately worse economy decisions, occasional retreat).
+- Multi-wave coordinated attacks (Hard tier).
+- Adaptive threat response: evacuate planets that are about to fall.
+- Tech-level investment priority curves.
 
-If all names in the pool are exhausted, naming falls back to `AI {n}` where `n = usedNames.size + 1`.
-
-The game store seeds a dedicated `mulberry32(config.seed + 2)` instance for AI names so assignment stays deterministic per match seed and does not share state with spawn placement (`seed + 1`) or planet naming (map generator uses `config.seed` directly).
-
-Human player names now come from `GameConfig.playerSlots[index].name` in the setup form. At game creation, the store trims each human slot name and falls back to `Player N` where `N` is the 1-based index among human slots only.
-
-## New-game player slots
-
-`GameConfig.playerSlots` defines 2–8 participants before map generation:
-
-| Field | Meaning |
-|-------|---------|
-| `type: 'human' \| 'ai'` | Slot 0 must be human (local player); slots 1+ may toggle |
-| `name?: string` | Optional display name for human slots; trimmed at start with fallback naming if blank |
-| `difficulty?: AiDifficulty` | Only for AI slots; defaults to `'normal'` in the store |
-
-`HomeScreen` provides a slot builder: fixed “You · Human” on slot 0, Human/AI toggle and Easy/Normal difficulty chips on other slots, Add Player (max 8), Remove on the last slot (min 2).
-
-Each AI `Player` created in `buildPlayers` stores `difficulty` from its slot. `computeAiTurn` does not read `player.difficulty` yet — both levels use the same heuristic until difficulty tuning is implemented.
-
-## Architecture constraints
-- AI logic lives entirely in `aiEngine.ts` — no AI logic in UI or turn engine
-- Uses the same `PlayerAction` / `TurnInput` types as human players
-- Intended to be replaceable with stronger AI later (MCTS, server simulation, etc.)
-
-## Future work
-- Differentiate `easy` vs `normal` (and harder tiers) via `AiDifficulty`
-- Multiple fleet dispatches per turn when strategically sound
-- Tech-level and production-class scoring
-- Building and research decisions
+---
 
 ## Changelog
-- 2026-05-28: Task 75 — AI source/target selection now filters with `effectiveRange` + `isInRange` so `SEND_FLEET` actions never exceed the player's click-range cap (transit-turn distance alone is insufficient).
-- 2026-05-27: Task 33 — AI naming changed from `[Name] [Epithet]` to unique short first-names with human/AI collision avoidance and `AI {n}` fallback.
-- 2026-05-27: Task 32 — added optional human slot names (`PlayerSlot.name`) with trimmed `Player N` fallback in store.
-- 2026-05-27: 2–8 player slots in new-game setup; `Player.difficulty`; `GameConfig.playerSlots` replaces `aiCount`.
+- 2026-05-29: Full AI brain overhaul — fog-of-war memory (`AiPlayerState` in `GameState.aiStates`), three difficulty tiers (Easy/Normal/Hard), multi-fleet dispatch, `BUILD`/`SET_PRODUCTION_SLIDER` `PlayerAction` variants, strategic phases (expand/build/strike/defend), building strategy (A-C factories/D-G mixed/H-P labs), slider management, scout probes (Hard). `AiDifficulty` expanded to include `'hard'`; HomeScreen adds Hard chip.
+- 2026-05-28: Task 75 — AI source/target selection now filters with `effectiveRange` + `isInRange`.
+- 2026-05-27: Task 33 — AI naming changed to unique short first-names.
+- 2026-05-27: Task 32 — added optional human slot names.
+- 2026-05-27: 2–8 player slots; `Player.difficulty`; `GameConfig.playerSlots`.
 - 2026-05-27: Task 18 — random AI player names added.
-- 2026-05-27: Implemented `computeAiTurn`, three-priority heuristic, `AiDifficulty` scaffolding, deterministic guarantees.
-- 2026-05-27: File created. System not yet implemented.
+- 2026-05-27: Implemented `computeAiTurn`, three-priority heuristic, `AiDifficulty` scaffolding.
+- 2026-05-27: File created.

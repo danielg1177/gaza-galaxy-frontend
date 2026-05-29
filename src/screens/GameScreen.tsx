@@ -6,13 +6,14 @@ import {
   Animated as RNAnimated,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Slider from '@react-native-community/slider';
-import Svg, { Circle, G, Line, Text as SvgText } from 'react-native-svg';
+import Svg, { G, Line, Polygon, Text as SvgText } from 'react-native-svg';
 import Animated, {
   runOnJS,
   runOnUI,
@@ -34,7 +35,7 @@ import {
   effectiveSpeed,
   isInRange,
 } from '../game/movementEngine';
-import type { Fleet, OwnerId, Planet, Player } from '../game/types';
+import type { BuildingType, Fleet, OwnerId, Planet, Player, TurnEvent } from '../game/types';
 import {
   getLocalHumanPlayerId,
   type PendingFleet,
@@ -44,26 +45,420 @@ import {
 
 type GameNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Game'>;
 
-const CELL_SIZE = 11;
-const PLANET_HIT_RADIUS = CELL_SIZE * 2.5;
-// Visual sizes scaled from prior CELL_SIZE=18 baseline (~61% spacing)
+interface QueuedBuildOrder {
+  type: 'BUILD';
+  planetId: string;
+  buildingType: BuildingType;
+}
+
+interface BuildDisplayEntry {
+  planetId: string;
+  buildingType: BuildingType;
+  buildingIndex: number;
+}
+
+interface BuildDisplayGroup {
+  planetId: string;
+  buildingType: BuildingType;
+  buildingIndices: number[];
+}
+
+function isBuildOrder(order: PendingFleet | QueuedBuildOrder): order is QueuedBuildOrder {
+  return 'type' in order && order.type === 'BUILD';
+}
+
+function buildTypeLabel(buildingType: BuildingType): string {
+  return buildingType === 'factory' ? 'Factory' : 'Research Lab';
+}
+
+function buildTypePrefix(buildingType: BuildingType): string {
+  return buildingType === 'factory' ? '🏭' : '🔬';
+}
+
+type CombatTurnEvent = Extract<TurnEvent, { kind: 'combat' }>;
+type BuildCompleteTurnEvent = Extract<TurnEvent, { kind: 'build_complete' }>;
+
+interface GroupedBuildComplete {
+  planetName: string;
+  buildingType: BuildingType;
+  count: number;
+}
+
+function groupBuildCompleteEvents(events: BuildCompleteTurnEvent[]): GroupedBuildComplete[] {
+  const counts = new Map<string, GroupedBuildComplete>();
+  for (const event of events) {
+    const key = `${event.planetName}\0${event.buildingType}`;
+    const existing = counts.get(key);
+    if (existing !== undefined) {
+      existing.count += 1;
+    } else {
+      counts.set(key, {
+        planetName: event.planetName,
+        buildingType: event.buildingType,
+        count: 1,
+      });
+    }
+  }
+  return [...counts.values()];
+}
+
+function formatGroupedBuildComplete(item: GroupedBuildComplete): string {
+  const icon = item.buildingType === 'factory' ? '🏭' : '🔬';
+  return `${item.planetName}: ${icon} x${item.count}`;
+}
+
+function formatTurnEvent(
+  event: TurnEvent,
+  localHumanPlayerId?: string,
+  players?: Player[],
+  turnEvents?: TurnEvent[],
+): string {
+  switch (event.kind) {
+    case 'fleet_arrived':
+      return `${event.planetName}: ${event.shipCount} 🚀`;
+    case 'combat': {
+      const sides = getBattleReportSides(
+        event,
+        localHumanPlayerId,
+        players ?? [],
+        turnEvents ?? [],
+      );
+      const humanPlayer =
+        localHumanPlayerId !== undefined
+          ? players?.find((player) => player.id === localHumanPlayerId)
+          : undefined;
+      const humanWon =
+        humanPlayer !== undefined &&
+        ((event.attackerName === humanPlayer.name && event.attackerWon) ||
+          (event.defenderName === humanPlayer.name && !event.attackerWon));
+      const attackPhrase =
+        sides.leftLabel === 'You'
+          ? `You (${sides.leftTroops}) attacked ${sides.rightLabel} (${sides.rightTroops})`
+          : `${sides.leftLabel} (${sides.leftTroops}) attacked You (${sides.rightTroops})`;
+      const opponentName =
+        sides.leftLabel === 'You' ? sides.rightLabel : sides.leftLabel;
+      const remaining = getVictorRemainingShips(event);
+      const outcomePhrase = humanWon
+        ? `You Won (${remaining} remaining)`
+        : `${opponentName} Won (${remaining} remaining)`;
+      return `${event.planetName}: ${attackPhrase} — ${outcomePhrase}`;
+    }
+    case 'research_levelup': {
+      const isLocalHuman =
+        localHumanPlayerId !== undefined &&
+        players?.find((p) => p.id === localHumanPlayerId)?.name === event.playerName;
+      const nameLabel = isLocalHuman ? 'You' : event.playerName;
+      return `${nameLabel} reached Tech Level ${event.newLevel}`;
+    }
+    case 'build_complete': {
+      const icon = event.buildingType === 'factory' ? '🏭' : '🔬';
+      return `${event.planetName}: ${icon} x1`;
+    }
+  }
+}
+
+function getBattleReportDetails(
+  event: CombatTurnEvent,
+  localHumanPlayerId: string,
+  players: Player[],
+): {
+  opponent: string;
+  yourTroops: number;
+  theirTroops: number;
+  outcomeText: string;
+  outcomeIsVictory: boolean | null;
+} {
+  const humanPlayer = players.find((player) => player.id === localHumanPlayerId);
+  const isAttacker =
+    humanPlayer !== undefined && event.attackerName === humanPlayer.name;
+  const isDefender =
+    humanPlayer !== undefined && event.defenderName === humanPlayer.name;
+  const isHumanInvolved = isAttacker || isDefender;
+
+  const opponent = !isHumanInvolved
+    ? `${event.attackerName} vs ${event.defenderName}`
+    : isAttacker
+      ? event.defenderName
+      : event.attackerName;
+
+  const yourTroops = isAttacker
+    ? event.attackerShipsBefore
+    : isDefender
+      ? event.defenderShipsBefore
+      : event.attackerShipsBefore;
+  const theirTroops = isAttacker
+    ? event.defenderShipsBefore
+    : isDefender
+      ? event.attackerShipsBefore
+      : event.defenderShipsBefore;
+
+  if (!isHumanInvolved) {
+    return {
+      opponent,
+      yourTroops,
+      theirTroops,
+      outcomeText: event.attackerWon ? 'Attacker Won' : 'Defender Won',
+      outcomeIsVictory: null,
+    };
+  }
+
+  const humanWon =
+    (isAttacker && event.attackerWon) || (isDefender && !event.attackerWon);
+
+  return {
+    opponent,
+    yourTroops,
+    theirTroops,
+    outcomeText: humanWon ? 'Victory' : 'Defeat',
+    outcomeIsVictory: humanWon,
+  };
+}
+
+function isHumanInvolvedInCombat(
+  event: CombatTurnEvent,
+  humanPlayerName: string,
+): boolean {
+  return event.attackerName === humanPlayerName || event.defenderName === humanPlayerName;
+}
+
+/** Victor's post-battle garrison on the planet (never the loser's wiped tally). */
+function getVictorRemainingShips(event: CombatTurnEvent): number {
+  if (event.attackerWon) {
+    return event.attackerShipsBefore - event.attackerLost;
+  }
+  return event.defenderShipsBefore - event.defenderLost;
+}
+
+/**
+ * Defender landed on a neutral planet this turn (fleet_arrived garrison equals combat
+ * defender tally) — both players should see themselves as the attacker on the left.
+ */
+function isSimultaneousNeutralLanding(
+  event: CombatTurnEvent,
+  turnEvents: TurnEvent[],
+): boolean {
+  const landing = turnEvents.find(
+    (turnEvent): turnEvent is Extract<TurnEvent, { kind: 'fleet_arrived' }> =>
+      turnEvent.kind === 'fleet_arrived' &&
+      turnEvent.planetName === event.planetName &&
+      turnEvent.attackerName === event.defenderName,
+  );
+  return landing !== undefined && landing.shipCount === event.defenderShipsBefore;
+}
+
+function getBattleReportSides(
+  event: CombatTurnEvent,
+  localHumanPlayerId: string | undefined,
+  players: Player[],
+  turnEvents: TurnEvent[],
+): {
+  leftTroops: number;
+  leftLabel: string;
+  rightTroops: number;
+  rightLabel: string;
+} {
+  let leftName = event.attackerName;
+  let leftTroops = event.attackerShipsBefore;
+  let rightName = event.defenderName;
+  let rightTroops = event.defenderShipsBefore;
+
+  const humanPlayer =
+    localHumanPlayerId !== undefined
+      ? players.find((player) => player.id === localHumanPlayerId)
+      : undefined;
+
+  if (
+    humanPlayer !== undefined &&
+    event.defenderName === humanPlayer.name &&
+    isSimultaneousNeutralLanding(event, turnEvents)
+  ) {
+    leftName = event.defenderName;
+    leftTroops = event.defenderShipsBefore;
+    rightName = event.attackerName;
+    rightTroops = event.attackerShipsBefore;
+  }
+
+  const leftLabel =
+    humanPlayer !== undefined && leftName === humanPlayer.name ? 'You' : leftName;
+  const rightLabel =
+    humanPlayer !== undefined && rightName === humanPlayer.name ? 'You' : rightName;
+
+  return { leftTroops, leftLabel, rightTroops, rightLabel };
+}
+
+function isHumanHomePlanetConquestVictory(
+  event: CombatTurnEvent,
+  localHumanPlayerId: string | undefined,
+  players: Player[],
+): boolean {
+  if (event.isHomePlanetConquest !== true || !event.attackerWon) {
+    return false;
+  }
+  const humanPlayer =
+    localHumanPlayerId !== undefined
+      ? players.find((player) => player.id === localHumanPlayerId)
+      : undefined;
+  return humanPlayer !== undefined && event.attackerName === humanPlayer.name;
+}
+
+function BattleReportCard({
+  event,
+  localHumanPlayerId,
+  players,
+  planetClass,
+  turnEvents,
+  homePlanetConquestHighlight = false,
+}: {
+  event: CombatTurnEvent;
+  localHumanPlayerId: string | undefined;
+  players: Player[];
+  planetClass: string;
+  turnEvents: TurnEvent[];
+  homePlanetConquestHighlight?: boolean;
+}) {
+  const details =
+    localHumanPlayerId !== undefined
+      ? getBattleReportDetails(event, localHumanPlayerId, players)
+      : getBattleReportDetails(event, '', []);
+  const sides = getBattleReportSides(event, localHumanPlayerId, players, turnEvents);
+  const remainingToShow = getVictorRemainingShips(event);
+
+  return (
+    <View style={homePlanetConquestHighlight ? styles.battleReportCardWrapper : undefined}>
+      {homePlanetConquestHighlight && (
+        <Text style={styles.homePlanetConquestBanner}>You took their home planet!</Text>
+      )}
+      <View
+        style={[
+          styles.battleReportCard,
+          homePlanetConquestHighlight
+            ? styles.battleReportCardHomeConquest
+            : details.outcomeIsVictory === true
+              ? styles.battleReportCardVictory
+              : details.outcomeIsVictory === false
+                ? styles.battleReportCardDefeat
+                : undefined,
+        ]}
+      >
+      <View style={styles.battleReportHeader}>
+        <View style={styles.battleReportPlanetCircle}>
+          <Text style={styles.battleReportPlanetCircleText}>{planetClass}</Text>
+        </View>
+        <View style={styles.battleReportHeaderCenter}>
+          <Text style={styles.battleReportPlanetName}>{event.planetName}</Text>
+        </View>
+        <View style={styles.battleReportHeaderEnd}>
+          {details.outcomeIsVictory !== null && (
+            <Text
+              style={[
+                styles.battleReportOutcomeBadge,
+                details.outcomeIsVictory === true
+                  ? styles.battleReportOutcomeWin
+                  : styles.battleReportOutcomeLoss,
+              ]}
+            >
+              {details.outcomeIsVictory ? 'W' : 'L'}
+            </Text>
+          )}
+        </View>
+      </View>
+      <View style={styles.battleReportTroopsRow}>
+        <View style={styles.battleReportTroopColumn}>
+          <View style={styles.battleReportTroopCountRow}>
+            <Text style={styles.battleReportTroopCount}>{sides.leftTroops}</Text>
+            <Text style={styles.battleReportTroopIcon}>🚀</Text>
+          </View>
+          <Text
+            style={
+              sides.leftLabel === 'You'
+                ? styles.battleReportTroopLabelYou
+                : styles.battleReportTroopLabelOpponent
+            }
+          >
+            {sides.leftLabel}
+          </Text>
+        </View>
+        <View style={styles.battleReportVsColumn}>
+          <Text style={styles.battleReportVsText}>attacked</Text>
+        </View>
+        <View style={styles.battleReportTroopColumn}>
+          <View style={styles.battleReportTroopCountRow}>
+            <Text style={styles.battleReportTroopCount}>{sides.rightTroops}</Text>
+            <Text style={styles.battleReportTroopIcon}>🚀</Text>
+          </View>
+          <Text
+            style={
+              sides.rightLabel === 'You'
+                ? styles.battleReportTroopLabelYou
+                : styles.battleReportTroopLabelOpponent
+            }
+          >
+            {sides.rightLabel}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.battleReportRemainingRow}>
+        <Text
+          style={[
+            styles.battleReportRemainingText,
+            details.outcomeIsVictory === true
+              ? styles.battleReportRemainingVictory
+              : details.outcomeIsVictory === false
+                ? styles.battleReportRemainingDefeat
+                : styles.battleReportRemainingNeutral,
+          ]}
+        >
+          {remainingToShow} remaining
+        </Text>
+      </View>
+      </View>
+    </View>
+  );
+}
+
+const CELL_SIZE = 18;
+const PLANET_HIT_RADIUS = CELL_SIZE * 1.8;
+// Visual sizes scaled from prior CELL_SIZE=18 baseline
 const PLANET_SIZE = Math.round((14 / 18) * CELL_SIZE);
 const PLANET_SIZE_SELECTED = Math.round((16 / 18) * CELL_SIZE);
 const PLANET_NAME_LABEL_WIDTH = Math.round((48 / 18) * CELL_SIZE);
-const PLANET_NAME_LABEL_TOP = Math.round((-11 / 18) * CELL_SIZE);
-const HUMAN_COLOR = '#4a9eff';
-const NEUTRAL_COLOR = '#444466';
-const AI_COLORS = ['#ff4a4a', '#4aff7a', '#ff9e4a', '#c04aff'] as const;
+const PLANET_NAME_ABOVE_GAP = Math.max(1, Math.round((2 / 18) * CELL_SIZE));
+const PLANET_LABEL_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE));
+const PLANET_BATTLE_ICON_MARGIN = Math.max(1, Math.round((1 / 18) * CELL_SIZE));
+const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((9 / 18) * CELL_SIZE));
+const SHIP_COUNT_LABEL_MARGIN_TOP = Math.max(0, Math.round((2 / 18) * CELL_SIZE));
+const PLANET_BATTLE_ICON_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE));
+const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(1, Math.round((2 / 18) * CELL_SIZE));
+const FLEET_ARROW_HALF_LENGTH = Math.max(2, Math.round((5 / 18) * CELL_SIZE));
+const FLEET_ARROW_HALF_WIDTH = Math.max(2, Math.round((4 / 18) * CELL_SIZE));
+const FLEET_MARKER_FONT_SIZE = Math.max(2, Math.round((8 / 18) * CELL_SIZE));
+const FLEET_MARKER_TEXT_OFFSET_X = Math.max(1, Math.round((6 / 18) * CELL_SIZE));
+const FLEET_MARKER_TEXT_OFFSET_Y = Math.max(1, Math.round((4 / 18) * CELL_SIZE));
+// Small preset (20×20 cells) at ~55% of a ~390px-wide viewport after status bar
+const REFERENCE_VIEWPORT_WIDTH = 390;
+const SMALL_MAP_CELLS = 20;
+const DEFAULT_MAP_SCALE =
+  Math.round(
+    ((REFERENCE_VIEWPORT_WIDTH * 0.55) / (SMALL_MAP_CELLS * CELL_SIZE)) * 10,
+  ) / 10;
+const HOME_PLANET_SNAP_SCALE = 2.0;
+const MAP_VIEWPORT_PADDING = 150;
+const BG_COLOR = '#f5f0eb';
+const HUMAN_COLOR = '#2e5bcc';
+const HOME_PLANET_COLOR = '#c8a26b';
+const NEUTRAL_COLOR = '#7a7a96';
+const AI_COLORS = ['#cc3333', '#2a9048', '#d06820', '#8030c0'] as const;
 
 const COLORS = {
-  background: '#0a0a1a',
-  text: '#e0e0f0',
-  textMuted: '#8888aa',
-  accent: '#4a9eff',
-  panel: '#12122a',
-  border: '#2a2a4a',
-  victory: '#4aff7a',
-  defeat: '#ff4a4a',
+  background: '#f5f0eb',
+  text: '#1c1c2e',
+  textMuted: '#6a6880',
+  accent: '#4060c8',
+  accentDim: '#e2e8f8',
+  panel: '#faf7f4',
+  border: '#ccc4b8',
+  victory: '#276b40',
+  defeat: '#b83030',
 };
 
 function formatPlanetId(id: string): string {
@@ -82,16 +477,19 @@ function getPlayerColor(ownerId: OwnerId, humanPlayerId: string, players: Player
   return AI_COLORS[Math.max(0, aiIndex) % AI_COLORS.length];
 }
 
-function getPlanetColor(planet: Planet, humanPlayerId: string): string {
+function getPlanetColor(
+  planet: Planet,
+  humanPlayerId: string,
+  homePlanetId: string | undefined,
+): string {
   if (planet.owner === humanPlayerId) {
-    return '#27ae60'; // green — current player's own planet
+    if (homePlanetId !== undefined && planet.id === homePlanetId) {
+      return HOME_PLANET_COLOR;
+    }
+    return '#2e8a50';
   }
-  if (planet.owner === 'neutral') {
-    return '#2a2a4a'; // very dim — neutral, no detail known
-  }
-  // All other planets are enemy-owned; the fog layer zeroes their shipCount
-  // so they are visible only as gray blobs
-  return '#333355'; // gray — enemy planet, fogged
+  // All non-owned planets (neutral AND enemy) look the same — fog of war
+  return NEUTRAL_COLOR;
 }
 
 function getOwnerName(ownerId: OwnerId, players: Player[]): string {
@@ -135,7 +533,9 @@ function findPlanetAtMapCoords(
   mapX: number,
   mapY: number,
   planets: Planet[],
+  scale: number,
 ): Planet | undefined {
+  const hitRadius = Math.max(PLANET_SIZE / 2, PLANET_HIT_RADIUS / scale);
   let best: Planet | undefined;
   let bestDist = Infinity;
   for (const planet of planets) {
@@ -143,7 +543,7 @@ function findPlanetAtMapCoords(
     const dx = mapX - center.x;
     const dy = mapY - center.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist <= PLANET_HIT_RADIUS && dist < bestDist) {
+    if (dist <= hitRadius && dist < bestDist) {
       bestDist = dist;
       best = planet;
     }
@@ -195,16 +595,42 @@ function clampTranslation(
   viewH: number,
 ): { x: number; y: number } {
   'worklet';
-  const maxOffsetX = Math.max(0, mapW * currentScale - viewW);
-  const maxOffsetY = Math.max(0, mapH * currentScale - viewH);
-  const minX = -maxOffsetX;
-  const maxX = 0;
-  const minY = -maxOffsetY;
-  const maxY = 0;
+  const minX = Math.min(
+    -(mapW * currentScale - viewW) - MAP_VIEWPORT_PADDING,
+    MAP_VIEWPORT_PADDING,
+  );
+  const maxX = MAP_VIEWPORT_PADDING;
+  const minY = Math.min(
+    -(mapH * currentScale - viewH) - MAP_VIEWPORT_PADDING,
+    MAP_VIEWPORT_PADDING,
+  );
+  const maxY = MAP_VIEWPORT_PADDING;
   return {
     x: Math.min(maxX, Math.max(minX, tx)),
     y: Math.min(maxY, Math.max(minY, ty)),
   };
+}
+
+function snapToHomePlanet(
+  homePlanet: Planet,
+  viewportWidth: number,
+  viewportHeight: number,
+  mapPixelWidth: number,
+  mapPixelHeight: number,
+): { scale: number; translateX: number; translateY: number } {
+  const scale = HOME_PLANET_SNAP_SCALE;
+  const targetTx = viewportWidth / 2 - homePlanet.position.x * CELL_SIZE * scale;
+  const targetTy = viewportHeight / 2 - homePlanet.position.y * CELL_SIZE * scale;
+  const clamped = clampTranslation(
+    targetTx,
+    targetTy,
+    scale,
+    mapPixelWidth,
+    mapPixelHeight,
+    viewportWidth,
+    viewportHeight,
+  );
+  return { scale, translateX: clamped.x, translateY: clamped.y };
 }
 
 function PlanetNode({
@@ -214,6 +640,7 @@ function PlanetNode({
   isSelected,
   isDragOrigin,
   adjustedShipCount,
+  hadBattleThisTurn,
 }: {
   planet: Planet;
   color: string;
@@ -221,6 +648,7 @@ function PlanetNode({
   isSelected: boolean;
   isDragOrigin: boolean;
   adjustedShipCount: number;
+  hadBattleThisTurn: boolean;
 }) {
   const highlighted = isSelected || isDragOrigin;
   const pulse = useRef(new RNAnimated.Value(0)).current;
@@ -246,7 +674,7 @@ function PlanetNode({
 
   const borderColor = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(255,255,255,0.85)', 'rgba(255,255,255,0.15)'],
+    outputRange: ['rgba(70, 96, 200, 0.5)', 'rgba(0,0,0,0)'],
   });
 
   const touchStyle = [
@@ -257,10 +685,27 @@ function PlanetNode({
     },
   ];
 
+  const circleLeft = touchTargetHalfSize - size / 2;
+  const circleTop = touchTargetHalfSize - size / 2;
+  const nameTop = circleTop - PLANET_NAME_ABOVE_GAP - PLANET_LABEL_FONT_SIZE;
+  const circleFrame = {
+    position: 'absolute' as const,
+    left: circleLeft,
+    top: circleTop,
+    width: size,
+    height: size,
+    borderRadius: size / 2,
+    backgroundColor: color,
+  };
+
   const planetBody = (
     <>
       <Text
-        style={[styles.planetNameLabel, !isOwned && styles.planetNameLabelFogged]}
+        style={[
+          styles.planetNameLabel,
+          { top: nameTop },
+          !isOwned && styles.planetNameLabelFogged,
+        ]}
       >
         {planet.name}
       </Text>
@@ -268,12 +713,9 @@ function PlanetNode({
         <RNAnimated.View
           style={[
             styles.planetCircle,
+            circleFrame,
             {
-              width: size,
-              height: size,
-              borderRadius: size / 2,
-              backgroundColor: color,
-              borderWidth: 2,
+              borderWidth: PLANET_HIGHLIGHT_BORDER_WIDTH,
               borderColor,
             },
           ]}
@@ -286,12 +728,9 @@ function PlanetNode({
         <View
           style={[
             styles.planetCircle,
+            circleFrame,
             {
-              width: size,
-              height: size,
-              borderRadius: size / 2,
-              backgroundColor: color,
-              borderWidth: isDragOrigin ? 2 : 0,
+              borderWidth: isDragOrigin ? PLANET_HIGHLIGHT_BORDER_WIDTH : 0,
               borderColor: 'rgba(255,255,255,0.6)',
             },
           ]}
@@ -301,8 +740,28 @@ function PlanetNode({
           </Text>
         </View>
       )}
-      {isOwned && (
-        <Text style={styles.shipCountLabel}>{adjustedShipCount}</Text>
+      {isOwned && adjustedShipCount > 0 && (
+        <Text
+          style={[
+            styles.shipCountLabel,
+            { top: circleTop + size + SHIP_COUNT_LABEL_MARGIN_TOP },
+          ]}
+        >
+          {adjustedShipCount}
+        </Text>
+      )}
+      {hadBattleThisTurn && (
+        <Text
+          style={[
+            styles.planetBattleIcon,
+            {
+              left: circleLeft + size + PLANET_BATTLE_ICON_MARGIN,
+              top: touchTargetHalfSize - PLANET_BATTLE_ICON_FONT_SIZE / 2,
+            },
+          ]}
+        >
+          🔥
+        </Text>
       )}
     </>
   );
@@ -315,6 +774,28 @@ function PlanetNode({
 }
 
 const PENDING_DEPARTURE_OFFSET_PX = CELL_SIZE;
+
+function fleetArrowPolygonPoints(
+  cx: number,
+  cy: number,
+  towardX: number,
+  towardY: number,
+): string {
+  const dx = towardX - cx;
+  const dy = towardY - cy;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const ux = len < 0.001 ? 1 : dx / len;
+  const uy = len < 0.001 ? 0 : dy / len;
+  const tipX = cx + ux * FLEET_ARROW_HALF_LENGTH;
+  const tipY = cy + uy * FLEET_ARROW_HALF_LENGTH;
+  const baseX = cx - ux * FLEET_ARROW_HALF_LENGTH;
+  const baseY = cy - uy * FLEET_ARROW_HALF_LENGTH;
+  const leftX = baseX + uy * FLEET_ARROW_HALF_WIDTH;
+  const leftY = baseY - ux * FLEET_ARROW_HALF_WIDTH;
+  const rightX = baseX - uy * FLEET_ARROW_HALF_WIDTH;
+  const rightY = baseY + ux * FLEET_ARROW_HALF_WIDTH;
+  return `${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`;
+}
 
 function FleetLayer({
   fleets,
@@ -372,15 +853,20 @@ function FleetLayer({
               strokeDasharray="3 3"
               opacity={0.6}
             />
-            <Circle cx={x} cy={y} r={4} fill={color} />
-            <SvgText x={x + 6} y={y - 4} fill="white" fontSize={8}>
+            <Polygon points={fleetArrowPolygonPoints(x, y, destX, destY)} fill={color} />
+            <SvgText
+              x={x + FLEET_MARKER_TEXT_OFFSET_X}
+              y={y - FLEET_MARKER_TEXT_OFFSET_Y}
+              fill={color}
+              fontSize={FLEET_MARKER_FONT_SIZE}
+            >
               {fleet.shipCount}
             </SvgText>
           </G>
         );
       })}
       <G pointerEvents="none">
-        {queuedOrders.map((order, index) => {
+        {queuedOrders.filter((order) => !isBuildOrder(order)).map((order, index) => {
           const originPlanet = planets.find((p) => p.id === order.fromPlanetId);
           const destPlanet = planets.find((p) => p.id === order.toPlanetId);
           if (originPlanet === undefined || destPlanet === undefined) {
@@ -411,8 +897,17 @@ function FleetLayer({
                 strokeDasharray="3 3"
                 opacity={0.5}
               />
-              <Circle cx={dotX} cy={dotY} r={3} fill={HUMAN_COLOR} opacity={0.7} />
-              <SvgText x={dotX + 5} y={dotY - 4} fill="white" fontSize={8}>
+              <Polygon
+                points={fleetArrowPolygonPoints(dotX, dotY, destCenter.x, destCenter.y)}
+                fill={HUMAN_COLOR}
+                opacity={0.7}
+              />
+              <SvgText
+                x={dotX + FLEET_MARKER_TEXT_OFFSET_X}
+                y={dotY - FLEET_MARKER_TEXT_OFFSET_Y}
+                fill={HUMAN_COLOR}
+                fontSize={FLEET_MARKER_FONT_SIZE}
+              >
                 {order.shipCount}
               </SvgText>
             </G>
@@ -434,14 +929,27 @@ export default function GameScreen() {
   const setPendingFleet = useGameStore((s) => s.setPendingFleet);
   const confirmPendingFleet = useGameStore((s) => s.confirmPendingFleet);
   const cancelQueuedOrder = useGameStore((s) => s.cancelQueuedOrder);
+  const updateQueuedOrder = useGameStore((s) => s.updateQueuedOrder);
   const endTurn = useGameStore((s) => s.endTurn);
   const queueBuildOrder = useGameStore((s) => s.queueBuildOrder);
   const cancelBuildOrder = useGameStore((s) => s.cancelBuildOrder);
   const demolishBuilding = useGameStore((s) => s.demolishBuilding);
   const setProductionSlider = useGameStore((s) => s.setProductionSlider);
+  const activeGameId = useGameStore((s) => s.activeGameId);
   const showingLockScreen = useGameStore((s) => s.showingLockScreen);
   const dismissLockScreen = useGameStore((s) => s.dismissLockScreen);
+  const eliminatedPlayerPendingKnockout = useGameStore(
+    (s) => s.eliminatedPlayerPendingKnockout,
+  );
+  const acknowledgeKnockout = useGameStore((s) => s.acknowledgeKnockout);
   const resetGame = useGameStore((s) => s.resetGame);
+  const turnReport = useGameStore((s) => s.turnReport);
+  const playerBattleArchiveByPlayerId = useGameStore(
+    (s) => s.playerBattleArchiveByPlayerId,
+  );
+  const playerTurnReportByPlayerId = useGameStore(
+    (s) => s.playerTurnReportByPlayerId,
+  );
 
   const [dragOriginPlanetId, setDragOriginPlanetId] = useState<string | null>(null);
   const [measureDragOriginPlanetId, setMeasureDragOriginPlanetId] = useState<string | null>(
@@ -458,9 +966,18 @@ export default function GameScreen() {
   const [outOfRangeMessage, setOutOfRangeMessage] = useState(false);
   const [showResearchModal, setShowResearchModal] = useState(false);
   const [showQueuedModal, setShowQueuedModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showBattleReportModal, setShowBattleReportModal] = useState(false);
+  const [planetBattleReportName, setPlanetBattleReportName] = useState<string | null>(null);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [editingOrderIndex, setEditingOrderIndex] = useState<number | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const mapAreaRef = useRef<View>(null);
   const mapAreaWindowRef = useRef({ x: 0, y: 0 });
+  const initialSnapGameIdRef = useRef<string | null>(null);
+  const prevShowingLockScreenRef = useRef(showingLockScreen);
+  const prevShowingLockScreenBattleRef = useRef(showingLockScreen);
+  const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     if (gameState === null) {
@@ -506,10 +1023,133 @@ export default function GameScreen() {
     [gameState?.players, localHumanPlayerId],
   );
 
+  const humanCombatEvents = useMemo((): CombatTurnEvent[] => {
+    const archiveEvents = playerBattleArchiveByPlayerId[localHumanPlayerId ?? ''] ?? [];
+    return archiveEvents.filter(
+      (e): e is CombatTurnEvent => e.kind === 'combat',
+    );
+  }, [playerBattleArchiveByPlayerId, localHumanPlayerId]);
+
+  const sortedBattleReportCombatEvents = useMemo((): CombatTurnEvent[] => {
+    return [...humanCombatEvents].sort((a, b) => {
+      const aHome = a.isHomePlanetConquest === true ? 1 : 0;
+      const bHome = b.isHomePlanetConquest === true ? 1 : 0;
+      return bHome - aHome;
+    });
+  }, [humanCombatEvents]);
+
+  const playerTurnReport =
+    playerTurnReportByPlayerId[localHumanPlayerId ?? ''] ?? [];
+
+  const humanCombatByPlanetName = useMemo(() => {
+    const byName = new Map<string, CombatTurnEvent>();
+    for (const event of humanCombatEvents) {
+      byName.set(event.planetName, event);
+    }
+    return byName;
+  }, [humanCombatEvents]);
+
+  const battlePlanetNames = useMemo(
+    () => new Set(humanCombatEvents.map((event) => event.planetName)),
+    [humanCombatEvents],
+  );
+
+  const reportResearchEvents = useMemo(
+    () => playerTurnReport.filter((event) => event.kind === 'research_levelup'),
+    [playerTurnReport],
+  );
+  const reportTroopLandingEvents = useMemo(
+    () => playerTurnReport.filter((event) => event.kind === 'fleet_arrived'),
+    [playerTurnReport],
+  );
+  const reportBuiltEvents = useMemo(
+    () => playerTurnReport.filter((event) => event.kind === 'build_complete'),
+    [playerTurnReport],
+  );
+  const reportSections = useMemo(() => {
+    const sections: { label: string; events: TurnEvent[] }[] = [];
+    if (humanCombatEvents.length > 0) {
+      sections.push({ label: 'Battles', events: humanCombatEvents });
+    }
+    if (reportResearchEvents.length > 0) {
+      sections.push({ label: 'Research', events: reportResearchEvents });
+    }
+    if (reportTroopLandingEvents.length > 0) {
+      sections.push({ label: 'Troop Landings', events: reportTroopLandingEvents });
+    }
+    if (reportBuiltEvents.length > 0) {
+      sections.push({ label: 'Built', events: reportBuiltEvents });
+    }
+    return sections;
+  }, [humanCombatEvents, reportResearchEvents, reportTroopLandingEvents, reportBuiltEvents]);
+
+  useEffect(() => {
+    if (humanCombatEvents.length === 0) {
+      setShowBattleReportModal(false);
+    }
+  }, [humanCombatEvents]);
+
+  useEffect(() => {
+    if (
+      planetBattleReportName !== null &&
+      !battlePlanetNames.has(planetBattleReportName)
+    ) {
+      setPlanetBattleReportName(null);
+    }
+  }, [battlePlanetNames, planetBattleReportName]);
+
+  useEffect(() => {
+    const wasShowing = prevShowingLockScreenBattleRef.current;
+    prevShowingLockScreenBattleRef.current = showingLockScreen;
+    if (!wasShowing || showingLockScreen) {
+      return;
+    }
+    if (humanCombatEvents.length > 0) {
+      setShowBattleReportModal(true);
+    }
+  }, [showingLockScreen, humanCombatEvents]);
+
   const selectedPlanet = useMemo(
     () => gameState?.map.planets.find((p) => p.id === selectedPlanetId),
     [gameState?.map.planets, selectedPlanetId],
   );
+
+  const activePlanetBattleEvent =
+    planetBattleReportName !== null
+      ? humanCombatByPlanetName.get(planetBattleReportName)
+      : undefined;
+
+  const activePlanetBattleDetails =
+    activePlanetBattleEvent !== undefined &&
+    localHumanPlayerId !== undefined &&
+    gameState !== null
+      ? getBattleReportDetails(
+          activePlanetBattleEvent,
+          localHumanPlayerId,
+          gameState.players,
+        )
+      : null;
+
+  const showPlanetBattleAboveModal =
+    activePlanetBattleEvent !== undefined &&
+    selectedPlanet !== undefined &&
+    selectedPlanet.name === planetBattleReportName &&
+    selectedPlanet.owner === localHumanPlayerId &&
+    activePlanetBattleDetails?.outcomeIsVictory === true;
+
+  const showPlanetBattleOnly =
+    activePlanetBattleEvent !== undefined &&
+    planetBattleReportName !== null &&
+    activePlanetBattleDetails?.outcomeIsVictory === false;
+
+  const dismissPlanetBattleReport = useCallback(() => {
+    setPlanetBattleReportName(null);
+  }, []);
+
+  const dismissPlanetDetail = useCallback(() => {
+    selectPlanet(null);
+    setPlanetBattleReportName(null);
+  }, [selectPlanet]);
 
   const pendingOriginPlanet = useMemo(
     () => gameState?.map.planets.find((p) => p.id === pendingFleet?.fromPlanetId),
@@ -639,26 +1279,128 @@ export default function GameScreen() {
             ),
           );
 
+  const currentRound = gameState?.roundNumber ?? 0;
+
+  const buildDisplayEntries = useMemo((): BuildDisplayEntry[] => {
+    if (gameState === null || localHumanPlayerId === undefined) {
+      return [];
+    }
+    const entries: BuildDisplayEntry[] = [];
+    for (const planet of gameState.map.planets) {
+      if (planet.owner !== localHumanPlayerId) {
+        continue;
+      }
+      for (let buildingIndex = 0; buildingIndex < planet.buildings.length; buildingIndex++) {
+        const building = planet.buildings[buildingIndex];
+        if (building.builtOnRound === currentRound) {
+          entries.push({
+            planetId: planet.id,
+            buildingType: building.type,
+            buildingIndex,
+          });
+        }
+      }
+    }
+    return entries;
+  }, [gameState, localHumanPlayerId, currentRound]);
+
+  const buildDisplayGroups = useMemo((): BuildDisplayGroup[] => {
+    const groupMap = new Map<string, BuildDisplayGroup>();
+    for (const entry of buildDisplayEntries) {
+      const key = `${entry.planetId}:${entry.buildingType}`;
+      let group = groupMap.get(key);
+      if (group === undefined) {
+        group = {
+          planetId: entry.planetId,
+          buildingType: entry.buildingType,
+          buildingIndices: [],
+        };
+        groupMap.set(key, group);
+      }
+      group.buildingIndices.push(entry.buildingIndex);
+    }
+    return Array.from(groupMap.values());
+  }, [buildDisplayEntries]);
+
+  const queuedOrderCount = useMemo(() => {
+    const fleetCount = queuedOrders.filter((order) => !isBuildOrder(order)).length;
+    const buildsInQueue = queuedOrders.filter(isBuildOrder).length;
+    const buildCount =
+      buildsInQueue > 0 ? buildsInQueue : buildDisplayEntries.length;
+    return fleetCount + buildCount;
+  }, [queuedOrders, buildDisplayEntries]);
+
+  const queuedModalItems = useMemo(() => {
+    type ModalItem =
+      | { kind: 'fleet'; order: PendingFleet; queueIndex: number }
+      | { kind: 'build'; group: BuildDisplayGroup };
+
+    const items: ModalItem[] = [];
+    const addedGroupKeys = new Set<string>();
+    let buildEntryIndex = 0;
+
+    const addGroupForEntry = (entry: BuildDisplayEntry) => {
+      const key = `${entry.planetId}:${entry.buildingType}`;
+      if (addedGroupKeys.has(key)) {
+        return;
+      }
+      const group = buildDisplayGroups.find(
+        (g) => g.planetId === entry.planetId && g.buildingType === entry.buildingType,
+      );
+      if (group !== undefined) {
+        items.push({ kind: 'build', group });
+        addedGroupKeys.add(key);
+      }
+    };
+
+    for (let queueIndex = 0; queueIndex < queuedOrders.length; queueIndex++) {
+      const order = queuedOrders[queueIndex];
+      if (isBuildOrder(order)) {
+        const entry = buildDisplayEntries[buildEntryIndex];
+        if (entry !== undefined) {
+          addGroupForEntry(entry);
+          buildEntryIndex++;
+        }
+      } else {
+        items.push({ kind: 'fleet', order, queueIndex });
+      }
+    }
+
+    for (; buildEntryIndex < buildDisplayEntries.length; buildEntryIndex++) {
+      addGroupForEntry(buildDisplayEntries[buildEntryIndex]);
+    }
+
+    return items;
+  }, [queuedOrders, buildDisplayEntries, buildDisplayGroups]);
+
   const queuedShipsPerPlanet = useMemo(() => {
     const map: Record<string, number> = {};
     for (const order of queuedOrders) {
+      if (isBuildOrder(order)) {
+        continue;
+      }
       map[order.fromPlanetId] = (map[order.fromPlanetId] ?? 0) + order.shipCount;
     }
     return map;
   }, [queuedOrders]);
 
   const shipsAlreadyQueued = queuedOrders
-    .filter((o) => o.fromPlanetId === pendingFleet?.fromPlanetId)
+    .filter(
+      (o, i) =>
+        !isBuildOrder(o) &&
+        o.fromPlanetId === pendingFleet?.fromPlanetId &&
+        i !== editingOrderIndex,
+    )
     .reduce((sum, o) => sum + o.shipCount, 0);
   const modalMaxShips =
     pendingOriginPlanet !== undefined
-      ? Math.max(1, pendingOriginPlanet.shipCount - 1 - shipsAlreadyQueued)
-      : 1;
+      ? Math.max(0, pendingOriginPlanet.shipCount - shipsAlreadyQueued)
+      : 0;
 
-  const scale = useSharedValue(1);
+  const scale = useSharedValue(DEFAULT_MAP_SCALE);
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
-  const savedScale = useSharedValue(1);
+  const savedScale = useSharedValue(DEFAULT_MAP_SCALE);
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
   const pinchFocalX = useSharedValue(0);
@@ -720,13 +1462,92 @@ export default function GameScreen() {
     }
     mapWidthSV.value = gameState.map.width * CELL_SIZE;
     mapHeightSV.value = gameState.map.height * CELL_SIZE;
-    scale.value = 1;
-    translateX.value = 0;
-    translateY.value = 0;
-    savedScale.value = 1;
-    savedTranslateX.value = 0;
-    savedTranslateY.value = 0;
   }, [gameState?.map.width, gameState?.map.height]);
+
+  const animateMapToSnap = useCallback(
+    (homePlanet: Planet) => {
+      if (gameState === null) {
+        return;
+      }
+      const viewW = viewportWidth.value;
+      const viewH = viewportHeight.value;
+      if (viewW <= 0 || viewH <= 0) {
+        return;
+      }
+      const mapPixelWidth = gameState.map.width * CELL_SIZE;
+      const mapPixelHeight = gameState.map.height * CELL_SIZE;
+      const { scale: targetScale, translateX: targetTx, translateY: targetTy } =
+        snapToHomePlanet(homePlanet, viewW, viewH, mapPixelWidth, mapPixelHeight);
+      runOnUI(
+        (snapScale: number, snapTx: number, snapTy: number) => {
+          'worklet';
+          scale.value = snapScale;
+          translateX.value = snapTx;
+          translateY.value = snapTy;
+          savedScale.value = snapScale;
+          savedTranslateX.value = snapTx;
+          savedTranslateY.value = snapTy;
+        },
+      )(targetScale, targetTx, targetTy);
+    },
+    [gameState, scale, translateX, translateY, savedScale, savedTranslateX, savedTranslateY, viewportWidth, viewportHeight],
+  );
+
+  const snapToLocalHumanHomePlanet = useCallback(() => {
+    if (gameState === null || localHumanPlayerId === undefined) {
+      return;
+    }
+    const player = gameState.players.find((p) => p.id === localHumanPlayerId);
+    if (player === undefined) {
+      return;
+    }
+    const homePlanet = gameState.map.planets.find((p) => p.id === player.homePlanetId);
+    if (homePlanet === undefined) {
+      return;
+    }
+    animateMapToSnap(homePlanet);
+  }, [animateMapToSnap, gameState, localHumanPlayerId]);
+
+  useEffect(() => {
+    if (
+      gameState === null ||
+      localHumanPlayerId === undefined ||
+      activeGameId === null ||
+      mapViewportSize.width <= 0 ||
+      mapViewportSize.height <= 0
+    ) {
+      return;
+    }
+    if (initialSnapGameIdRef.current === activeGameId) {
+      return;
+    }
+    initialSnapGameIdRef.current = activeGameId;
+    snapToLocalHumanHomePlanet();
+  }, [
+    activeGameId,
+    gameState,
+    localHumanPlayerId,
+    mapViewportSize.height,
+    mapViewportSize.width,
+    snapToLocalHumanHomePlanet,
+  ]);
+
+  useEffect(() => {
+    const wasShowing = prevShowingLockScreenRef.current;
+    prevShowingLockScreenRef.current = showingLockScreen;
+    if (!wasShowing || showingLockScreen) {
+      return;
+    }
+    if (mapViewportSize.width <= 0 || mapViewportSize.height <= 0) {
+      return;
+    }
+    snapToLocalHumanHomePlanet();
+  }, [
+    mapViewportSize.height,
+    mapViewportSize.width,
+    showingLockScreen,
+    snapToLocalHumanHomePlanet,
+  ]);
 
   const pinch = Gesture.Pinch()
     .onStart((event) => {
@@ -847,7 +1668,12 @@ export default function GameScreen() {
         return;
       }
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
-      const planet = findPlanetAtMapCoords(mapPoint.x, mapPoint.y, gameState.map.planets);
+      const planet = findPlanetAtMapCoords(
+        mapPoint.x,
+        mapPoint.y,
+        gameState.map.planets,
+        s,
+      );
       if (planet === undefined || planet.owner !== localHumanPlayerId) {
         fleetDragOriginPlanetRef.current = null;
         return;
@@ -866,6 +1692,8 @@ export default function GameScreen() {
 
   const handleFleetPanUpdate = useCallback(
     (
+      startX: number,
+      startY: number,
       localX: number,
       localY: number,
       absoluteX: number,
@@ -876,7 +1704,7 @@ export default function GameScreen() {
     ) => {
       if (!fleetDragActivatedRef.current) {
         fleetDragActivatedRef.current = true;
-        handleDragStart(localX, localY, s, tx, ty);
+        handleDragStart(startX, startY, s, tx, ty);
       }
       setDragFingerLocal(absoluteToMapLocal(absoluteX, absoluteY));
       const originPlanet = fleetDragOriginPlanetRef.current;
@@ -894,7 +1722,12 @@ export default function GameScreen() {
         return;
       }
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
-      const planet = findPlanetAtMapCoords(mapPoint.x, mapPoint.y, gameState.map.planets);
+      const planet = findPlanetAtMapCoords(
+        mapPoint.x,
+        mapPoint.y,
+        gameState.map.planets,
+        s,
+      );
       if (planet === undefined || planet.owner === localHumanPlayerId) {
         measureOriginPlanetRef.current = null;
         return;
@@ -934,6 +1767,8 @@ export default function GameScreen() {
 
   const handleMeasurePanUpdate = useCallback(
     (
+      startX: number,
+      startY: number,
       localX: number,
       localY: number,
       absoluteX: number,
@@ -944,7 +1779,7 @@ export default function GameScreen() {
     ) => {
       if (!measureDragActivatedRef.current) {
         measureDragActivatedRef.current = true;
-        handleMeasureDragStart(localX, localY, s, tx, ty);
+        handleMeasureDragStart(startX, startY, s, tx, ty);
       }
       handleMeasureDragUpdate(localX, localY, absoluteX, absoluteY, s, tx, ty);
     },
@@ -985,12 +1820,27 @@ export default function GameScreen() {
         mapPoint.x,
         mapPoint.y,
         gameState.map.planets,
+        s,
       );
 
       const fromPlanetId = dragOriginPlanetId;
       cancelDrag();
 
       if (destPlanet === undefined || destPlanet.id === fromPlanetId) {
+        const ordersFromPlanet = queuedOrders
+          .map((o, i) => ({ order: o, index: i }))
+          .filter(({ order }) => !isBuildOrder(order) && order.fromPlanetId === fromPlanetId);
+        if (ordersFromPlanet.length === 1) {
+          const { order: existingOrder, index: orderIdx } = ordersFromPlanet[0];
+          setEditingOrderIndex(orderIdx);
+          setPendingFleet({
+            fromPlanetId: existingOrder.fromPlanetId,
+            toPlanetId: existingOrder.toPlanetId,
+            shipCount: existingOrder.shipCount,
+          });
+        } else if (ordersFromPlanet.length > 1) {
+          setShowQueuedModal(true);
+        }
         return;
       }
 
@@ -1000,11 +1850,27 @@ export default function GameScreen() {
         return;
       }
 
-      setPendingFleet({
-        fromPlanetId,
-        toPlanetId: destPlanet.id,
-        shipCount: 1,
-      });
+      const existingOrderIdx = queuedOrders.findIndex(
+        (o) =>
+          !isBuildOrder(o) &&
+          o.fromPlanetId === fromPlanetId &&
+          o.toPlanetId === destPlanet.id,
+      );
+      if (existingOrderIdx !== -1) {
+        const existingOrder = queuedOrders[existingOrderIdx];
+        setEditingOrderIndex(existingOrderIdx);
+        setPendingFleet({
+          fromPlanetId,
+          toPlanetId: destPlanet.id,
+          shipCount: existingOrder.shipCount,
+        });
+      } else {
+        setPendingFleet({
+          fromPlanetId,
+          toPlanetId: destPlanet.id,
+          shipCount: 1,
+        });
+      }
     },
     [
       absoluteToMapLocal,
@@ -1012,6 +1878,8 @@ export default function GameScreen() {
       dragOriginPlanetId,
       gameState,
       humanPlayer,
+      queuedOrders,
+      setEditingOrderIndex,
       setPendingFleet,
     ],
   );
@@ -1032,13 +1900,35 @@ export default function GameScreen() {
         mapPoint.x,
         mapPoint.y,
         record.state.map.planets,
+        s,
       );
-      if (planet === undefined || planet.owner !== freshHumanId) {
+      if (planet === undefined) {
+        return;
+      }
+
+      const combat = humanCombatByPlanetName.get(planet.name);
+
+      if (combat !== undefined) {
+        const details = getBattleReportDetails(combat, freshHumanId, record.state.players);
+        if (details.outcomeIsVictory === false) {
+          store.selectPlanet(null);
+          setPlanetBattleReportName(planet.name);
+          return;
+        }
+        if (planet.owner === freshHumanId) {
+          store.selectPlanet(planet.id);
+          setPlanetBattleReportName(planet.name);
+          return;
+        }
+      }
+
+      if (planet.owner !== freshHumanId) {
         return;
       }
       store.selectPlanet(planet.id);
+      setPlanetBattleReportName(null);
     },
-    [],
+    [humanCombatByPlanetName, setPlanetBattleReportName],
   );
 
   const planetTap = Gesture.Tap()
@@ -1057,6 +1947,8 @@ export default function GameScreen() {
     .minDistance(10)
     .onUpdate((event) => {
       runOnJS(handleFleetPanUpdate)(
+        event.x - event.translationX,
+        event.y - event.translationY,
         event.x,
         event.y,
         event.absoluteX,
@@ -1083,6 +1975,8 @@ export default function GameScreen() {
     .minDistance(10)
     .onUpdate((event) => {
       runOnJS(handleMeasurePanUpdate)(
+        event.x - event.translationX,
+        event.y - event.translationY,
         event.x,
         event.y,
         event.absoluteX,
@@ -1103,9 +1997,32 @@ export default function GameScreen() {
   const mapGesture = Gesture.Simultaneous(composed, planetFleet, measureDrag);
 
   const handleConfirmFleet = () => {
-    confirmPendingFleet();
+    if (pendingFleet?.shipCount === 0) {
+      if (editingOrderIndex !== null) {
+        cancelQueuedOrder(editingOrderIndex);
+      }
+      setPendingFleet(null);
+      setEditingOrderIndex(null);
+      setDragOriginPlanetId(null);
+      selectPlanet(null);
+      return;
+    }
+    if (editingOrderIndex !== null && pendingFleet !== null) {
+      updateQueuedOrder(editingOrderIndex, pendingFleet.shipCount);
+      setPendingFleet(null);
+      setEditingOrderIndex(null);
+    } else {
+      confirmPendingFleet();
+    }
     selectPlanet(null);
   };
+
+  const handleCloseBattleReport = useCallback(() => {
+    if (eliminatedPlayerPendingKnockout) {
+      acknowledgeKnockout();
+    }
+    setShowBattleReportModal(false);
+  }, [eliminatedPlayerPendingKnockout, acknowledgeKnockout]);
 
   const handleNewGame = () => {
     resetGame();
@@ -1158,8 +2075,15 @@ export default function GameScreen() {
   const mapPixelWidth = map.width * CELL_SIZE;
   const mapPixelHeight = map.height * CELL_SIZE;
   const isHumanTurn = status === 'active' && currentPlayerId === humanPlayer.id;
+  const isKnockoutTurn = eliminatedPlayerPendingKnockout && isHumanTurn;
   const humanWon = status === 'finished' && winnerId === humanPlayer.id;
-  const humanLost = status === 'finished' && winnerId !== null && winnerId !== humanPlayer.id;
+  const winnerPlayer =
+    winnerId !== null ? players.find((p) => p.id === winnerId) : undefined;
+
+  const selectedPlanetFillColor =
+    selectedPlanet !== undefined
+      ? getPlanetColor(selectedPlanet, localHumanPlayerId, humanPlayer.homePlanetId)
+      : '#2e8a50';
 
   const dragOriginPlanet =
     dragOriginPlanetId !== null
@@ -1195,12 +2119,79 @@ export default function GameScreen() {
         </Text>
       </View>
 
+      {isHumanTurn && status === 'active' && !isKnockoutTurn && (
+        <>
+          <Pressable
+            style={[styles.headerMenuTrigger, { top: insets.top + 8 }]}
+            onPress={() => setShowHeaderMenu((prev) => !prev)}
+            hitSlop={8}
+          >
+            <Text style={styles.headerMenuTriggerText}>⋮</Text>
+          </Pressable>
+          {showHeaderMenu && (
+            <>
+              <Pressable
+                style={styles.headerMenuBackdrop}
+                onPress={() => setShowHeaderMenu(false)}
+              />
+              <View style={[styles.headerMenuPanel, { top: insets.top + 8 + 36 }]}>
+                <Pressable
+                  style={styles.headerMenuRow}
+                  onPress={() => {
+                    setShowHeaderMenu(false);
+                    setShowQueuedModal(true);
+                  }}
+                >
+                  <Text style={styles.headerMenuRowText}>Queued</Text>
+                  <View style={styles.headerMenuBadge}>
+                    <Text style={styles.headerMenuBadgeText}>{queuedOrderCount}</Text>
+                  </View>
+                </Pressable>
+                <Pressable
+                  style={styles.headerMenuRow}
+                  onPress={() => {
+                    setShowHeaderMenu(false);
+                    setShowResearchModal(true);
+                  }}
+                >
+                  <Text style={styles.headerMenuRowText}>R&D</Text>
+                </Pressable>
+                {humanCombatEvents.length > 0 && (
+                  <Pressable
+                    style={styles.headerMenuRow}
+                    onPress={() => {
+                      setShowHeaderMenu(false);
+                      setShowBattleReportModal(true);
+                    }}
+                  >
+                    <Text style={styles.headerMenuRowText}>Battles</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={styles.headerMenuRow}
+                  onPress={() => {
+                    setShowHeaderMenu(false);
+                    setShowReportModal(true);
+                  }}
+                >
+                  <Text style={styles.headerMenuRowText}>Report</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </>
+      )}
+
       <View
         ref={mapAreaRef}
         style={styles.mapArea}
         onLayout={(e) => {
-          viewportWidth.value = e.nativeEvent.layout.width;
-          viewportHeight.value = e.nativeEvent.layout.height;
+          const { width, height } = e.nativeEvent.layout;
+          viewportWidth.value = width;
+          viewportHeight.value = height;
+          setMapViewportSize((prev) =>
+            prev.width === width && prev.height === height ? prev : { width, height },
+          );
           measureMapArea();
         }}
       >
@@ -1232,7 +2223,7 @@ export default function GameScreen() {
                 <PlanetNode
                   key={planet.id}
                   planet={planet}
-                  color={getPlanetColor(planet, localHumanPlayerId)}
+                  color={getPlanetColor(planet, localHumanPlayerId, humanPlayer.homePlanetId)}
                   isOwned={planet.owner === localHumanPlayerId}
                   isSelected={planet.id === selectedPlanetId}
                   isDragOrigin={planet.id === dragOriginPlanetId}
@@ -1240,6 +2231,7 @@ export default function GameScreen() {
                     0,
                     planet.shipCount - (queuedShipsPerPlanet[planet.id] ?? 0),
                   )}
+                  hadBattleThisTurn={battlePlanetNames.has(planet.name)}
                 />
               ))}
               <FleetLayer
@@ -1260,15 +2252,14 @@ export default function GameScreen() {
         visible={pendingFleet !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setPendingFleet(null)}
+        onRequestClose={() => { setPendingFleet(null); setEditingOrderIndex(null); }}
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Send Fleet</Text>
+            <Text style={styles.modalTitle}>{editingOrderIndex !== null ? 'Edit Fleet' : 'Send Fleet'}</Text>
             {pendingOriginPlanet !== undefined && pendingDestPlanet !== undefined && (
               <Text style={styles.modalRoute}>
-                {formatPlanetId(pendingOriginPlanet.id)} →{' '}
-                {formatPlanetId(pendingDestPlanet.id)}
+                {pendingOriginPlanet.name} → {pendingDestPlanet.name}
               </Text>
             )}
             {pendingTransitInfo !== null && (
@@ -1287,10 +2278,10 @@ export default function GameScreen() {
                     pendingFleet !== null &&
                     setPendingFleet({
                       ...pendingFleet,
-                      shipCount: Math.max(1, pendingFleet.shipCount - 1),
+                      shipCount: Math.max(0, pendingFleet.shipCount - 1),
                     })
                   }
-                  disabled={pendingFleet === null || pendingFleet.shipCount <= 1}
+                  disabled={pendingFleet === null || pendingFleet.shipCount <= 0}
                 >
                   <Text style={styles.stepperBtnText}>−</Text>
                 </Pressable>
@@ -1316,12 +2307,14 @@ export default function GameScreen() {
             <View style={styles.modalActions}>
               <Pressable
                 style={[styles.modalBtn, styles.modalBtnSecondary]}
-                onPress={() => setPendingFleet(null)}
+                onPress={() => { setPendingFleet(null); setEditingOrderIndex(null); }}
               >
                 <Text style={styles.modalBtnSecondaryText}>Cancel</Text>
               </Pressable>
               <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleConfirmFleet}>
-                <Text style={styles.primaryButtonText}>Confirm</Text>
+                <Text style={styles.primaryButtonText}>
+                  {pendingFleet?.shipCount === 0 ? 'Cancel Order' : 'Confirm'}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -1334,18 +2327,32 @@ export default function GameScreen() {
         }
         transparent
         animationType="fade"
-        onRequestClose={() => selectPlanet(null)}
+        onRequestClose={dismissPlanetDetail}
       >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => selectPlanet(null)}
-        >
-          <Pressable style={styles.planetDetailCard} onPress={() => {}}>
+        <Pressable style={styles.modalBackdrop} onPress={dismissPlanetDetail}>
+          <Pressable style={styles.planetModalStack} onPress={() => {}}>
+            {showPlanetBattleAboveModal &&
+              activePlanetBattleEvent !== undefined &&
+              gameState !== null && (
+                <View style={styles.planetBattleReportAbove}>
+                  <BattleReportCard
+                    event={activePlanetBattleEvent}
+                    localHumanPlayerId={localHumanPlayerId}
+                    players={gameState.players}
+                    turnEvents={turnReport}
+                    planetClass={
+                      gameState.map.planets.find((p) => p.name === activePlanetBattleEvent.planetName)
+                        ?.class ?? ''
+                    }
+                  />
+                </View>
+              )}
+            <Pressable style={styles.planetDetailCard} onPress={() => {}}>
             <View style={styles.planetDetailHeader}>
               <View style={styles.planetDetailHeaderSpacer} />
               <Text style={styles.planetDetailName}>{selectedPlanet?.name}</Text>
               <Pressable
-                onPress={() => selectPlanet(null)}
+                onPress={dismissPlanetDetail}
                 hitSlop={12}
                 style={styles.planetDetailHeaderClose}
               >
@@ -1354,7 +2361,9 @@ export default function GameScreen() {
             </View>
 
             <View style={styles.planetInfoRow}>
-              <View style={styles.planetClassTile}>
+              <View
+                style={[styles.planetClassTile, { backgroundColor: selectedPlanetFillColor }]}
+              >
                 <Text style={styles.planetClassTileText}>{selectedPlanet?.class}</Text>
               </View>
               <View style={styles.troopsSummary}>
@@ -1458,6 +2467,37 @@ export default function GameScreen() {
               </View>
             )}
           </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showPlanetBattleOnly}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissPlanetBattleReport}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={dismissPlanetBattleReport}>
+          <Pressable style={styles.planetBattleOnlyCard} onPress={() => {}}>
+            {activePlanetBattleEvent !== undefined && gameState !== null && (
+              <BattleReportCard
+                event={activePlanetBattleEvent}
+                localHumanPlayerId={localHumanPlayerId}
+                players={gameState.players}
+                turnEvents={turnReport}
+                planetClass={
+                  gameState.map.planets.find((p) => p.name === activePlanetBattleEvent.planetName)
+                    ?.class ?? ''
+                }
+              />
+            )}
+            <Pressable
+              style={[styles.primaryButton, styles.battleReportCloseButton]}
+              onPress={dismissPlanetBattleReport}
+            >
+              <Text style={styles.primaryButtonText}>Close</Text>
+            </Pressable>
+          </Pressable>
         </Pressable>
       </Modal>
 
@@ -1513,23 +2553,56 @@ export default function GameScreen() {
                 <Text style={styles.planetDetailClose}>✕</Text>
               </Pressable>
             </View>
-            {queuedOrders.length === 0 ? (
+            {queuedModalItems.length === 0 ? (
               <Text style={styles.queuedEmptyText}>No orders queued</Text>
             ) : (
-              queuedOrders.map((order, index) => {
-                const originPlanet = map.planets.find((p) => p.id === order.fromPlanetId);
-                const destPlanet = map.planets.find((p) => p.id === order.toPlanetId);
-                const originLabel = originPlanet?.name ?? formatPlanetId(order.fromPlanetId);
-                const destLabel = destPlanet?.name ?? formatPlanetId(order.toPlanetId);
+              queuedModalItems.map((item, index) => {
+                if (item.kind === 'fleet') {
+                  const { order, queueIndex } = item;
+                  const originPlanet = map.planets.find((p) => p.id === order.fromPlanetId);
+                  const destPlanet = map.planets.find((p) => p.id === order.toPlanetId);
+                  const originLabel = originPlanet?.name ?? formatPlanetId(order.fromPlanetId);
+                  const destLabel = destPlanet?.name ?? formatPlanetId(order.toPlanetId);
+                  return (
+                    <View
+                      key={`fleet-${order.fromPlanetId}-${order.toPlanetId}-${queueIndex}`}
+                      style={styles.queuedModalRow}
+                    >
+                      <Text style={styles.queuedModalText} numberOfLines={1}>
+                        {originLabel} → {destLabel} · {order.shipCount}
+                      </Text>
+                      <Pressable onPress={() => cancelQueuedOrder(queueIndex)} hitSlop={8}>
+                        <Text style={styles.queueOverlayCancelText}>✕</Text>
+                      </Pressable>
+                    </View>
+                  );
+                }
+
+                const { group } = item;
+                const planet = map.planets.find((p) => p.id === group.planetId);
+                const planetLabel = planet?.name ?? formatPlanetId(group.planetId);
+                const typeLabel = buildTypeLabel(group.buildingType);
+                const count = group.buildingIndices.length;
+                const buildLabel =
+                  count > 1
+                    ? `${buildTypePrefix(group.buildingType)} ${planetLabel} — ${count}× ${typeLabel}`
+                    : `${buildTypePrefix(group.buildingType)} ${planetLabel} — ${typeLabel}`;
                 return (
                   <View
-                    key={`${order.fromPlanetId}-${order.toPlanetId}-${index}`}
+                    key={`build-${group.planetId}-${group.buildingType}-${index}`}
                     style={styles.queuedModalRow}
                   >
                     <Text style={styles.queuedModalText} numberOfLines={1}>
-                      {originLabel} → {destLabel} · {order.shipCount}
+                      {buildLabel}
                     </Text>
-                    <Pressable onPress={() => cancelQueuedOrder(index)} hitSlop={8}>
+                    <Pressable
+                      onPress={() => {
+                        [...group.buildingIndices]
+                          .sort((a, b) => b - a)
+                          .forEach((idx) => cancelBuildOrder(group.planetId, idx));
+                      }}
+                      hitSlop={8}
+                    >
                       <Text style={styles.queueOverlayCancelText}>✕</Text>
                     </Pressable>
                   </View>
@@ -1540,42 +2613,162 @@ export default function GameScreen() {
         </Pressable>
       </Modal>
 
-      {status === 'finished' && (
-        <View style={styles.gameOverOverlay}>
-          <Text style={[styles.banner, humanWon ? styles.bannerVictory : styles.bannerDefeat]}>
-            {humanWon ? 'Victory' : humanLost ? 'Defeat' : 'Game Over'}
-          </Text>
-          <Pressable style={styles.primaryButton} onPress={handleNewGame}>
-            <Text style={styles.primaryButtonText}>New Game</Text>
+      <Modal
+        visible={showReportModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowReportModal(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowReportModal(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <View style={styles.researchHeader}>
+              <Text style={styles.modalTitle}>Turn Report</Text>
+              <Pressable
+                onPress={() => setShowReportModal(false)}
+                hitSlop={12}
+                style={styles.researchCloseButton}
+              >
+                <Text style={styles.planetDetailClose}>✕</Text>
+              </Pressable>
+            </View>
+            {reportSections.length === 0 ? (
+              <Text style={styles.queuedEmptyText}>Nothing to report this turn.</Text>
+            ) : (
+              <ScrollView style={styles.reportModalScroll} nestedScrollEnabled>
+                {reportSections.map((section, sectionIndex) => (
+                  <View key={section.label}>
+                    {sectionIndex > 0 && <View style={styles.reportSectionDivider} />}
+                    <Text
+                      style={[
+                        styles.reportSectionHeader,
+                        sectionIndex === 0 && styles.reportSectionHeaderFirst,
+                      ]}
+                    >
+                      {section.label}
+                    </Text>
+                    {section.label === 'Built'
+                      ? groupBuildCompleteEvents(
+                          section.events.filter(
+                            (event): event is BuildCompleteTurnEvent =>
+                              event.kind === 'build_complete',
+                          ),
+                        ).map((item, index) => (
+                          <Text
+                            key={`${section.label}-${item.planetName}-${item.buildingType}-${index}`}
+                            style={styles.reportModalLine}
+                          >
+                            {formatGroupedBuildComplete(item)}
+                          </Text>
+                        ))
+                      : section.events.map((event, index) => (
+                          <Text
+                            key={`${section.label}-${event.kind}-${index}`}
+                            style={styles.reportModalLine}
+                          >
+                            {formatTurnEvent(
+                              event,
+                              localHumanPlayerId,
+                              gameState?.players,
+                              turnReport,
+                            )}
+                          </Text>
+                        ))}
+                  </View>
+                ))}
+              </ScrollView>
+            )}
           </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showBattleReportModal}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseBattleReport}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Battle Report</Text>
+            {isKnockoutTurn && (
+              <Text style={styles.knockoutBanner}>You have been knocked out of the game!</Text>
+            )}
+            <ScrollView style={styles.battleReportScroll} nestedScrollEnabled>
+              {sortedBattleReportCombatEvents.map((event, index) => (
+                <BattleReportCard
+                  key={`combat-${event.planetName}-${index}`}
+                  event={event}
+                  localHumanPlayerId={localHumanPlayerId}
+                  players={gameState?.players ?? []}
+                  turnEvents={turnReport}
+                  homePlanetConquestHighlight={isHumanHomePlanetConquestVictory(
+                    event,
+                    localHumanPlayerId,
+                    gameState?.players ?? [],
+                  )}
+                  planetClass={
+                    gameState?.map.planets.find((p) => p.name === event.planetName)?.class ?? ''
+                  }
+                />
+              ))}
+            </ScrollView>
+            <Pressable
+              style={[styles.primaryButton, styles.battleReportCloseButton]}
+              onPress={handleCloseBattleReport}
+            >
+              <Text style={styles.primaryButtonText}>Close</Text>
+            </Pressable>
+          </View>
         </View>
-      )}
+      </Modal>
 
-      {isHumanTurn && status === 'active' && (
-        <Pressable
-          style={[styles.researchButton, { bottom: insets.bottom + 128 }]}
-          onPress={() => setShowQueuedModal(true)}
-        >
-          <Text style={styles.researchButtonText}>Queued ({queuedOrders.length})</Text>
-        </Pressable>
-      )}
+      <Modal
+        visible={status === 'finished' && humanWon}
+        transparent
+        animationType="fade"
+        onRequestClose={handleNewGame}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.victoryModalTitle}>Victory</Text>
+            <Text style={styles.victoryModalMessage}>
+              You are the last player standing! The galaxy is yours.
+            </Text>
+            <Pressable style={styles.primaryButton} onPress={handleNewGame}>
+              <Text style={styles.primaryButtonText}>Return to Home</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
-      {isHumanTurn && status === 'active' && (
-        <Pressable
-          style={[styles.researchButton, { bottom: insets.bottom + 72 }]}
-          onPress={() => setShowResearchModal(true)}
-        >
-          <Text style={styles.researchButtonText}>R&D</Text>
-        </Pressable>
-      )}
+      <Modal
+        visible={status === 'finished' && !humanWon}
+        transparent
+        animationType="fade"
+        onRequestClose={handleNewGame}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Game Over</Text>
+            <Text style={styles.victoryModalMessage}>
+              {winnerPlayer !== undefined
+                ? `${winnerPlayer.name} is the last player standing.`
+                : 'The galaxy has a new ruler.'}
+            </Text>
+            <Pressable style={styles.primaryButton} onPress={handleNewGame}>
+              <Text style={styles.primaryButtonText}>Return to Home</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
-      {isHumanTurn && status === 'active' && (
+      {isHumanTurn && status === 'active' && !isKnockoutTurn && (
         <Pressable
           style={[styles.endTurnButton, { bottom: insets.bottom + 16 }]}
           onPress={() => {
             cancelDrag();
             endTurn();
-            selectPlanet(null);
+            dismissPlanetDetail();
           }}
         >
           <Text style={styles.endTurnButtonText}>End Turn</Text>
@@ -1607,7 +2800,7 @@ export default function GameScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: BG_COLOR,
   },
   statusBar: {
     paddingHorizontal: 16,
@@ -1630,7 +2823,7 @@ const styles = StyleSheet.create({
   },
   mapArea: {
     flex: 1,
-    backgroundColor: '#060612',
+    backgroundColor: BG_COLOR,
     overflow: 'hidden',
   },
   mapGestureHost: {
@@ -1655,7 +2848,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: 1,
-    backgroundColor: 'rgba(10, 10, 26, 0.85)',
+    backgroundColor: 'rgba(20, 18, 40, 0.55)',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
@@ -1665,8 +2858,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: PLANET_SIZE_SELECTED,
     height: PLANET_SIZE_SELECTED,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   planetCircle: {
     zIndex: 1,
@@ -1675,32 +2866,33 @@ const styles = StyleSheet.create({
   },
   planetNameLabel: {
     position: 'absolute',
-    top: PLANET_NAME_LABEL_TOP,
     width: PLANET_NAME_LABEL_WIDTH,
-    marginLeft: -(PLANET_NAME_LABEL_WIDTH - CELL_SIZE) / 2,
+    left: '50%',
+    marginLeft: -PLANET_NAME_LABEL_WIDTH / 2,
     textAlign: 'center',
-    color: '#c8c8e8',
-    fontSize: 4,
+    color: COLORS.text,
+    fontSize: PLANET_LABEL_FONT_SIZE,
+    lineHeight: PLANET_LABEL_FONT_SIZE + 1,
   },
   planetNameLabelFogged: {
-    color: '#666688',
+    color: COLORS.textMuted,
   },
   planetClassLabel: {
     color: 'rgba(255,255,255,0.85)',
-    fontSize: 4,
+    fontSize: PLANET_LABEL_FONT_SIZE,
     fontWeight: '700',
     letterSpacing: 0,
   },
   planetClassLabelFogged: {
-    color: 'rgba(180, 180, 200, 0.5)',
+    color: COLORS.background,
   },
   shipCountLabel: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     color: COLORS.text,
-    fontSize: 6,
-    marginTop: 1,
+    fontSize: SHIP_COUNT_FONT_SIZE,
     textAlign: 'center',
-    width: CELL_SIZE * 2,
-    marginLeft: -CELL_SIZE / 2,
   },
   fleetLayer: {
     position: 'absolute',
@@ -1746,7 +2938,7 @@ const styles = StyleSheet.create({
     left: 24,
     right: 24,
     bottom: 80,
-    backgroundColor: 'rgba(18, 18, 42, 0.95)',
+    backgroundColor: COLORS.panel,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -1772,6 +2964,210 @@ const styles = StyleSheet.create({
     fontSize: 13,
     flex: 1,
   },
+  reportModalScroll: {
+    maxHeight: 280,
+    marginTop: 4,
+  },
+  reportModalLine: {
+    color: COLORS.text,
+    fontSize: 13,
+    marginTop: 10,
+  },
+  reportSectionHeader: {
+    fontWeight: 'bold',
+    fontSize: 15,
+    color: COLORS.text,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  reportSectionHeaderFirst: {
+    marginTop: 0,
+  },
+  reportSectionDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  battleReportScroll: {
+    maxHeight: 360,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  battleReportCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingTop: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    marginBottom: 10,
+  },
+  battleReportCardWrapper: {
+    marginBottom: 0,
+  },
+  homePlanetConquestBanner: {
+    color: '#2255cc',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  battleReportCardVictory: {
+    backgroundColor: 'rgba(39, 107, 64, 0.12)',
+  },
+  battleReportCardHomeConquest: {
+    backgroundColor: '#e8eeff',
+    borderLeftColor: '#2255cc',
+    borderLeftWidth: 4,
+  },
+  battleReportCardDefeat: {
+    backgroundColor: 'rgba(184, 48, 48, 0.12)',
+  },
+  battleReportHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  battleReportPlanetCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: NEUTRAL_COLOR,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  battleReportPlanetCircleText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  battleReportHeaderCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  battleReportPlanetName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  battleReportHeaderEnd: {
+    width: 34,
+    alignItems: 'flex-end',
+  },
+  battleReportOutcomeBadge: {
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 30,
+  },
+  battleReportOutcomeWin: {
+    color: COLORS.victory,
+  },
+  battleReportOutcomeLoss: {
+    color: COLORS.defeat,
+  },
+  battleReportTroopColumn: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  battleReportTroopCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  battleReportTroopCount: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  battleReportTroopIcon: {
+    fontSize: 22,
+  },
+  battleReportTroopLabelYou: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.victory,
+    marginTop: 4,
+  },
+  battleReportTroopLabelOpponent: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  battleReportTroopsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  battleReportVsColumn: {
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  battleReportVsText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  battleReportRemainingRow: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  battleReportRemainingText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  battleReportRemainingVictory: {
+    color: COLORS.victory,
+  },
+  battleReportRemainingDefeat: {
+    color: COLORS.defeat,
+  },
+  battleReportRemainingNeutral: {
+    color: COLORS.textMuted,
+  },
+  planetBattleIcon: {
+    position: 'absolute',
+    fontSize: PLANET_BATTLE_ICON_FONT_SIZE,
+    lineHeight: PLANET_BATTLE_ICON_FONT_SIZE + 2,
+  },
+  planetModalStack: {
+    width: '90%',
+    maxWidth: 360,
+    alignItems: 'center',
+  },
+  planetBattleReportAbove: {
+    width: '100%',
+    marginBottom: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 10,
+  },
+  planetBattleOnlyCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: COLORS.panel,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 20,
+  },
+  battleReportLine: {
+    color: COLORS.text,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  battleReportOutcomeNeutral: {
+    color: COLORS.textMuted,
+  },
+  battleReportCloseButton: {
+    marginTop: 4,
+  },
   queueOverlayCancelText: {
     color: COLORS.defeat,
     fontSize: 13,
@@ -1793,21 +3189,71 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
-  researchButton: {
+  headerMenuTrigger: {
     position: 'absolute',
     right: 16,
-    backgroundColor: COLORS.accent,
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    zIndex: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
   },
-  researchButtonText: {
+  headerMenuTriggerText: {
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 20,
+    marginTop: -2,
+  },
+  headerMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 49,
+  },
+  headerMenuPanel: {
+    position: 'absolute',
+    right: 16,
+    minWidth: 160,
+    backgroundColor: COLORS.panel,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 4,
+    zIndex: 50,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  headerMenuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  headerMenuRowText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  headerMenuBadge: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    minWidth: 22,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignItems: 'center',
+  },
+  headerMenuBadgeText: {
     color: COLORS.background,
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
   },
   planetSection: {
     marginBottom: 12,
@@ -1824,7 +3270,9 @@ const styles = StyleSheet.create({
   stepperControls: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 12,
+    width: '100%',
   },
   stepperBtn: {
     width: 36,
@@ -1901,6 +3349,27 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textAlign: 'center',
     marginBottom: 8,
+  },
+  knockoutBanner: {
+    color: '#cc3300',
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  victoryModalTitle: {
+    color: COLORS.victory,
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  victoryModalMessage: {
+    color: COLORS.text,
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: 'center',
+    marginBottom: 20,
   },
   researchHeader: {
     flexDirection: 'row',
@@ -2009,13 +3478,12 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: COLORS.accent,
+    borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1a1a34',
   },
   planetClassTileText: {
-    color: COLORS.text,
+    color: COLORS.background,
     fontSize: 24,
     fontWeight: '700',
   },
@@ -2124,7 +3592,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 100,
-    backgroundColor: COLORS.background,
+    backgroundColor: BG_COLOR,
     alignItems: 'center',
     justifyContent: 'center',
   },

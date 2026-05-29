@@ -1,5 +1,383 @@
 # Completed Tasks
 
+## AI Brain Overhaul — Fog-of-war memory, three difficulty tiers, economy decisions
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/game/types.ts` — added `AiPlanetMemory`, `AiPlayerState` interfaces; added `aiStates?: Record<string, AiPlayerState>` to `GameState`
+- `src/game/turnEngine.ts` — added `BUILD` and `SET_PRODUCTION_SLIDER` to `PlayerAction`; added `processBuild` and `processSetProductionSlider` handlers in `resolveTurn`; calls `updateAiObservation` at end of each AI turn to persist fog-of-war memory; imports `FACTORY_GOLD_COST`/`RESEARCH_LAB_GOLD_COST` from `productionEngine`
+- `src/game/aiEngine.ts` — full rewrite: `AiDifficulty` expanded to `'easy' | 'normal' | 'hard'`; `updateAiObservation` (exported, called by `turnEngine`); fog-of-war memory with staleness-aware enemy garrison estimates; `computeAiTurn` dispatches to `computeEasyTurn` (original 3-priority heuristic, full state access) or `computeNormalOrHardTurn` (memory-based, multi-fleet, economy decisions); building strategy (A-C factories, D-G mixed, H-P labs); production slider management (interior=gold, frontier=balanced/troops, gold emergency); strategic phases (expand/build/strike/defend); scout probes (Hard only); up to 3 fleets (Normal) or 5 fleets (Hard) per turn
+- `src/store/gameStore.ts` — imports `updateAiObservation`, `AiPlayerState`; `startNewGame` initialises `aiStates` for each AI player by calling `updateAiObservation` on the initial state so first-turn memory includes home area
+- `src/screens/HomeScreen.tsx` — difficulty chip array expanded from `['easy', 'normal']` to `['easy', 'normal', 'hard']`; Hard label added
+**Notes:** All AI memory lives in `GameState.aiStates` so it serialises with `state_json` when the backend is built. `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — Map connectivity guarantee at base fleet range (11 clicks)
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/game/mapGenerator.ts` — `ensureConnectivity(positions)` after shape placement/normalization, before planet object construction; Union-Find at 11-click edge distance; bridge planets along shortest inter-component gap when multiple components exist.
+**Notes:** Fixes seeds that produced disconnected galaxy clusters with gaps larger than `BASE_FLEET_RANGE_CLICKS`. Bridge planets use the same RNG-driven name/class as other planets. `MIN_PLANET_DISTANCE` and placement functions unchanged. `spawnPlacer` unaffected. `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — Deferred farewell for last-player-in-round knockout
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/store/gameStore.ts` — `pendingFarewellPlayerIds`; `findFarewellInPath`; `endTurn` defers knockout farewell when the eliminated player triggered the round wrap; `acknowledgeKnockout` shows deferred farewells at the next natural turn slot.
+- `src/screens/GameScreen.tsx` — victory modal copy: "last commander standing" → "last player standing".
+**Notes:** Fixes pass-and-play showing the knockout modal immediately after the last player ends their turn (before others play in the new round). `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 127 — Zone-based starting planet placement (human vs AI)
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/game/types.ts` — exported `MapSize` (`'small' | 'medium' | 'large'`)
+- `src/game/spawnPlacer.ts` — replaced 200-candidate scored-random search with zone-based placement (4 edge bands + 4 interior quadrants); `PlaceSpawnsOptions` API; human min-separation 30/40/50 by map size with 50-attempt retry; removed scoring helpers
+- `src/store/gameStore.ts` — `mapSize: MapSize` on `GameConfig`; `startNewGame` derives `humanPlayerIds`/`aiPlayerIds` from slots and passes options to `placeSpawns`
+- `src/screens/HomeScreen.tsx` — imports `MapSize` from types; passes `mapSize` to `startNewGame`
+- `docs/systems/spawn-placement.md`, `docs/development/current-state.md`, `docs/tasks/backlog.md`, `docs/development/decisions.md`
+
+**Notes:** Humans spawn from edge zones near map sides (not corners); AIs can land anywhere including centre. `SpawnPlacementResult` shape unchanged. `npx tsc --noEmit` passes clean.
+
+----
+
+## Task 126 — Home planet conquest elimination mechanics
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/game/combatEngine.ts` — `ResolveArrivalResult` return type; on home-planet conquest sets `isEliminated`, forfeits other owned planets to neutral (0 troops, buildings intact), removes defender's in-transit fleets; optional `fleets` param threaded from `turnEngine`.
+- `src/game/turnEngine.ts` — passes `fleets` to `resolveArrival`; applies optional `players`/`fleets` updates; exports `advanceToNextNonEliminatedPlayer`; skips re-checking already-eliminated players; `runAiTurnsUntilHuman` skips eliminated AI.
+- `src/store/gameStore.ts` — `eliminatedPlayerPendingKnockout`, `acknowledgeKnockout()`; pass-and-play knockout turn after `endTurn`; victory via existing `status: 'finished'` / `winnerId`.
+- `src/screens/GameScreen.tsx` — knockout banner on Battle Report modal; victory / game-over modals with Return to Home; End Turn hidden during knockout.
+**Notes:** Uses existing `Player.isEliminated` (not a separate `eliminated` field). `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 125 — Home planet conquest battle report UI (blue highlight + "took their home planet" message)
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/game/types.ts` — optional `isHomePlanetConquest?: boolean` on combat `TurnEvent` variant.
+- `src/game/combatEngine.ts` — `resolveArrival` sets `isHomePlanetConquest: true` when attacker wins and conquered planet equals defender's `homePlanetId`.
+- `src/screens/GameScreen.tsx` — Battle Report modal sorts home-conquest cards first; winning human attacker sees blue banner **"You took their home planet!"** and blue-tinted card (`#e8eeff` background, `#2255cc` left border) instead of victory green.
+**Notes:** Display-only; elimination mechanics deferred to Task 126. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 124 — Research points carry over after level-up (no reset)
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/game/productionEngine.ts` — removed `researchPoints -= researchThreshold(techLevel)` from the level-up `while` loop in `runProduction`; cumulative threshold comparison only increments `techLevel`.
+**Notes:** `RESEARCH_THRESHOLDS` is cumulative; points accumulate forever. R&D modal projection in `GameScreen` already correct (`threshold - totalPoints`). `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 123 — Turn report research message uses "You" instead of player name
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/screens/GameScreen.tsx` — `formatTurnEvent` `research_levelup` case gates on `localHumanPlayerId` + `players` to render `"You reached Tech Level N"` for the local human and keep the player name for others (same pattern as combat reports).
+**Notes:** Display-only; no engine or store changes. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 121 — Diagnose and fix map generator boundary-fill at large planet counts
+**Completed:** 2026-05-29
+**What was done:**
+- Part A: Changed `gridSide` multiplier in `computeMapDimensions` from ×30 to ×90, reducing planet packing fraction from ~42% to ~14% so the organic growth model has room for natural voids.
+- Part B: `growthPosition` now operates on a virtual canvas 2× width by 2× height; the first planet seeds at the virtual centre; after all planets are placed, a bounding-box normalization pass rescales positions into the configured grid with `PLANET_EDGE_PADDING`. Hard boundary walls no longer force the cluster to fill a rectangle.
+**Files modified:**
+- `src/screens/HomeScreen.tsx`, `src/game/mapGenerator.ts`
+
+---
+
+## Task 122 — Galaxy shape templates
+**Completed:** 2026-05-29
+**What was done:**
+- `GalaxyShape` type (`'scattered' | 'arms' | 'dense_core' | 'ring'`) added to `src/game/types.ts`.
+- `MapConfig.galaxyShape?` optional field added; `generateMap` picks a shape via seeded RNG when none is provided.
+- Four placement functions implemented in `mapGenerator.ts`: `placePlanetsScattered` (organic parent-linked growth), `placePlanetsArms` (2–4 arms with Gaussian lateral spread), `placePlanetsDenseCore` (inverse-square-root radial density), `placePlanetsRing` (annular band, inner radius 40%, width 45% of max radius). All share `isFarEnough` minimum-spacing enforcement and the bounding-box normalization pass.
+**Files modified:**
+- `src/game/types.ts`, `src/game/mapGenerator.ts`
+
+---
+
+## Task 119 — Map size selection with player-count-driven planet count
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/screens/HomeScreen.tsx` — replaced hardcoded `MAP_PRESETS` with `MAP_SIZE_CONFIG`, `computeMapDimensions(mapSize, playerCount)`, and `MAP_SIZE_LABELS`; `handleLaunch` passes computed `mapWidth`/`mapHeight`/`planetCount`; map size buttons show label only (no dimension subtitle).
+**Notes:** `GameConfig` already carried `mapWidth`, `mapHeight`, `planetCount`; `gameStore.startNewGame` forwards them to `generateMap` unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 120 — Replace research threshold formula with exact lookup table
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/game/productionEngine.ts` — added exported `RESEARCH_THRESHOLDS` readonly array [10, 23, 38, 58, 82, 113, 151, 198, 258, 333, 426, 542, 688, 869, 1097]; `researchThreshold(level)` now returns `RESEARCH_THRESHOLDS[level] ?? Infinity` instead of `Math.round(10 * Math.pow(1.5, level))`; level-up loop in `runProduction` unchanged.
+**Notes:** `npx tsc --noEmit` passes clean. R&D modal continues to use exported `researchThreshold`.
+
+---
+
+## Task 117 — Probabilistic coin-flip combat resolution
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/game/combatEngine.ts` — removed `DEFENSE_BONUS`, `ATTACKER_TECH_MULTIPLIER`, `DEFENDER_TECH_MULTIPLIER` exports; added `rng: () => number` as first parameter to `resolveArrival`; looks up attacker and defender `techLevel` from `players` array (defaults to `0`); replaced deterministic strength-comparison block with iterative coin-flip loop using `pAttackerWins = (7 + Math.max(0, techDiff)) / (14 + Math.abs(techDiff))`; loop removes 1 troop per flip until one side reaches 0; all `TurnEvent` combat fields unchanged.
+- `src/game/turnEngine.ts` — imported `mulberry32` from `./mapGenerator`; added `combatRngCounter` local variable in `resolveTurn`; each `resolveArrival` call gets a fresh `mulberry32(state.seed + state.roundNumber * 10000 + combatRngCounter * 100)` RNG instance; counter shared across both arrival loops (eligibleArrivals and justArrived).
+**Notes:** `npx tsc --noEmit` passes clean. Three old constants confirmed absent from entire `src/` tree.
+
+---
+
+## Task 116 — Bug fix: `build_complete` report notification fires one round too late
+**Completed:** 2026-05-29
+**Files modified:** `src/game/productionEngine.ts` — `build_complete` emission when `builtOnRound === currentRound` (was `currentRound - 1`).
+**Notes:** `countActiveBuildings` (`builtOnRound < currentRound`) unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 115 — Bug fix: per-player turn report for ⋮ Report modal in pass-and-play
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/store/gameStore.ts` — added `playerTurnReportByPlayerId`; populated in `endTurn` (clears outgoing player, routes combat/fleet_arrived/research_levelup/build_complete to involved humans); initialised in `startNewGame`, `loadGame`, `resetGame`.
+- `src/screens/GameScreen.tsx` — Research/Troop Landings/Built sections filter `playerTurnReport` from per-player archive; Battles unchanged; global `turnReport` retained for `BattleReportCard` and simultaneous-neutral-landing detection.
+**Notes:** `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 113 — Battle report card: attacker on left, defender on right, "attacked" centre text
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `getBattleReportSides` / `isSimultaneousNeutralLanding` helpers; `BattleReportCard` troop row uses attacker-left / defender-right from combat `attackerName`/`defenderName`; centre divider **attacked**; simultaneous neutral landing flips defender-viewer to left when same-planet `fleet_arrived` ship count equals `defenderShipsBefore`; **You**/name labels per side; W/L badge and remaining footer unchanged; `turnEvents={turnReport}` on modal and planet-tap cards.
+**Notes:** Display-only; no engine or type changes. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 112 — Bug fix: second player sees no battle card on planet tap and no battles in turn report
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — planet-tap battle card via `humanCombatByPlanetName`; Report modal **Battles** section uses `humanCombatEvents`.
+**Notes:** `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 111 — Bug fix: battle UI shown to both human players in pass-and-play
+**Completed:** 2026-05-28
+**Files modified:**
+- `src/store/gameStore.ts` — added `battleAckPlayerId: string | null` (defers lock screen when outgoing player has battles; set to their id in `endTurn` when `hasBattlesForOutgoingPlayer && showLock`, null otherwise); added `acknowledgeBattleReport()` action (clears `battleAckPlayerId`, then sets `showingLockScreen: true`); reset to null in `startNewGame`, `loadGame`, `resetGame`.
+- `src/screens/GameScreen.tsx` — reads `battleAckPlayerId` + `acknowledgeBattleReport` from store; adds `battlePreAckedPlayerIdRef` (tracks which player last pre-acked to prevent double-show in 1-human loops); adds `effectiveHumanPlayer` useMemo (resolves to player with `battleAckPlayerId` when set, else `humanPlayer`); `humanCombatEvents` uses `effectiveHumanPlayer.name`; Effect 1 and Effect 2 guard `setShowBattleReportModal(true)` with `effectiveHumanPlayer?.id !== battlePreAckedPlayerIdRef.current`; battle modal Close `onPress` + `onRequestClose` both set `battlePreAckedPlayerIdRef.current` and call `acknowledgeBattleReport()` when `battleAckPlayerId !== null`; `BattleReportCard` in the modal uses `effectiveHumanPlayer?.id ?? localHumanPlayerId` for correct W/L perspective.
+**Notes (revised implementation):** Initial fix deferred the lock screen until the outgoing player closed their battle modal, but that was wrong timing — the outgoing player should NOT see battle results until the start of their next turn. Final fix uses a `playerBattleArchiveByPlayerId` record: `endTurn` clears the outgoing player's entry and re-populates archives for all human players involved in combat; the lock screen shows immediately as before; `humanCombatEvents` sources from the archive so each player sees their battles at their own turn start (Effect 2, lock-screen dismiss) and 🔥 markers persist until their own next `endTurn`. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 110 — Restructure turn report into ordered categories
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — Report modal replaces flat `turnReport.map` with sectioned layout (Battles → Research → Troop Landings → Built); four filtered arrays via `useMemo`; empty sections omitted; `reportSectionHeader` / `reportSectionDivider` styles; `formatTurnEvent` strings unchanged.
+**Notes:** Display-only; no store, engine, or type changes. Empty state "Nothing to report this turn." unchanged when all sections empty. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 109 — Battle results modal at turn start
+**Completed:** 2026-05-28
+**Files modified:** `src/game/types.ts` — combat `TurnEvent` adds `attackerShipsBefore`, `defenderShipsBefore`, `remainingShips`; `src/game/combatEngine.ts` — populates new fields in both attacker-wins and defender-holds branches; `src/screens/GameScreen.tsx` — `showBattleReportModal` state, `turnReport`/`showingLockScreen` effects (pass-and-play defer until lock dismiss), **Battle Report** modal with per-combat cards (planet, opponent, troop counts, outcome, remaining), Close-only dismiss.
+**Notes:** Auto-opens when human turn begins and last cycle included combat; existing ⋮ Report modal unchanged. Human perspective derived via `localHumanPlayerId` + player name match on combat event names. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 108 — Scale planet hit/select radius with zoom level
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `findPlanetAtMapCoords` now accepts `scale` and compares distance against `PLANET_HIT_RADIUS / scale` (constant screen-space radius); all call sites pass current gesture scale (planet tap, fleet drag-start, fleet drag-drop, measure drag-start).
+**Notes:** Fixes oversized hit zones when zoomed in and undersized targets when zoomed out. `PLANET_HIT_RADIUS` constant unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — Queued modal: group build orders by planet + type
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — added `BuildDisplayGroup` and `buildDisplayGroups` useMemo grouping `buildDisplayEntries` by `${planetId}:${buildingType}`; `queuedModalItems` emits one build row per group; modal label `🏭 Planet — 2× Factory` when count > 1 else `🏭 Planet — Factory`; group ✕ cancels all indices via `cancelBuildOrder` in descending order; `queuedOrderCount` badge still sums individual buildings; fleet rows unchanged.
+**Notes:** Fixes duplicate identical rows when multiple same-type buildings are queued on one planet. No store/engine/type changes. `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — Fleet dispatch modal cancel at 0 ships
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `modalMaxShips` minimum 0; decrement stepper floor 0 and disabled at `shipCount <= 0`; `handleConfirmFleet` at `shipCount === 0` calls `cancelQueuedOrder` when editing an existing queued order or closes without queuing on a new dispatch; primary button label **Cancel Order** at 0; clears `pendingFleet`, `editingOrderIndex`, `dragOriginPlanetId`.
+**Notes:** Players can cancel a queued fleet route from the Send/Edit Fleet modal without opening the Queued modal separately. No store/engine/type changes. `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — Instant snap to home planet (no animation)
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `animateMapToSnap` worklet assigns `scale`, `translateX`, `translateY`, and matching `saved*` shared values directly instead of 350 ms `withTiming`; removed `HOME_PLANET_SNAP_DURATION_MS` and unused `withTiming` import; snap logic (`snapToHomePlanet`, clamp, triggers) unchanged.
+**Notes:** Fixes visible map scroll on initial load and pass-and-play lock-screen dismiss. `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — Enemy planet colour reveals home planet (fog of war)
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `getPlanetColor` final fallback changed from enemy-specific tint to `NEUTRAL_COLOR` for all non-owned planets (neutral and enemy); human-owned home (`HOME_PLANET_COLOR`) and other owned (`#2e8a50`) unchanged; `getPlayerColor` retained for `FleetLayer` in-transit and queued fleet markers only.
+**Notes:** At game start only home planets are owned; distinct enemy player colours on planet nodes immediately revealed every enemy home. Fleet dots/lines still show owner colour. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 107 — Retheme colour palette for off-white background
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx`, `src/screens/HomeScreen.tsx` — replaced dark-navy `COLORS` with warm light-mode palette (`background` `#f5f0eb`, dark navy text, indigo accent, warm panel/border); updated map planet/fleet constants (`HUMAN_COLOR`, `NEUTRAL_COLOR`, `AI_COLORS`, owned green `#2e8a50`, neutral `#9090a8`); hardcoded map label and overlay colours aligned to `COLORS.text` / `COLORS.textMuted`; selection pulse border uses accent tint; game-over overlay uses `COLORS.panel`; `BG_COLOR` unchanged.
+**Notes:** Display-only theme change across both screens. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 106 — Fleet dispatch modal: center the ship count input
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `stepperControls` StyleSheet entry now includes `justifyContent: 'center'` and `width: '100%'` so the − / ship count / + stepper row is horizontally centred in the Send Fleet / Edit Fleet modal; route label, distance/ETA, and modal actions unchanged.
+**Notes:** Display-only layout change. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 105 — Fleet dispatch modal: use planet names only (no internal IDs)
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — Send Fleet / Edit Fleet confirm modal route line now shows `{pendingOriginPlanet.name} → {pendingDestPlanet.name}` instead of `formatPlanetId` (which exposed numeric indices like "Planet 15 → Planet 0").
+**Notes:** Display-only change; no store or engine updates. Audited modal — distance/ETA, ship stepper, and actions had no planet ID leaks. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 104 — Report modal: turn summary of all events this turn
+**Completed:** 2026-05-28
+**Files modified:** `src/game/types.ts` — `TurnEvent` union (`fleet_arrived`, `combat`, `research_levelup`, `build_complete`). `src/game/combatEngine.ts` — optional `events` + `players` on `resolveArrival`; pushes arrival/combat events with player/planet names and troop losses. `src/game/productionEngine.ts` — optional `events` on `runProduction`; pushes research level-ups and buildings where `builtOnRound === currentRound - 1`. `src/game/turnEngine.ts` — `ResolveTurnResult` with `events[]`; passes events through arrival/production calls. `src/store/gameStore.ts` — `turnReport: TurnEvent[]`; `endTurn` aggregates events across human + AI turns. `src/screens/GameScreen.tsx` — Report modal (scrollable list, empty state); removed placeholder Alert.
+**Notes:** Report covers the full End Turn resolution cycle (human + intervening AI turns). Resets on each new End Turn. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 103 — Header dropdown: consolidate Queued, R&D, and Report into top-right menu
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — added `showHeaderMenu` and `showReportModal` state; top-right **⋮** circular trigger (respects safe-area insets) toggles dropdown panel with Queued (accent count badge via `queuedOrderCount`), R&D, and Report rows; backdrop tap or item tap closes menu; Queued/R&D open existing modals; Report sets `showReportModal` and shows placeholder Alert; removed standalone **Queued (N)** and **R&D** pill buttons and unused `researchButton` styles; dropdown z-index 50 above map content.
+**Notes:** Menu visible during active human turn only (same gating as former pills). Report modal UI deferred to Task 104. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 102 — Queued modal: include builds queued this turn
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — Queued Orders modal renders fleet rows (unchanged) plus build rows (planet name, Factory/Research Lab label, 🏭/🔬 prefix, ✕ cancel via `cancelBuildOrder`); **Queued (N)** badge counts fleet + build orders; `buildDisplayEntries` derived from human-owned planets with `builtOnRound === currentRound`; `queuedModalItems` interleaves `BUILD` entries from `queuedOrders` when present; fleet-only filters on pending-departure viz, `queuedShipsPerPlanet`, and snap-back edit logic.
+**Notes:** Builds are applied directly to planet state today (not appended to `queuedOrders` in store); modal derives under-construction buildings from map state. Cancel removes building, refunds gold, and entry disappears. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 101 — Fix zoom-edge map shift: add map viewport padding
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — added `MAP_VIEWPORT_PADDING` (150); `clampTranslation` now clamps translate X/Y to `[-(mapDim×scale−viewport)−padding, padding]` with `Math.min(..., padding)` on min when map is smaller than viewport; pinch `onEnd`, pan `onEnd`, and `snapToHomePlanet` all use the shared helper.
+**Notes:** Prevents map jump when releasing pinch near edges by never allowing the map boundary flush with the viewport. Small maps at low zoom collapse to a single valid translate (padding, padding). Gesture logic and zoom levels unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 100 — Background colour: soft off-white
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — added `BG_COLOR` (`#f5f0eb`); applied to `root`, `mapArea`, and pass-and-play `lockScreen`; darkened map-canvas labels (`planetNameLabel`, `planetNameLabelFogged`, `shipCountLabel`) and lock-screen text for legibility on off-white. `src/screens/HomeScreen.tsx` — local `BG_COLOR` on `safeArea`; header title/subtitle and empty-state message use dark text colours.
+**Notes:** Modal backgrounds, pill buttons, planet node fills, and status bar panel unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 99 — Home planet colour: light brown tint
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — added `HOME_PLANET_COLOR` (`#c8a26b`); `getPlanetColor` checks `planet.id === homePlanetId` before owned green when `planet.owner === localHumanPlayerId`; map render passes `humanPlayer.homePlanetId`.
+**Notes:** Circle fill only; labels unchanged. Captured planets stay green. Pass-and-play: active human sees their home brown via `getLocalHumanPlayerId`. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 98 — Snap to home planet at turn start
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — added `HOME_PLANET_SNAP_SCALE` (2.0) and `snapToHomePlanet` helper (centres home planet grid position, clamps via `clampTranslation`); `animateMapToSnap` applies 350 ms `withTiming` to scale/translate and `saved*` shared values; initial-load effect (once per `activeGameId` after viewport layout) and lock-screen dismiss effect (`showingLockScreen` true→false) call snap for local human player's `homePlanetId`; map-dimension effect no longer resets transform to default on load.
+**Notes:** Prevents pass-and-play positional leakage from previous player's pan/zoom. Edge planets stay within clamp bounds. No store changes required. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 97 — Re-open and edit queued fleet order by dragging back to origin planet
+**Completed:** 2026-05-28
+**Files modified:** `src/store/gameStore.ts` — added `updateQueuedOrder(index, shipCount)` to replace ship count on an existing queued order in place. `src/screens/GameScreen.tsx` — snap-back drag (release on same origin) opens edit flow; single queued route opens ship-count modal pre-populated; multiple routes opens queued-orders list; `editingOrderIndex` state; `shipsAlreadyQueued` excludes order being edited; confirm calls `updateQueuedOrder`; cancel clears edit state; modal title "Edit Fleet" when editing.
+**Notes:** Same-turn only; in-transit fleets unaffected. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 96 — Move owned-planet name label up so it doesn't overlap the planet node
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `PLANET_NAME_LABEL_TOP` numerator `-11` → `-18` (`Math.round((-18/18)*CELL_SIZE)`); 7px higher at `CELL_SIZE` 18 for all planet name labels.
+**Notes:** Label `top` is relative to the touch target; previous offset placed label bottom too close to the 14px planet circle. Universal offset improves owned and non-owned consistency. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 95 — Fix troop send cap: can't send more than 1 troop even when planet has 2+
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `modalMaxShips` calculation removed stale `- 1` garrison reserve; max is now `Math.max(1, pendingOriginPlanet.shipCount - shipsAlreadyQueued)`.
+**Notes:** Leftover UI constraint after Task 76 allowed sending all ships in the engine but capped the dispatch modal at 1 when garrison was 2. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 93 — Simplify planet growth distance to uniform [4, 11] clicks
+**Completed:** 2026-05-28
+**Files modified:** `src/game/mapGenerator.ts` — in `growthPosition`, parent offset distance changed from `4 + (rng() + rng()) * 4.5` (triangular, peak ~8–9) to `4 + rng() * 7` (uniform [4, 11] clicks).
+**Notes:** No other map-generator changes. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 92 — Replace Gaussian planet placement with organic growth model
+**Completed:** 2026-05-28
+**Files modified:** `src/game/mapGenerator.ts` — removed `gaussianPosition` and `connectivityCeiling`; added `growthPosition` (first planet random in padded bounds; later planets attach to random parent at triangular distance `4 + (rng()+rng())*4.5` and uniform angle); placement loop uses `growthPosition` + `isFarEnough` only (Phase A/B removed).
+**Notes:** Produces varied irregular galaxy shapes (chains, arms, bridges) per seed instead of symmetric central blobs. `MIN_PLANET_DISTANCE=4`, `MAX_PLACEMENT_ATTEMPTS_PER_PLANET=2000`, `paddedBounds`, `randomPosition`, `nearestDistance`, and `isFarEnough` unchanged. `spawnPlacer` unaffected. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 91 — Fix planet placement failure: increase map preset sizes
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/HomeScreen.tsx` — map presets `24×24/16`, `40×40/32`, `52×52/54` (planet counts unchanged); `src/game/mapGenerator.ts` — `MAX_PLACEMENT_ATTEMPTS_PER_PLANET` 1000→2000; Phase A connectivity ceiling `Math.round(width * 0.55)` instead of hard-coded 11.
+**Notes:** Fixes placement failures after Task 90's `MIN_PLANET_DISTANCE=4` on undersized grids; presets remain smaller than pre-Task-84 originals. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 90 — Fix planet spacing: minimum 4 clicks, prefer 6–10 click neighbours
+**Completed:** 2026-05-28
+**Files modified:** `src/game/mapGenerator.ts` — `MIN_PLANET_DISTANCE` 2→4; `gaussianPosition` σ `width * 0.28` → `width * 0.38`; `nearestDistance` helper; two-phase placement loop (attempts 0–699 require nearest placed planet ≤ 11 clicks when group non-empty; attempts 700–999 min-distance only).
+**Notes:** Hard minimum 4-click separation; Phase A biases toward connected 6–10 click neighbour spacing via Gaussian spread + connectivity ceiling; Phase B fallback preserves placement success. `spawnPlacer` and rendering untouched. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 89 — Replace multi-cluster planet placement with single organic blob
+**Completed:** 2026-05-28
+**Files modified:** `src/game/mapGenerator.ts` — removed `PlanetCluster`, `createPlanetClusters`, and `clusterPosition`; added `gaussianPosition` (centre `(width/2, height/2)`, σ = `width * 0.28`, sum-of-3-uniforms normal approximation); out-of-bounds candidates return `null` and the placement loop `continue`s; `MIN_PLANET_DISTANCE` / `isFarEnough` / 1000-attempt retry unchanged; `randomPosition` and `paddedBounds` retained.
+**Notes:** Replaces Task 86 multi-cluster layout with one organic density falloff from map centre (no rectangular footprint, no edge clamp bunching). `spawnPlacer` and rendering constants untouched. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 88 — Restore visual proportions by reverting CELL_SIZE to 18
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `CELL_SIZE` 6→18 only; all derived constants (`PLANET_SIZE`, `PLANET_HIT_RADIUS`, label fonts, fleet/pending SVG markers, `DEFAULT_MAP_SCALE` ~0.6) resolve via existing `(value/18)*CELL_SIZE` formulas from Task 85.
+**Notes:** Reverts Task 85 visual shrink while keeping Task 84 halved grid coordinates. Map canvas 360×360 px at scale 1 for Small (20×20); labels readable; pinch zoom meaningful. No engine or preset changes. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 87 — Rebalance planet class weights (A–E only slightly more common than F–P)
+**Completed:** 2026-05-28
+**Files modified:** `src/game/mapGenerator.ts` — `PLANET_CLASS_WEIGHTS` restored to all 16 classes (A–P); A–E each weight `8/117`, F–P each weight `7/117`; `rollPlanetClass` cumulative draw logic unchanged; home planet spawn classes (A–G in `spawnPlacer`) unaffected.
+**Notes:** Previous Task 52 weighting (A–E only) superseded. A–E now ~34% combined share vs F–P ~66%, giving a clear but not dominant lean toward the better tiers. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 86 — Randomise planet distribution (clustered layout)
+**Completed:** 2026-05-28
+**Files modified:** `src/game/mapGenerator.ts` — after seeding RNG, creates 2–5 `PlanetCluster` entries (centre via padded `randomPosition`, spread `width * (0.2 + rng() * 0.3)`); placement loop uses `clusterPosition` (uniform cluster pick, `[-1,1]` offset × spread, clamp + round to padded bounds) instead of uniform `randomPosition`; `MIN_PLANET_DISTANCE` / `isFarEnough` / 1000-attempt retry unchanged.
+**Notes:** `spawnPlacer` and movement/rendering constants untouched. Maps remain deterministic from seed. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 85 — Reduce visual click-distance by half (CELL_SIZE)
+**Completed:** 2026-05-28
+**Files modified:** `src/screens/GameScreen.tsx` — `CELL_SIZE` 11→6; planet diameters, name-label width/top, `PLANET_HIT_RADIUS`, and pending-departure offset unchanged formulas (`(value/18)*CELL_SIZE` or `CELL_SIZE * N`); map label `fontSize`/`marginTop` now constants `PLANET_LABEL_FONT_SIZE`, `SHIP_COUNT_FONT_SIZE`, `SHIP_COUNT_LABEL_MARGIN_TOP`; fleet/pending SVG marker radius, text size, and offsets derived from same baseline; `DEFAULT_MAP_SCALE` 1.8 from `REFERENCE_VIEWPORT_WIDTH` 390 × 0.55 / (20 × `CELL_SIZE`); pinch clamp 0.4–4 unchanged.
+**Notes:** Rendering-only; `screenToMapCoords`, pan clamp, and hit tests use updated map pixel dimensions via `CELL_SIZE`. Modals, status bar, HUD buttons, and distance pill untouched. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 84 — Reduce planet starting distance by half (map coordinate scale)
+**Completed:** 2026-05-28
+**Files modified:**
+- `src/screens/HomeScreen.tsx` — halved `MAP_PRESETS` grid dimensions while keeping planet counts: Small `20 × 20 · 16 worlds`, Medium `30 × 30 · 32 worlds`, Large `40 × 40 · 54 worlds`
+- `src/game/mapGenerator.ts` — `MIN_PLANET_DISTANCE` 4→2; `PLANET_EDGE_PADDING` 3→2
+- `docs/systems/map-generation.md` — updated min-distance, edge-padding, and preset table
+- `docs/development/current-state.md`, `docs/tasks/backlog.md`, `docs/tasks/completed.md`
+**Notes:** Visual rendering (`CELL_SIZE`, default scale, font sizes) unchanged per Task 85 scope split. Click-distance between planets at game start is halved because grid coordinates span half the previous range. `npx tsc --noEmit` passes clean.
+
+---
+
 ## Task 82 — Fix planet label text sizes (too large after CELL_SIZE reduction)
 **Completed:** 2026-05-28
 **Files modified:** `src/screens/GameScreen.tsx` — scaled map-canvas planet label typography by 11/18: `planetNameLabel` and `planetClassLabel` `fontSize` 7→4, `shipCountLabel` `fontSize` 9→6 and `marginTop` 2→1; `PLANET_NAME_LABEL_WIDTH` / `PLANET_NAME_LABEL_TOP` left as Task 79 `(value/18)*CELL_SIZE` constants; modals, status bar, HUD, and distance pill unchanged.
@@ -727,6 +1105,7 @@
 ---
 
 ## Changelog
+- 2026-05-28: Task 108 entry added.
 - 2026-05-28: Task 68 entry added.
 - 2026-05-28: Task 57 entry added.
 - 2026-05-28: Task 56 entry added.

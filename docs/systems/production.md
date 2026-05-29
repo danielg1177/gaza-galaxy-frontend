@@ -123,6 +123,7 @@ Values step uniformly: troops decrease by 1/16 per grade; gold decreases by 3.12
 | `STARTING_GOLD` | 500 |
 | `RESEARCH_LAB_POINTS_PER_TURN` | 1 |
 | `MAX_TECH_LEVEL` | 15 |
+| `RESEARCH_THRESHOLDS` | `readonly number[]` — 15-entry cumulative lookup, one per tech level 0–14 |
 | `FACTORY_TROOP_OUTPUT` | `Record<PlanetClass, number>` — see table above |
 | `FACTORY_GOLD_OUTPUT` | `Record<PlanetClass, number>` — see table above |
 
@@ -143,15 +144,18 @@ Planets owned by a player id not present in the `players` array are skipped. Neu
 After all planets contribute research for the turn, each player's accumulated `researchPoints` may advance `techLevel`:
 
 1. Start from the player's current `techLevel` and post-production `researchPoints` total.
-2. Compute the per-level threshold with:
-   - `researchThreshold(level) = Math.round(10 * Math.pow(1.5, level))`
-   - Early levels are: 10, 15, 23, 34, 51, 76, ...
+2. Look up the cumulative threshold from the exported `RESEARCH_THRESHOLDS` array (15 entries, index = current tech level 0–14): `researchThreshold(level)` returns `RESEARCH_THRESHOLDS[level] ?? Infinity`.
+   - Threshold sequence (cumulative totals): 10, 23, 38, 58, 82, 113, 151, 198, 258, 333, 426, 542, 688, 869, 1097.
+   - Level 1 requires 10 total points; Level 2 requires 23 total (13 more after Level 1); Level 3 requires 38 total (15 more); and so on.
 3. While `researchPoints >= researchThreshold(techLevel)` and `techLevel < MAX_TECH_LEVEL` (15):
-   - Subtract `researchThreshold(techLevel)` from `researchPoints`
    - Increment `techLevel` by 1
 4. Persist the resulting `researchPoints` and `techLevel` on the player record.
 
+Research points are **never subtracted or reset** on level-up — they accumulate forever. The cumulative threshold array encodes the total required at each level; the level-up loop only compares total accumulated points against the next threshold.
+
 Multiple levels can be gained in a single turn if enough research was banked. `techLevel` never exceeds 15; excess research points remain banked once capped.
+
+The R&D modal in `GameScreen` projects turns to next level as `(researchThreshold(techLevel) - researchPoints) / activeLabCount`, which correctly yields remaining points needed under cumulative thresholds.
 
 ## Map generation defaults
 
@@ -166,7 +170,18 @@ Planet class is rolled from `PLANET_CLASS_WEIGHTS` (A–P, mid-range classes mos
 
 ## Turn engine integration
 
-`turnEngine.resolveTurn` calls `runProduction` only when turn order wraps (the last active player ends their turn). It passes `state.roundNumber` as `currentRound`, so building activation (`builtOnRound < currentRound`) stays aligned with the same once-per-round round counter used by transit and round progression.
+`turnEngine.resolveTurn` calls `runProduction` only when turn order wraps (the last active player ends their turn). It passes `state.roundNumber` as `currentRound`, so building activation (`builtOnRound < currentRound`) stays aligned with the same once-per-round round counter used by transit and round progression. Optional `events` collects `research_levelup` (each level gained) and `build_complete` (buildings with `builtOnRound === currentRound`).
+
+## Turn report events
+
+When `events` is supplied:
+
+| Trigger | Event kind | Payload |
+|---------|------------|---------|
+| Tech level increases in level-up loop | `research_levelup` | `playerName`, `newLevel` |
+| Building finished construction this round | `build_complete` | `planetName`, `buildingType` (`factory` \| `researchLab`) |
+
+Build completion is detected at the start of `runProduction` when `builtOnRound === currentRound` (emitted at the round wrap where the building was placed; visible in the ⋮ Report at the start of the next round, when `builtOnRound < currentRound` makes it active).
 
 ## Client build-order feedback
 
@@ -174,6 +189,10 @@ Planet class is rolled from `PLANET_CLASS_WEIGHTS` (A–P, mid-range classes mos
 
 ## Changelog
 
+- 2026-05-29: Task 124 — research points no longer subtracted on level-up; `RESEARCH_THRESHOLDS` is cumulative and points accumulate forever; level-up loop only increments `techLevel` when `researchPoints >= researchThreshold(techLevel)`.
+- 2026-05-29: Task 120 — replaced exponential formula with hand-tuned `RESEARCH_THRESHOLDS` lookup array [10, 23, 38, 58, 82, 113, 151, 198, 258, 333, 426, 542, 688, 869, 1097]; `researchThreshold(level)` now returns `RESEARCH_THRESHOLDS[level] ?? Infinity`; array exported.
+- 2026-05-29: Task 116 — `build_complete` emission condition changed from `builtOnRound === currentRound - 1` to `builtOnRound === currentRound` so Report **Built** aligns with building activation timing.
+- 2026-05-28: Task 104 — optional `events` on `runProduction`; emits `research_levelup` and `build_complete` turn-report entries.
 - 2026-05-28: Task 77 — building placement simplified to single-tap Factory/Research Lab chips; `queueBuildOrder` auto-assigns first available slot; slot grid empty tiles are display-only.
 - 2026-05-28: Task 70 — `cancelBuildOrder` refunds and removes same-round buildings; planet modal under-construction slots tappable for instant cancel.
 - 2026-05-28: Task 69 — `queueBuildOrder` returns a result union instead of `void`; gold failures are distinguishable from slot/ownership failures for UI feedback in `GameScreen`.

@@ -12,17 +12,26 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import type { AiDifficulty } from '../game/aiEngine';
+import type { MapSize } from '../game/types';
 import { useGameStore, type GameRecord, type PlayerSlot } from '../store/gameStore';
 
-type MapSize = 'small' | 'medium' | 'large';
+const MAP_SIZE_CONFIG = {
+  small: { base: 20, perExtra: 10 },
+  medium: { base: 30, perExtra: 15 },
+  large: { base: 35, perExtra: 25 },
+} as const;
 
-const MAP_PRESETS: Record<
-  MapSize,
-  { label: string; detail: string; width: number; height: number; planetCount: number }
-> = {
-  small: { label: 'Small', detail: '40 × 40 · 16 worlds', width: 40, height: 40, planetCount: 16 },
-  medium: { label: 'Medium', detail: '60 × 60 · 32 worlds', width: 60, height: 60, planetCount: 32 },
-  large: { label: 'Large', detail: '80 × 80 · 54 worlds', width: 80, height: 80, planetCount: 54 },
+function computeMapDimensions(mapSize: MapSize, playerCount: number) {
+  const { base, perExtra } = MAP_SIZE_CONFIG[mapSize];
+  const planetCount = base + (playerCount - 2) * perExtra;
+  const gridSide = Math.ceil(Math.sqrt(planetCount * 90));
+  return { planetCount, width: gridSide, height: gridSide };
+}
+
+const MAP_SIZE_LABELS: Record<MapSize, string> = {
+  small: 'Small',
+  medium: 'Medium',
+  large: 'Large',
 };
 
 const DEFAULT_PLAYER_SLOTS: PlayerSlot[] = [
@@ -30,14 +39,16 @@ const DEFAULT_PLAYER_SLOTS: PlayerSlot[] = [
   { type: 'ai', difficulty: 'normal' },
 ];
 
+const BG_COLOR = '#f5f0eb';
+
 const COLORS = {
-  background: '#0a0a1a',
-  text: '#e0e0f0',
-  textMuted: '#8888aa',
-  accent: '#4a9eff',
-  accentDim: '#1a3a6a',
-  panel: '#12122a',
-  border: '#2a2a4a',
+  background: '#f5f0eb',
+  text: '#1c1c2e',
+  textMuted: '#6a6880',
+  accent: '#4060c8',
+  accentDim: '#e2e8f8',
+  panel: '#faf7f4',
+  border: '#ccc4b8',
 };
 
 type HomeNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
@@ -132,14 +143,15 @@ export default function HomeScreen() {
   };
 
   const handleLaunch = () => {
-    const preset = MAP_PRESETS[mapSize];
+    const { width, height, planetCount } = computeMapDimensions(mapSize, playerSlots.length);
 
     startNewGame({
       playerName: (playerSlots[0]?.name ?? '').trim() || 'Commander',
       playerSlots,
-      mapWidth: preset.width,
-      mapHeight: preset.height,
-      planetCount: preset.planetCount,
+      mapSize,
+      mapWidth: width,
+      mapHeight: height,
+      planetCount,
       playMode,
     });
     navigation.navigate('Game');
@@ -236,7 +248,7 @@ export default function HomeScreen() {
                     <View style={styles.difficultyRow}>
                       <Text style={styles.difficultyLabel}>Difficulty</Text>
                       <View style={styles.difficultyToggle}>
-                        {(['easy', 'normal'] as const).map((level) => (
+                        {(['easy', 'normal', 'hard'] as const).map((level) => (
                           <Pressable
                             key={level}
                             style={({ pressed }) => [
@@ -256,7 +268,7 @@ export default function HomeScreen() {
                                   styles.difficultyChipTextSelected,
                               ]}
                             >
-                              {level === 'easy' ? 'Easy' : 'Normal'}
+                              {level === 'easy' ? 'Easy' : level === 'normal' ? 'Normal' : 'Hard'}
                             </Text>
                           </Pressable>
                         ))}
@@ -355,8 +367,7 @@ export default function HomeScreen() {
           <View style={styles.section}>
             <Text style={styles.label}>Map size</Text>
             <View style={styles.mapSizeRow}>
-              {(Object.keys(MAP_PRESETS) as MapSize[]).map((size) => {
-                const preset = MAP_PRESETS[size];
+              {(Object.keys(MAP_SIZE_CONFIG) as MapSize[]).map((size) => {
                 const selected = mapSize === size;
                 return (
                   <Pressable
@@ -369,10 +380,7 @@ export default function HomeScreen() {
                     onPress={() => setMapSize(size)}
                   >
                     <Text style={[styles.mapSizeLabel, selected && styles.mapSizeLabelSelected]}>
-                      {preset.label}
-                    </Text>
-                    <Text style={[styles.mapSizeDetail, selected && styles.mapSizeDetailSelected]}>
-                      {preset.detail}
+                      {MAP_SIZE_LABELS[size]}
                     </Text>
                   </Pressable>
                 );
@@ -436,7 +444,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: BG_COLOR,
   },
   lobbyContainer: {
     flex: 1,

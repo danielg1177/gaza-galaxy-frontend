@@ -1,6 +1,7 @@
 import {
   computeAiTurn,
   generateAiName,
+  updateAiObservation,
   type AiDifficulty,
 } from '../game/aiEngine';
 import {
@@ -10,13 +11,16 @@ import {
 } from '../game/productionEngine';
 import { generateMap } from '../game/mapGenerator';
 import { HOME_PLANET_CLASS_CONFIG, placeSpawns } from '../game/spawnPlacer';
-import { resolveTurn } from '../game/turnEngine';
+import { resolveTurn, advanceToNextNonEliminatedPlayer, type ResolveTurnResult } from '../game/turnEngine';
 import type {
+  AiPlayerState,
   BuildingType,
   GameMap,
   GameState,
+  MapSize,
   PlayMode,
   Player,
+  TurnEvent,
 } from '../game/types';
 import { useMemo } from 'react';
 import { create } from 'zustand';
@@ -33,6 +37,7 @@ export interface GameConfig {
   playerName: string;
   /** Length 2–8; slot 0 is always the local human player. */
   playerSlots: PlayerSlot[];
+  mapSize: MapSize;
   mapWidth: number;
   mapHeight: number;
   planetCount: number;
@@ -65,6 +70,15 @@ export interface GameStore {
   pendingFleet: PendingFleet | null;
   queuedOrders: PendingFleet[];
   showingLockScreen: boolean;
+  turnReport: TurnEvent[];
+  /** Per-player archive of combat events not yet shown to that player. Populated at endTurn; cleared when the player starts their next turn (at their own endTurn call). */
+  playerBattleArchiveByPlayerId: Record<string, TurnEvent[]>;
+  /** Per-player turn report (research, landings, builds) for the ⋮ Report modal. Cleared for the outgoing player at each endTurn. */
+  playerTurnReportByPlayerId: Record<string, TurnEvent[]>;
+  /** Pass-and-play: eliminated human must see knockout battle report before turn advances. */
+  eliminatedPlayerPendingKnockout: boolean;
+  /** Human players knocked out on their own round-wrap endTurn; farewell shown at next natural turn slot. */
+  pendingFarewellPlayerIds: string[];
   startNewGame: (config: GameConfig) => void;
   loadGame: (id: string) => void;
   deleteGame: (id: string) => void;
@@ -74,11 +88,13 @@ export interface GameStore {
   confirmPendingFleet: () => void;
   queueOrder: (order: PendingFleet) => void;
   cancelQueuedOrder: (index: number) => void;
+  updateQueuedOrder: (index: number, shipCount: number) => void;
   queueBuildOrder: (planetId: string, buildingType: BuildingType) => QueueBuildOrderResult;
   cancelBuildOrder: (planetId: string, buildingIndex: number) => void;
   demolishBuilding: (planetId: string, buildingIndex: number) => void;
   setProductionSlider: (planetId: string, value: number) => void;
   endTurn: () => void;
+  acknowledgeKnockout: () => void;
   dismissLockScreen: () => void;
   resetGame: () => void;
   getVisibleGameState: () => GameState | null;
@@ -188,16 +204,63 @@ function visibleStateForRecord(record: GameRecord | null): GameState | null {
   return buildVisibleState(gameState, viewingPlayerId);
 }
 
-function runAiTurnsUntilHuman(state: GameState): GameState {
-  let current = state;
+function stripTurnEvents(result: ResolveTurnResult): GameState {
+  const { events: _events, ...state } = result;
+  return state;
+}
+
+function runAiTurnsUntilHuman(result: ResolveTurnResult): {
+  state: GameState;
+  events: TurnEvent[];
+} {
+  let allEvents = [...result.events];
+  let current = stripTurnEvents(result);
   while (current.status === 'active') {
     const currentPlayer = current.players.find((p) => p.id === current.currentPlayerId);
-    if (currentPlayer === undefined || !currentPlayer.isAI) {
+    if (currentPlayer === undefined || !currentPlayer.isAI || currentPlayer.isEliminated) {
       break;
     }
-    current = resolveTurn(current, computeAiTurn(current, current.currentPlayerId));
+    const aiResult = resolveTurn(current, computeAiTurn(current, current.currentPlayerId));
+    allEvents = allEvents.concat(aiResult.events);
+    current = stripTurnEvents(aiResult);
   }
-  return current;
+  return { state: current, events: allEvents };
+}
+
+function findNewlyEliminatedHumanIds(
+  events: TurnEvent[],
+  players: Player[],
+): string[] {
+  const ids: string[] = [];
+  for (const event of events) {
+    if (event.kind !== 'combat' || event.isHomePlanetConquest !== true) {
+      continue;
+    }
+    const defender = players.find(
+      (player) => !player.isAI && player.name === event.defenderName && player.isEliminated,
+    );
+    if (defender !== undefined && !ids.includes(defender.id)) {
+      ids.push(defender.id);
+    }
+  }
+  return ids;
+}
+
+function findFarewellInPath(
+  fromId: string,
+  toId: string,
+  players: Player[],
+  farewellIds: string[],
+): string | null {
+  if (farewellIds.length === 0) return null;
+  const fromIndex = players.findIndex((p) => p.id === fromId);
+  if (fromIndex === -1) return null;
+  for (let offset = 1; offset <= players.length; offset++) {
+    const candidate = players[(fromIndex + offset) % players.length];
+    if (candidate.id === toId) break;
+    if (farewellIds.includes(candidate.id)) return candidate.id;
+  }
+  return null;
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -207,6 +270,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   pendingFleet: null,
   queuedOrders: [],
   showingLockScreen: false,
+  turnReport: [],
+  playerBattleArchiveByPlayerId: {},
+  playerTurnReportByPlayerId: {},
+  eliminatedPlayerPendingKnockout: false,
+  pendingFarewellPlayerIds: [],
 
   startNewGame: (config) => {
     const seed = Date.now();
@@ -219,11 +287,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
       planetCount: config.planetCount,
       playerCount,
     });
-    const { map: mapWithSpawns, homePlanetClassByPlayerId } = placeSpawns(
+    const humanPlayerIds: string[] = [];
+    const aiPlayerIds: string[] = [];
+    config.playerSlots.forEach((slot, index) => {
+      if (slot.type === 'human') {
+        humanPlayerIds.push(playerIds[index]);
+      } else {
+        aiPlayerIds.push(playerIds[index]);
+      }
+    });
+    const { map: mapWithSpawns, homePlanetClassByPlayerId } = placeSpawns({
       map,
-      playerIds,
-      mulberry32(seed + 1),
-    );
+      humanPlayerIds,
+      aiPlayerIds,
+      mapSize: config.mapSize,
+      rng: mulberry32(seed + 1),
+    });
     const aiNameRng = mulberry32(seed + 2);
     const players = buildPlayers(
       mapWithSpawns,
@@ -232,7 +311,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       config,
       aiNameRng,
     );
-    const state: GameState = {
+    // Build initial AI fog-of-war state: each AI player starts with memory of their
+    // home planet and any planets within sensor range of it.
+    const initialAiStates: Record<string, AiPlayerState> = {};
+    const baseState: GameState = {
       map: mapWithSpawns,
       players,
       fleets: [],
@@ -244,6 +326,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       status: 'active',
       winnerId: null,
     };
+    for (const player of players) {
+      if (player.isAI) {
+        initialAiStates[player.id] = updateAiObservation(baseState, player.id, undefined);
+      }
+    }
+    const state: GameState = { ...baseState, aiStates: initialAiStates };
     const id = Date.now().toString();
     const name = `Game ${get().games.length + 1}`;
     const record: GameRecord = { id, name, state, config };
@@ -254,6 +342,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       pendingFleet: null,
       queuedOrders: [],
       showingLockScreen: false,
+      turnReport: [],
+      playerBattleArchiveByPlayerId: {},
+      playerTurnReportByPlayerId: {},
+      eliminatedPlayerPendingKnockout: false,
+      pendingFarewellPlayerIds: [],
     });
   },
 
@@ -264,6 +357,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       pendingFleet: null,
       queuedOrders: [],
       showingLockScreen: false,
+      turnReport: [],
+      playerBattleArchiveByPlayerId: {},
+      playerTurnReportByPlayerId: {},
+      eliminatedPlayerPendingKnockout: false,
+      pendingFarewellPlayerIds: [],
     }),
 
   deleteGame: (id) => {
@@ -302,6 +400,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
     set({ queuedOrders: queuedOrders.filter((_, i) => i !== index) });
+  },
+
+  updateQueuedOrder: (index, shipCount) => {
+    const { queuedOrders } = get();
+    if (index < 0 || index >= queuedOrders.length) {
+      return;
+    }
+    set({
+      queuedOrders: queuedOrders.map((o, i) =>
+        i === index ? { ...o, shipCount } : o,
+      ),
+    });
   },
 
   queueBuildOrder: (planetId, buildingType) => {
@@ -515,8 +625,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
     const gameState = record.state;
-    const humanPlayer = gameState.players.find((p) => !p.isAI);
-    if (humanPlayer === undefined || gameState.currentPlayerId !== humanPlayer.id) {
+    const humanPlayer = gameState.players.find(
+      (p) => p.id === gameState.currentPlayerId && !p.isAI,
+    );
+    if (humanPlayer === undefined) {
       return;
     }
     const { queuedOrders } = get();
@@ -532,15 +644,167 @@ export const useGameStore = create<GameStore>((set, get) => ({
       ],
       playerId: humanPlayer.id,
     };
-    const nextState = runAiTurnsUntilHuman(resolveTurn(gameState, input));
+    const { state: nextState, events } = runAiTurnsUntilHuman(resolveTurn(gameState, input));
+
+    const outgoingPlayerId = gameState.currentPlayerId;
+    const knockoutHumanIds = findNewlyEliminatedHumanIds(events, nextState.players);
+    // Players knocked out DURING their own endTurn (round wrap they triggered) need
+    // a deferred farewell — showing it immediately would mean they see it right after
+    // they end their own turn, before any other player goes.
+    const deferredKnockouts = knockoutHumanIds.filter((id) => id === outgoingPlayerId);
+    const immediateKnockouts = knockoutHumanIds.filter((id) => id !== outgoingPlayerId);
+    let newPendingFarewellIds = [...get().pendingFarewellPlayerIds, ...deferredKnockouts];
+    let finalState = nextState;
+    let pendingKnockout = false;
+    if (nextState.playMode === 'passAndPlay' && nextState.status === 'active') {
+      // Check if any deferred farewell player's position falls between the outgoing
+      // player and the next active player in the turn order
+      const farewellInPath = findFarewellInPath(
+        outgoingPlayerId,
+        nextState.currentPlayerId,
+        nextState.players,
+        newPendingFarewellIds,
+      );
+      if (farewellInPath !== null) {
+        finalState = { ...nextState, currentPlayerId: farewellInPath };
+        pendingKnockout = true;
+        newPendingFarewellIds = newPendingFarewellIds.filter((id) => id !== farewellInPath);
+      } else if (immediateKnockouts.length > 0) {
+        finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
+        pendingKnockout = true;
+      }
+    }
+
+    const showLock =
+      finalState.playMode === 'passAndPlay' && finalState.status === 'active';
+    const newArchive = { ...get().playerBattleArchiveByPlayerId };
+    delete newArchive[humanPlayer.id];
+    const newTurnReport = { ...get().playerTurnReportByPlayerId };
+    delete newTurnReport[humanPlayer.id];
+    for (const event of events) {
+      if (event.kind === 'combat') {
+        for (const player of finalState.players) {
+          if (player.isAI) {
+            continue;
+          }
+          if (
+            event.attackerName === player.name ||
+            event.defenderName === player.name
+          ) {
+            const existing = newArchive[player.id];
+            if (existing === undefined) {
+              newArchive[player.id] = [event];
+            } else {
+              existing.push(event);
+            }
+            const reportExisting = newTurnReport[player.id];
+            if (reportExisting === undefined) {
+              newTurnReport[player.id] = [event];
+            } else {
+              reportExisting.push(event);
+            }
+          }
+        }
+        continue;
+      }
+      if (event.kind === 'fleet_arrived') {
+        const owner = finalState.players.find(
+          (p) => !p.isAI && p.name === event.attackerName,
+        );
+        if (owner !== undefined) {
+          const existing = newTurnReport[owner.id];
+          if (existing === undefined) {
+            newTurnReport[owner.id] = [event];
+          } else {
+            existing.push(event);
+          }
+        }
+        continue;
+      }
+      if (event.kind === 'research_levelup') {
+        const owner = finalState.players.find(
+          (p) => !p.isAI && p.name === event.playerName,
+        );
+        if (owner !== undefined) {
+          const existing = newTurnReport[owner.id];
+          if (existing === undefined) {
+            newTurnReport[owner.id] = [event];
+          } else {
+            existing.push(event);
+          }
+        }
+        continue;
+      }
+      if (event.kind === 'build_complete') {
+        const planet = finalState.map.planets.find(
+          (p) => p.name === event.planetName,
+        );
+        const owner = finalState.players.find(
+          (p) => !p.isAI && p.id === planet?.owner,
+        );
+        if (owner !== undefined) {
+          const existing = newTurnReport[owner.id];
+          if (existing === undefined) {
+            newTurnReport[owner.id] = [event];
+          } else {
+            existing.push(event);
+          }
+        }
+      }
+    }
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id ? { ...g, state: finalState } : g,
+      ),
+      queuedOrders: [],
+      selectedPlanetId: null,
+      turnReport: events,
+      playerBattleArchiveByPlayerId: newArchive,
+      playerTurnReportByPlayerId: newTurnReport,
+      eliminatedPlayerPendingKnockout: pendingKnockout,
+      pendingFarewellPlayerIds: newPendingFarewellIds,
+      ...(showLock ? { showingLockScreen: true } : {}),
+    });
+  },
+
+  acknowledgeKnockout: () => {
+    const record = get().getActiveRecord();
+    if (record === null || !get().eliminatedPlayerPendingKnockout) {
+      return;
+    }
+    const farewellPlayerId = record.state.currentPlayerId;
+    let nextState = advanceToNextNonEliminatedPlayer(record.state);
+    const { state: afterAi } = runAiTurnsUntilHuman({
+      ...nextState,
+      events: [],
+    });
+    nextState = afterAi;
+    let newPendingFarewellIds = [...get().pendingFarewellPlayerIds];
+    const farewellInPath = findFarewellInPath(
+      farewellPlayerId,
+      nextState.currentPlayerId,
+      nextState.players,
+      newPendingFarewellIds,
+    );
+    let pendingKnockout = false;
+    if (
+      farewellInPath !== null &&
+      nextState.playMode === 'passAndPlay' &&
+      nextState.status === 'active'
+    ) {
+      nextState = { ...nextState, currentPlayerId: farewellInPath };
+      pendingKnockout = true;
+      newPendingFarewellIds = newPendingFarewellIds.filter((id) => id !== farewellInPath);
+    }
     const showLock =
       nextState.playMode === 'passAndPlay' && nextState.status === 'active';
+
     set({
       games: get().games.map((g) =>
         g.id === record.id ? { ...g, state: nextState } : g,
       ),
-      queuedOrders: [],
-      selectedPlanetId: null,
+      eliminatedPlayerPendingKnockout: pendingKnockout,
+      pendingFarewellPlayerIds: newPendingFarewellIds,
       ...(showLock ? { showingLockScreen: true } : {}),
     });
   },
@@ -558,6 +822,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       pendingFleet: null,
       queuedOrders: [],
       showingLockScreen: false,
+      turnReport: [],
+      playerBattleArchiveByPlayerId: {},
+      playerTurnReportByPlayerId: {},
+      eliminatedPlayerPendingKnockout: false,
+      pendingFarewellPlayerIds: [],
     });
   },
 
