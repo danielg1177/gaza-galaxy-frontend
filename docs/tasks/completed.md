@@ -1,5 +1,311 @@
 # Completed Tasks
 
+## Fleet dispatch modal — tap ship count to type value
+**Completed:** 2026-06-01
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/systems/movement.md`, `docs/development/current-state.md`
+**Notes:** Send/Edit Fleet modal ship count is tappable; opens numeric `TextInput` with value clamped to `0…modalMaxShips` on blur/submit. **Confirm** resolves the draft synchronously (does not rely on blur). − / + / **All** stepper unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — Remove `troop_produced` from all player-facing reports
+**Completed:** 2026-06-01
+**Files modified:** `src/screens/GameScreen.tsx`, `src/store/gameStore.ts`, `docs/systems/production.md`, `docs/development/current-state.md`
+**Notes:** Removed `TroopProducedReportCard`, Battle Report production lines, and ⋮ Report **Production** section; `gameStore` no longer routes `troop_produced` to `playerTurnReportByPlayerId`. Events may still be emitted for engine/async payloads.
+
+---
+
+## ~~Bug fix — `troop_produced` owner-only in ⋮ Report~~ *(superseded 2026-06-01 — UI removed entirely)*
+
+---
+
+## Strategic map modal (⋮ Map menu)
+**Completed:** 2026-06-01
+**Files modified:**
+- `src/components/StrategicMapModal.tsx` — new full-board overview modal with pinch-zoom and pan; owned planets green, others muted
+- `src/screens/GameScreen.tsx` — **Map** row in ⋮ header menu; wires `StrategicMapModal`
+- `docs/development/current-state.md`
+**Notes:** Opens from in-game ⋮ menu during human turn. Shows all planet positions (not fog-filtered). Fit-to-viewport on open. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 193 — Frontend: Round context on battle report + stale-fleet drain on load
+**Completed:** 2026-06-01
+**Files modified:**
+- `src/game/types.ts` — optional `roundNumber` on `fleet_arrived` and `combat` `TurnEvent` variants
+- `src/game/combatEngine.ts` — `resolveArrival` takes `roundNumber`; populates it on emitted events
+- `src/game/turnEngine.ts` — passes `state.roundNumber` into `resolveArrival`
+- `src/store/gameStore.ts` — `drainStaleFleets` filters `turnsRemaining <= 0` fleets on `loadGame` / `loadAsyncGame`
+- `src/screens/GameScreen.tsx` — muted **Round N** label on `BattleReportCard` and `FleetArrivedReportCard` (⋮ Report Troop Landings)
+- `docs/systems/combat.md`, `docs/systems/turn-engine.md`, task docs, `docs/development/current-state.md`
+**Notes:** Phase 37 complete. Two same-planet combat cards from different rounds are distinguishable; stale `turnsRemaining = 0` fleets no longer trigger phantom early-arrival combat after reload. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 192 — Frontend: Reset `troopAccumulator` on ownership change and add troop-production events
+**Completed:** 2026-06-01
+**Files modified:**
+- `src/game/types.ts` — `TurnEvent` adds `troop_produced` (`planetName`, `ownerName`, `troopsAdded`)
+- `src/game/combatEngine.ts` — `troopAccumulator: 0` on neutral capture and enemy-combat victory ownership change
+- `src/game/productionEngine.ts` — emits `troop_produced` when `wholeTroops >= 1`
+- `src/store/gameStore.ts` — routes `troop_produced` to planet owner and humans involved in combat on that planet
+- `src/screens/GameScreen.tsx` — `TroopProducedReportCard` in Battle Report modal (below combat cards for same planet); ⋮ Report **Production** section; `formatTurnEvent` case
+- `docs/systems/production.md`, `docs/systems/combat.md`, task docs, `docs/development/current-state.md`, `docs/development/known-issues.md`
+**Notes:** Phase 36 complete. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 191 — Frontend: Restore `turnReport` from loaded events in `loadAsyncGame`
+**Completed:** 2026-06-01
+**Files modified:**
+- `src/services/gamesService.ts` — `GameDetailResponse.latest_events`; `ApiGameDetail.latestEvents`; `mapGameDetail` maps `latestEvents: data.latest_events ?? []`
+- `src/store/gameStore.ts` — `loadAsyncGame` sets `turnReport: detail.latestEvents ?? []`
+- `docs/tasks/backlog.md`, `docs/tasks/completed.md`, `docs/tasks/in-progress.md`, `docs/development/known-issues.md`, `docs/development/current-state.md`, `docs/systems/multiplayer.md`, `backend/docs/development/known-issues.md`
+**Notes:** Phase 35 complete. Waiting player sees battle report when opening game after opponent submits. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 190 — Frontend: Include `events` in `submitTurn` payload
+**Completed:** 2026-06-01
+**Files modified:**
+- `src/services/gamesService.ts` — `SubmitTurnPayload.events?: TurnEvent[]`; `submitTurn` POST body includes `events: payload.events ?? []`
+- `src/store/gameStore.ts` — async `endTurn()` passes aggregated `events` to `submitTurn`
+- `docs/tasks/backlog.md`, `docs/tasks/completed.md`, `docs/tasks/in-progress.md`, `backend/docs/development/known-issues.md`
+**Notes:** Waiting player still gets empty battle report until Task 191 restores `turnReport` from `detail.latestEvents` in `loadAsyncGame`. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 189 — Backend: return latest_events from GET /api/games/{id}
+**Completed:** 2026-06-01
+**Files modified:**
+- `backend/app/Http/Controllers/GameController.php` — `show()` queries latest submitted turn (`resulting_state_json` not null); returns decoded `events_json` as `latest_events`, or `[]`
+- `backend/docs/backend/api-contract.md`, `backend/docs/development/task-log.md`, `backend/docs/project/current-state.md`, `backend/docs/development/known-issues.md`
+- `docs/tasks/backlog.md`, `docs/tasks/completed.md`
+**Notes:** Frontend still does not consume `latest_events` (Task 191).
+
+---
+
+## Task 188 — Backend: store turn events on submit
+**Completed:** 2026-06-01
+**Files modified:**
+- `backend/database/migrations/2026_06_01_000001_add_events_json_to_turns_table.php` — nullable `events_json` `longText` on `turns`
+- `backend/app/Http/Controllers/TurnController.php` — optional `events` validation; persist `events_json` on turn upsert
+- `backend/app/Models/Turn.php` — `events_json` in `$fillable`
+- `backend/docs/backend/database-schema.md`, `backend/docs/backend/turn-engine.md`, `backend/docs/development/task-log.md`, `backend/docs/project/current-state.md`
+- `docs/tasks/backlog.md`, `docs/tasks/completed.md`
+**Notes:** Storage only; `GET /api/games/{id}` does not return events yet (Task 189). `php artisan migrate` run successfully.
+
+---
+
+## Task 187 — Persist pending turn report across app exit for local games
+**Completed:** 2026-06-01
+**Files modified:**
+- `src/store/gameStore.ts` — `GameRecord.pendingTurnReport?: TurnEvent[]`; `endTurn` writes events to active record; `loadGame` restores `turnReport` and strips `pendingTurnReport` from persisted record; `clearPendingTurnReport` clears in-memory report and persisted field
+- `src/screens/GameScreen.tsx` — `handleCloseBattleReport` calls `clearPendingTurnReport` after dismiss
+- `docs/tasks/backlog.md`, `docs/tasks/completed.md`, `docs/development/known-issues.md`, `docs/development/current-state.md`, `docs/systems/save-system.md`
+**Notes:** Local games only (`loadAsyncGame` unchanged). Battle report auto-open on resume uses restored `turnReport`. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 172 — Remove AI difficulty picker; default AI to hard
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/screens/HomeScreen.tsx` — removed AI difficulty chips from player slot rows; new AI slots and human→AI toggles now set `difficulty: 'hard'`; async `createGame` payload always sends `difficulty: 'hard'` for AI slots
+- `src/store/gameStore.ts` — `buildPlayers` now forces all AI `Player.difficulty` values to `'hard'`
+- `docs/development/current-state.md` — status/changelog updated for Task 172
+- `docs/systems/ai-system.md` — documented hard-only AI setup behavior
+**Notes:** AI engine still supports Easy/Normal/Hard internally, but setup flow now standardizes gameplay to hard AI only. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 171 — Reduce average inter-planet distance by ~1.5 clicks
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/game/mapGenerator.ts` — `MIN_PLANET_DISTANCE` 4→2.5; `growthPosition` parent offset `4 + rng() * 7` → `2.5 + rng() * 7` (uniform [2.5, 9.5] clicks, mean ~6.0)
+**Notes:** Constants-only tune; placement algorithms, galaxy shapes, connectivity/bridge pass, bounding-box normalization, and `spawnPlacer` unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Command Center — creator delete async game
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/services/gamesService.ts` — `ApiGame.createdByUserId` mapped from `created_by_user_id` (fallback `creator_id`)
+- `src/screens/HomeScreen.tsx` — `AsyncGameCard` **Delete** when creator; confirmation alert; `deleteApiGame` + optimistic list removal + `deleteLocalGame` for matching `asyncGameId`; `ApiError` messages on failure
+**Notes:** No status gate. `npx tsc --noEmit` passes clean.
+
+---
+
+## Fleet dispatch modal — All button for max ship count
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/screens/GameScreen.tsx` — **All** button beside ship-count stepper sets count to `modalMaxShips` (garrison minus already-queued outbound); disabled when already at max or max is 0
+**Notes:** Display-only UX shortcut; no store/engine changes. `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — pass-and-play lock screen turn counter
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/screens/GameScreen.tsx` — lock screen turn label now displays `roundNumber` (shared round counter) instead of `turnNumber` (global per-player-turn counter)
+**Notes:** HUD already showed `roundNumber` (Task 78); lock screen was missed when turn info was added. In a 2-player game both players now see Turn 1 on round 1, Turn 2 on round 2, etc. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 150 — Bug fix: async end turn returns home instead of next player's turn
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/store/gameStore.ts` — `isAsyncGame()` returns true when `activeRecord.asyncGameId != null` (not `config.playMode` or decoded `state.playMode`); `loadAsyncGame` sets `playMode: 'asyncMultiplayer'` on parsed `partialStateJson` / `stateJson` before storing; `endTurn` async branch keyed on `asyncGameId`
+- `src/screens/GameScreen.tsx` — pass-and-play lock screen rendered only when `showingLockScreen && !isAsyncGame`; `isAsyncGame` selector subscribes to `activeGameId` + `games[].asyncGameId`; `shouldReturnHome` effect early-returns when false
+**Notes:** Async flow unchanged: resolve turn locally (including AI), `submitTurn`, `resetGame()`, `shouldReturnHome` → navigate Home. Pass-and-play lock screen and turn handoff unchanged when `asyncGameId == null`. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 149 — Bug fix: campaigns visible after exit to Home
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/screens/GameScreen.tsx` — **Exit to Home** (pass-and-play) calls `navigation.navigate('Home')` only; removed `resetGame()` so local games stay in `games[]`; **Exit Game** (async mid-turn save) navigates home without `resetGame()` after `saveTurnProgress` (or when no `asyncGameId`)
+- `src/screens/HomeScreen.tsx` — **Pass & Play** section always renders every `GameRecord` where `asyncGameId == null` (no status filter); decoupled from empty-state ternary so local cards never hidden
+**Notes:** Victory/game-over **Return to Home** still calls `resetGame()` for finished games. Async games after successful `endTurn` submit still call `resetGame()` (local copy discarded; server is source of truth). `npx tsc --noEmit` passes clean.
+
+---
+
+## GameScreen — pass-and-play lock screen turn info + Start Turn button
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/screens/GameScreen.tsx` — lock screen shows round number (`roundNumber`), active player name, and **Start Turn** button; overlay is non-tappable except via the button (replaces "Tap anywhere to continue")
+**Notes:** `dismissLockScreen` behaviour unchanged; map snap and battle-report auto-open on dismiss unchanged.
+
+---
+
+## HomeScreen — "Play with Friends" label + remove coming soon UI
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/screens/HomeScreen.tsx` — play-mode card title "Play with Friends" (was "Async Multiplayer"); subtitle "Separate devices" (removed coming soon); lobby async games section label updated; removed `playMode*ComingSoon` dimmed styles
+**Notes:** Internal `playMode` value remains `asyncMultiplayer`. No engine/store changes.
+
+---
+
+## AppTopBar — Friends (top-left) + Logout (top-right)
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/components/AppTopBar.tsx` (new) — shared safe-area top row; Friends pill with pending-request badge; Logout with confirmation `Alert`; calls `authStore.logout()`
+- `src/screens/HomeScreen.tsx` — uses `AppTopBar` on lobby and campaign-setup views; removed inline `FriendsNavButton` / top-bar styles
+- `src/screens/FriendsScreen.tsx` — uses `AppTopBar` with `showFriendsButton={false}` (Logout only on right)
+**Notes:** `GameScreen` unchanged (in-game ⋮ menu retains Exit to Home). `npx tsc --noEmit` passes clean.
+
+---
+
+## Bug fix — HomeScreen Friends button hidden under iOS status bar
+**Completed:** 2026-05-31
+**Files modified:**
+- `src/screens/HomeScreen.tsx` — Friends nav button moved from absolutely positioned `friendsButtonContainer` into in-flow `topBar` inside `SafeAreaView` (lobby + campaign setup); React Native absolute children ignore parent safe-area padding, which caused overlap with battery/time indicators
+**Notes:** `GameScreen` already uses `useSafeAreaInsets()` for HUD placement. No system doc changes.
+
+---
+
+## Task 148 — Notification deep-link handler (tap notification → open game)
+**Completed:** 2026-05-29
+**Files modified:**
+- `App.tsx` — `pendingGameId` ref; `useNavigationContainerRef<RootStackParamList>()` on `NavigationContainer`; `addNotificationResponseReceivedListener` stores `game_id` from notification data; `consumePendingGameId()` fetches via `getGame`, loads via `loadAsyncGame`, navigates `Home` then `Game` with `isReadOnly` when `alertState === 'waiting'`; cold-start via `useEffect([currentUser])`, warm-start via direct listener call when authenticated; all errors swallowed
+**Notes:** Phase 16 complete. No screen or `pushNotificationService.ts` changes. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 147 — Expo push token registration + API upload on startup
+**Completed:** 2026-05-29
+**Files modified:**
+- `package.json` / `package-lock.json` — `expo-notifications` installed (Expo SDK 54)
+- `src/services/pushNotificationService.ts` (new) — `registerNotificationHandler()` sets foreground notification behavior; `setupPushNotifications()` requests permissions, fetches Expo push token, deduplicates via AsyncStorage key `push_token`, uploads via `POST /push-token`, swallows all errors
+- `App.tsx` — module-level `registerNotificationHandler()`; `useEffect` on `currentUser` calls `setupPushNotifications()` when user is logged in
+**Notes:** `shouldShowBanner` and `shouldShowList` added alongside deprecated `shouldShowAlert` for Expo SDK 54 `NotificationBehavior` types. Deep-link handler is Task 148. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 146 — Async game state fetch on open + read-only spectator mode
+**Completed:** 2026-05-29
+**Files modified:**
+- `App.tsx` — `Game` route params add optional `isReadOnly?: boolean`
+- `src/screens/HomeScreen.tsx` — `loadingGameId` per-card loading; block other taps while loading; navigate only after successful `getGame`; `Alert` on failure; pass `isReadOnly: detail.alertState === 'waiting'`; `waiting` cards tappable
+- `src/screens/GameScreen.tsx` — read `isReadOnly` from route; amber spectator banner; hide End Turn and ⋮ when read-only; `handleDragStart` early return when read-only
+**Notes:** Phase 15 complete. `loadAsyncGame` unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 145 — Async endTurn: submit via API and navigate home
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/store/gameStore.ts` — `isSubmittingTurn: boolean`, `shouldReturnHome: boolean`, `clearReturnHome()`; post-resolution async block in `endTurn`: snapshots `queuedOrders` as actions, calls `submitTurn`, sets `shouldReturnHome` on success, `Alert` on failure; pass-and-play path unchanged
+- `src/screens/GameScreen.tsx` — `useEffect` on `shouldReturnHome` → navigate Home; full-screen "Submitting turn…" overlay with `ActivityIndicator` while `isSubmittingTurn`; End Turn button disabled during submit
+**Notes:** All local turn resolution logic unchanged. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 144 — Mid-turn state restoration on async game open
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/store/gameStore.ts` — `loadAsyncGame` explicit mid-turn branch: when `inProgressActions.partialStateJson` is present, parse as `GameState` and map `queuedOrders` to `PendingFleet[]`; otherwise parse `stateJson` with empty queue; `asyncGameId` unchanged
+**Notes:** HomeScreen tap handler unchanged (`getGame` → `loadAsyncGame` → navigate). `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 143 — Exit Game in ⋮ menu + mid-turn save to API
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/store/gameStore.ts` — `isAsyncGame()` returns true when active record `config.playMode === 'asyncMultiplayer'`
+- `src/screens/GameScreen.tsx` — ⋮ menu **Exit Game** (async: `saveTurnProgress` with serialized `GameState` + `queuedOrders`, `ActivityIndicator` while saving, `Alert` on failure) and **Exit to Home** (pass-and-play: `resetGame` + navigate); skips API when `asyncGameId` falsy
+**Notes:** Phase 15 started. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 142 — Turn alert badges on async game cards
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/screens/HomeScreen.tsx` — `sortAsyncGamesByAlertPriority`; `AsyncGameCard` badges (YOUR TURN, IN PROGRESS, Waiting..., VICTORY/DEFEAT/FINISHED); left accent for actionable cards; tappable only for `your_turn`/`in_progress`; victory heuristic via non-eliminated human player match
+**Notes:** Phase 14 complete. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 141 — Async games list in HomeScreen from API
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/store/gameStore.ts` — `GameRecord.asyncGameId?`; `loadAsyncGame(detail)` parses `stateJson` or mid-turn `partialStateJson`, builds minimal `GameConfig`, restores `queuedOrders`, upserts into `games[]`, sets `activeGameId`
+- `src/screens/HomeScreen.tsx` — `asyncGames`/`asyncGamesLoading` state; `listGames()` in `useFocusEffect` (first-load spinner only); "Async Multiplayer" section above pass-and-play; `AsyncGameCard` with waiting/finished/active states; tap → `getGame` + `loadAsyncGame` + navigate; invite accept with `gameStarted` refreshes list; local games filtered by `asyncGameId == null`
+**Notes:** Pull-to-refresh deferred (not in task requirements). `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 140 — Game invites section on HomeScreen
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/screens/HomeScreen.tsx` — `invites`/`inviteLoadingId` state; `listInvites()` in `useFocusEffect` (silent errors); "Game Invites (N)" section above games list with accept/decline rows; `ActivityIndicator` while action in-flight; `Alert` on failure; `// TODO Task 141` stub when `gameStarted`
+**Notes:** Section hidden when `invites.length === 0`. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 139 — Friend picker for human slots in async game creation
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/store/gameStore.ts` — `PlayerSlot` gains optional `userId?: number` for async human invite targets
+- `src/screens/HomeScreen.tsx` — async non-slot-0 human slots show tappable friend picker row + modal; `getFriends()` loaded when `playMode === 'asyncMultiplayer'`; select sets `name`/`userId`, clear resets; empty state links to Friends; pass-and-play and slot 0 keep TextInput
+**Notes:** `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 138 — Username default in game setup
+**Completed:** 2026-05-29
+**Files modified:**
+- `src/screens/HomeScreen.tsx` — imports `useAuthStore`; `createDefaultPlayerSlots(slot0Name)` replaces hardcoded `DEFAULT_PLAYER_SLOTS`; slot 0 initializes with `currentUser?.username ?? 'Commander'`; TextInput remains controlled and editable
+**Notes:** Applies to both pass-and-play and async multiplayer modes. `handleLaunch` fallback `'Commander'` unchanged for empty trimmed names. `npx tsc --noEmit` passes clean.
+
+---
+
+## Task 137 — Games service layer
+**Completed:** 2026-05-29
+**Files created:**
+- `src/services/gamesService.ts` — exports `ApiGame`, `ApiGamePlayer`, `ApiGameDetail`, `CreateGamePayload`, `InProgressTurnPayload`, `SubmitTurnPayload`, `ApiInvite`; nine API functions (`listGames`, `getGame`, `createGame`, `deleteGame`, `saveTurnProgress`, `submitTurn`, `listInvites`, `acceptInvite`, `declineInvite`); private snake_case response interfaces + mapper functions; all calls via `apiClient`
+**Notes:** `saveTurnProgress` sends `partial_state_json` over the wire; `submitTurn` sends `resulting_state`, `turn_number`, `round_number`. `npx tsc --noEmit` passes clean.
+
+---
+
 ## AI Brain Overhaul — Fog-of-war memory, three difficulty tiers, economy decisions
 **Completed:** 2026-05-29
 **Files modified:**

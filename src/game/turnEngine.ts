@@ -1,5 +1,5 @@
 import { updateAiObservation } from './aiEngine';
-import { resolveArrival } from './combatEngine';
+import { resolveArrival, resolveMultiwayCombat, type MultiwayCombatant } from './combatEngine';
 import { mulberry32 } from './mapGenerator';
 import {
   advanceFleets,
@@ -36,6 +36,97 @@ function cloneMap(map: GameMap): GameMap {
     height: map.height,
     planets: map.planets.map((p) => ({ ...p, buildings: [...p.buildings] })),
   };
+}
+
+function hashSeed(n: number): number {
+  let h = n >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function groupArrivalsByDestination(arrivals: Fleet[], map: GameMap): Map<string, Fleet[]> {
+  const destinationOrder: string[] = [];
+  const byDestination = new Map<string, Fleet[]>();
+
+  for (const fleet of arrivals) {
+    const dest = fleet.destinationPlanetId;
+    if (!byDestination.has(dest)) {
+      byDestination.set(dest, []);
+      destinationOrder.push(dest);
+    }
+    byDestination.get(dest)!.push(fleet);
+  }
+
+  const grouped = new Map<string, Fleet[]>();
+
+  for (const destinationPlanetId of destinationOrder) {
+    const destFleets = byDestination.get(destinationPlanetId)!;
+    const byOwner = new Map<string, Fleet[]>();
+
+    for (const fleet of destFleets) {
+      if (!byOwner.has(fleet.ownerId)) {
+        byOwner.set(fleet.ownerId, []);
+      }
+      byOwner.get(fleet.ownerId)!.push(fleet);
+    }
+
+    const merged: Fleet[] = [];
+    for (const ownerFleets of byOwner.values()) {
+      const first = ownerFleets[0];
+      const shipCount = ownerFleets.reduce((sum, f) => sum + f.shipCount, 0);
+      merged.push({ ...first, shipCount });
+    }
+
+    const planet = findPlanet(map, destinationPlanetId);
+    const planetOwner = planet?.owner;
+
+    merged.sort((a, b) => {
+      const aIsOwner = a.ownerId === planetOwner;
+      const bIsOwner = b.ownerId === planetOwner;
+      if (aIsOwner && !bIsOwner) {
+        return -1;
+      }
+      if (!aIsOwner && bIsOwner) {
+        return 1;
+      }
+      return a.id.localeCompare(b.id);
+    });
+
+    grouped.set(destinationPlanetId, merged);
+  }
+
+  return grouped;
+}
+
+function groupAndSortArrivals(arrivals: Fleet[], map: GameMap): Fleet[] {
+  return [...groupArrivalsByDestination(arrivals, map).values()].flat();
+}
+
+function countTotalCombatants(destFleets: Fleet[], planet: Planet | undefined): number {
+  const arrivalOwners = new Set(destFleets.map((f) => f.ownerId));
+  if (planet !== undefined && planet.owner !== 'neutral' && !arrivalOwners.has(planet.owner)) {
+    return arrivalOwners.size + 1;
+  }
+  return arrivalOwners.size;
+}
+
+function buildCombatantList(destFleets: Fleet[], planet: Planet | undefined): MultiwayCombatant[] {
+  const combatants: MultiwayCombatant[] = [];
+  if (planet !== undefined && planet.owner !== 'neutral') {
+    let garrisonShips = planet.shipCount;
+    const ownerArriving = destFleets.find((f) => f.ownerId === planet.owner);
+    if (ownerArriving !== undefined) {
+      garrisonShips += ownerArriving.shipCount;
+    }
+    combatants.push({ ownerId: planet.owner, ships: garrisonShips });
+  }
+  for (const fleet of destFleets) {
+    if (planet === undefined || fleet.ownerId !== planet.owner) {
+      combatants.push({ ownerId: fleet.ownerId, ships: fleet.shipCount });
+    }
+  }
+  return combatants;
 }
 
 export function advanceToNextNonEliminatedPlayer(state: GameState): GameState {
@@ -209,7 +300,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
   let fleets: Fleet[] = state.fleets.map((f) => ({ ...f }));
   let players: Player[] = state.players.map((p) => ({ ...p }));
 
-  const eligibleArrivals: Fleet[] = [];
+  let eligibleArrivals: Fleet[] = [];
   let stillInTransit: Fleet[] = [];
   let combatRngCounter = 0;
 
@@ -221,23 +312,61 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     }
   }
 
-  for (const fleet of eligibleArrivals) {
-    const combatRng = mulberry32(state.seed + state.roundNumber * 10000 + combatRngCounter * 100);
-    combatRngCounter += 1;
-    const arrivalResult = resolveArrival(
-      combatRng,
-      fleet,
-      map,
-      events,
-      players,
-      stillInTransit,
-    );
-    map = arrivalResult.map;
-    if (arrivalResult.players !== undefined) {
-      players = arrivalResult.players;
-    }
-    if (arrivalResult.fleets !== undefined) {
-      stillInTransit = arrivalResult.fleets;
+  const arrivalsByDest = groupArrivalsByDestination(eligibleArrivals, map);
+  for (const [destPlanetId, destFleets] of arrivalsByDest) {
+    const destPlanet = findPlanet(map, destPlanetId);
+    const totalCombatants = countTotalCombatants(destFleets, destPlanet);
+
+    if (totalCombatants >= 3) {
+      const combatants = buildCombatantList(destFleets, destPlanet);
+      const combatRng = mulberry32(hashSeed(state.seed + state.roundNumber * 10000 + combatRngCounter * 100));
+      combatRngCounter += 1;
+      const result = resolveMultiwayCombat(
+        combatRng,
+        combatants,
+        map,
+        destPlanetId,
+        state.roundNumber,
+        events,
+        players,
+        stillInTransit,
+      );
+      map = result.map;
+      if (result.players !== undefined) {
+        players = result.players;
+      }
+      if (result.fleets !== undefined) {
+        stillInTransit = result.fleets;
+      }
+    } else {
+      for (let i = 0; i < destFleets.length; i++) {
+        const fleet = destFleets[i];
+        const destP = findPlanet(map, fleet.destinationPlanetId);
+        const nextFleet = destFleets[i + 1];
+        const isSilentReinforcement =
+          destP !== undefined &&
+          fleet.ownerId === destP.owner &&
+          nextFleet !== undefined &&
+          nextFleet.destinationPlanetId === fleet.destinationPlanetId;
+        const combatRng = mulberry32(hashSeed(state.seed + state.roundNumber * 10000 + combatRngCounter * 100));
+        combatRngCounter += 1;
+        const arrivalResult = resolveArrival(
+          combatRng,
+          fleet,
+          map,
+          state.roundNumber,
+          isSilentReinforcement ? undefined : events,
+          players,
+          stillInTransit,
+        );
+        map = arrivalResult.map;
+        if (arrivalResult.players !== undefined) {
+          players = arrivalResult.players;
+        }
+        if (arrivalResult.fleets !== undefined) {
+          stillInTransit = arrivalResult.fleets;
+        }
+      }
     }
   }
 
@@ -312,36 +441,74 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
   const isRoundWrap = status === 'active' && nextPlayerIndex <= currentPlayerIndex;
 
   if (isRoundWrap) {
-    const { inTransit, arrived: justArrived } = advanceFleets(fleets);
-    fleets = inTransit;
-    for (const fleet of justArrived) {
-      const combatRng = mulberry32(state.seed + state.roundNumber * 10000 + combatRngCounter * 100);
-      combatRngCounter += 1;
-      const arrivalResult = resolveArrival(
-        combatRng,
-        fleet,
-        map,
-        events,
-        players,
-        fleets,
-      );
-      map = arrivalResult.map;
-      if (arrivalResult.players !== undefined) {
-        players = arrivalResult.players;
-      }
-      if (arrivalResult.fleets !== undefined) {
-        fleets = arrivalResult.fleets;
-      }
-    }
-
-    const { map: newMap, players: newPlayers } = runProduction(
+    const { map: productionMap, players: productionPlayers } = runProduction(
       map,
       players,
       state.roundNumber,
       events,
     );
-    map = newMap;
-    players = newPlayers;
+    map = productionMap;
+    players = productionPlayers;
+
+    const { inTransit, arrived } = advanceFleets(fleets);
+    fleets = inTransit;
+    const arrivalsByDest = groupArrivalsByDestination(arrived, map);
+    for (const [destPlanetId, destFleets] of arrivalsByDest) {
+      const destPlanet = findPlanet(map, destPlanetId);
+      const totalCombatants = countTotalCombatants(destFleets, destPlanet);
+
+      if (totalCombatants >= 3) {
+        const combatants = buildCombatantList(destFleets, destPlanet);
+        const combatRng = mulberry32(hashSeed(state.seed + state.roundNumber * 10000 + combatRngCounter * 100));
+        combatRngCounter += 1;
+        const result = resolveMultiwayCombat(
+          combatRng,
+          combatants,
+          map,
+          destPlanetId,
+          state.roundNumber,
+          events,
+          players,
+          fleets,
+        );
+        map = result.map;
+        if (result.players !== undefined) {
+          players = result.players;
+        }
+        if (result.fleets !== undefined) {
+          fleets = result.fleets;
+        }
+      } else {
+        for (let i = 0; i < destFleets.length; i++) {
+          const fleet = destFleets[i];
+          const destP = findPlanet(map, fleet.destinationPlanetId);
+          const nextFleet = destFleets[i + 1];
+          const isSilentReinforcement =
+            destP !== undefined &&
+            fleet.ownerId === destP.owner &&
+            nextFleet !== undefined &&
+            nextFleet.destinationPlanetId === fleet.destinationPlanetId;
+          const combatRng = mulberry32(hashSeed(state.seed + state.roundNumber * 10000 + combatRngCounter * 100));
+          combatRngCounter += 1;
+          const arrivalResult = resolveArrival(
+            combatRng,
+            fleet,
+            map,
+            state.roundNumber,
+            isSilentReinforcement ? undefined : events,
+            players,
+            fleets,
+          );
+          map = arrivalResult.map;
+          if (arrivalResult.players !== undefined) {
+            players = arrivalResult.players;
+          }
+          if (arrivalResult.fleets !== undefined) {
+            fleets = arrivalResult.fleets;
+          }
+        }
+      }
+    }
   }
 
   let roundNumber = state.roundNumber;

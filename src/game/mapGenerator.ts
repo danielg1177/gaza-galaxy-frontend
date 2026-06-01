@@ -29,8 +29,9 @@ const PLANET_CLASS_WEIGHTS: readonly { class: PlanetClass; weight: number }[] = 
   { class: 'P', weight: 7 / 117 },
 ];
 
-const MIN_PLANET_DISTANCE = 4;
+const MIN_PLANET_DISTANCE = 2.5; // minimum in final grid coordinates (matches computeClickDistance)
 const MAX_PLACEMENT_ATTEMPTS_PER_PLANET = 2000;
+const MAX_SPACING_ATTEMPTS = 25;
 const PLANET_EDGE_PADDING = 2;
 
 const PLANET_ADJECTIVES = [
@@ -68,8 +69,37 @@ function euclideanDistance(a: Position, b: Position): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-function minPlanetDistance(): number {
-  return MIN_PLANET_DISTANCE;
+function minPairwiseDistance(positions: Position[]): number {
+  let min = Infinity;
+  for (let i = 0; i < positions.length; i++) {
+    for (let j = i + 1; j < positions.length; j++) {
+      min = Math.min(min, euclideanDistance(positions[i], positions[j]));
+    }
+  }
+  return min;
+}
+
+function normalizePositionsToGrid(positions: Position[], width: number, height: number): void {
+  const xs = positions.map((p) => p.x);
+  const ys = positions.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+  const innerW = width - 1 - 2 * PLANET_EDGE_PADDING;
+  const innerH = height - 1 - 2 * PLANET_EDGE_PADDING;
+  // Uniform scale preserves inter-planet distances (non-uniform X/Y stretch was shrinking pairs).
+  const scale = Math.min(innerW / rangeX, innerH / rangeY);
+  const padX = PLANET_EDGE_PADDING + Math.floor((innerW - rangeX * scale) / 2);
+  const padY = PLANET_EDGE_PADDING + Math.floor((innerH - rangeY * scale) / 2);
+  for (let i = 0; i < positions.length; i++) {
+    positions[i] = {
+      x: padX + Math.round((positions[i].x - minX) * scale),
+      y: padY + Math.round((positions[i].y - minY) * scale),
+    };
+  }
 }
 
 function rollPlanetClass(rng: () => number): PlanetClass {
@@ -131,8 +161,8 @@ function growthPosition(
   }
   // Pick a random parent from all placed planets
   const parent = placed[Math.floor(rng() * placed.length)];
-  // Triangular distance distribution: range ~4–13, peak ~8–9
-  const dist = 4 + rng() * 7;
+  // Uniform distance distribution: range [2.5, 9.5] clicks, mean ~6.0
+  const dist = 2.5 + rng() * 7;
   // Random direction
   const angle = rng() * 2 * Math.PI;
   const x = Math.round(parent.x + Math.cos(angle) * dist);
@@ -147,8 +177,8 @@ function placePlanetsScattered(
   planetCount: number,
   width: number,
   height: number,
+  virtualMinDistance: number,
 ): Position[] {
-  const minDistance = minPlanetDistance();
   const positions: Position[] = [];
 
   for (let i = 0; i < planetCount; i++) {
@@ -156,35 +186,19 @@ function placePlanetsScattered(
     for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
       const candidate = growthPosition(rng, positions, width * 2, height * 2);
       if (candidate === null) continue;
-      if (!isFarEnough(candidate, positions, minDistance)) continue;
+      if (!isFarEnough(candidate, positions, virtualMinDistance)) continue;
       positions.push(candidate);
       placed = true;
       break;
     }
     if (!placed) {
       throw new Error(
-        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (minDistance=${minDistance})`,
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (virtualMinDistance=${virtualMinDistance})`,
       );
     }
   }
 
-  // Normalize bounding box of placed positions into the configured grid with padding
-  const xs = positions.map((p) => p.x);
-  const ys = positions.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const rangeX = maxX - minX || 1;
-  const rangeY = maxY - minY || 1;
-  const innerW = width - 1 - 2 * PLANET_EDGE_PADDING;
-  const innerH = height - 1 - 2 * PLANET_EDGE_PADDING;
-  for (let i = 0; i < positions.length; i++) {
-    const nx = PLANET_EDGE_PADDING + Math.round(((positions[i].x - minX) / rangeX) * innerW);
-    const ny = PLANET_EDGE_PADDING + Math.round(((positions[i].y - minY) / rangeY) * innerH);
-    positions[i] = { x: nx, y: ny };
-  }
-
+  normalizePositionsToGrid(positions, width, height);
   return positions;
 }
 
@@ -193,6 +207,7 @@ function placePlanetsArms(
   planetCount: number,
   width: number,
   height: number,
+  virtualMinDistance: number,
 ): Position[] {
   const virtualWidth = width * 2;
   const virtualHeight = height * 2;
@@ -219,7 +234,7 @@ function placePlanetsArms(
       );
 
       if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
-      if (!isFarEnough({ x, y }, positions, MIN_PLANET_DISTANCE)) continue;
+      if (!isFarEnough({ x, y }, positions, virtualMinDistance)) continue;
 
       positions.push({ x, y });
       placed = true;
@@ -232,23 +247,7 @@ function placePlanetsArms(
     }
   }
 
-  // Normalize bounding box of placed positions into the configured grid with padding
-  const xs = positions.map((p) => p.x);
-  const ys = positions.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const rangeX = maxX - minX || 1;
-  const rangeY = maxY - minY || 1;
-  const innerW = width - 1 - 2 * PLANET_EDGE_PADDING;
-  const innerH = height - 1 - 2 * PLANET_EDGE_PADDING;
-  for (let i = 0; i < positions.length; i++) {
-    const nx = PLANET_EDGE_PADDING + Math.round(((positions[i].x - minX) / rangeX) * innerW);
-    const ny = PLANET_EDGE_PADDING + Math.round(((positions[i].y - minY) / rangeY) * innerH);
-    positions[i] = { x: nx, y: ny };
-  }
-
+  normalizePositionsToGrid(positions, width, height);
   return positions;
 }
 
@@ -257,6 +256,7 @@ function placePlanetsDenseCore(
   planetCount: number,
   width: number,
   height: number,
+  virtualMinDistance: number,
 ): Position[] {
   const virtualWidth = width * 2;
   const virtualHeight = height * 2;
@@ -275,7 +275,7 @@ function placePlanetsDenseCore(
       const y = Math.round(virtualCy + Math.sin(angle) * radius);
 
       if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
-      if (!isFarEnough({ x, y }, positions, MIN_PLANET_DISTANCE)) continue;
+      if (!isFarEnough({ x, y }, positions, virtualMinDistance)) continue;
 
       positions.push({ x, y });
       placed = true;
@@ -288,23 +288,7 @@ function placePlanetsDenseCore(
     }
   }
 
-  // Normalize bounding box of placed positions into the configured grid with padding
-  const xs = positions.map((p) => p.x);
-  const ys = positions.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const rangeX = maxX - minX || 1;
-  const rangeY = maxY - minY || 1;
-  const innerW = width - 1 - 2 * PLANET_EDGE_PADDING;
-  const innerH = height - 1 - 2 * PLANET_EDGE_PADDING;
-  for (let i = 0; i < positions.length; i++) {
-    const nx = PLANET_EDGE_PADDING + Math.round(((positions[i].x - minX) / rangeX) * innerW);
-    const ny = PLANET_EDGE_PADDING + Math.round(((positions[i].y - minY) / rangeY) * innerH);
-    positions[i] = { x: nx, y: ny };
-  }
-
+  normalizePositionsToGrid(positions, width, height);
   return positions;
 }
 
@@ -313,6 +297,7 @@ function placePlanetsRing(
   planetCount: number,
   width: number,
   height: number,
+  virtualMinDistance: number,
 ): Position[] {
   const virtualWidth = width * 2;
   const virtualHeight = height * 2;
@@ -332,7 +317,7 @@ function placePlanetsRing(
       const y = Math.round(virtualCy + Math.sin(angle) * radius);
 
       if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
-      if (!isFarEnough({ x, y }, positions, MIN_PLANET_DISTANCE)) continue;
+      if (!isFarEnough({ x, y }, positions, virtualMinDistance)) continue;
 
       positions.push({ x, y });
       placed = true;
@@ -345,24 +330,37 @@ function placePlanetsRing(
     }
   }
 
-  // Normalize bounding box of placed positions into the configured grid with padding
-  const xs = positions.map((p) => p.x);
-  const ys = positions.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const rangeX = maxX - minX || 1;
-  const rangeY = maxY - minY || 1;
-  const innerW = width - 1 - 2 * PLANET_EDGE_PADDING;
-  const innerH = height - 1 - 2 * PLANET_EDGE_PADDING;
-  for (let i = 0; i < positions.length; i++) {
-    const nx = PLANET_EDGE_PADDING + Math.round(((positions[i].x - minX) / rangeX) * innerW);
-    const ny = PLANET_EDGE_PADDING + Math.round(((positions[i].y - minY) / rangeY) * innerH);
-    positions[i] = { x: nx, y: ny };
-  }
-
+  normalizePositionsToGrid(positions, width, height);
   return positions;
+}
+
+function enforceMinimumSpacing(positions: Position[], width: number, height: number): void {
+  const minX = PLANET_EDGE_PADDING;
+  const maxX = width - 1 - PLANET_EDGE_PADDING;
+  const minY = PLANET_EDGE_PADDING;
+  const maxY = height - 1 - PLANET_EDGE_PADDING;
+  const maxIter = positions.length * positions.length * 4;
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    let moved = false;
+    for (let i = 0; i < positions.length; i++) {
+      for (let j = i + 1; j < positions.length; j++) {
+        const d = euclideanDistance(positions[i], positions[j]);
+        if (d >= MIN_PLANET_DISTANCE || d === 0) continue;
+        moved = true;
+        const push = (MIN_PLANET_DISTANCE - d) / 2 + 0.01;
+        const dx = positions[j].x - positions[i].x;
+        const dy = positions[j].y - positions[i].y;
+        const len = d || 1;
+        let jx = Math.round(positions[j].x + (dx / len) * push);
+        let jy = Math.round(positions[j].y + (dy / len) * push);
+        jx = Math.max(minX, Math.min(maxX, jx));
+        jy = Math.max(minY, Math.min(maxY, jy));
+        positions[j] = { x: jx, y: jy };
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 const CONNECTIVITY_RANGE = 11; // must match BASE_FLEET_RANGE_CLICKS in movementEngine.ts
@@ -428,8 +426,8 @@ function ensureConnectivity(positions: Position[]): void {
         }
       }
       if (!placed) {
-        positions.push({ x: bx, y: by });
-        parent.push(positions.length - 1);
+        // Skip this bridge slot rather than forcing a planet inside MIN_PLANET_DISTANCE.
+        continue;
       }
     }
     rebuildUnion();
@@ -438,25 +436,52 @@ function ensureConnectivity(positions: Position[]): void {
 
 export function generateMap(config: MapConfig): GameMap {
   const { seed, width, height, planetCount } = config;
-  const rng = mulberry32(seed);
 
-  // Pick galaxy shape — use provided shape or pick randomly
+  const shapeRng = mulberry32(seed);
   const shapes: GalaxyShape[] = ['scattered', 'arms', 'dense_core', 'ring'];
-  const shape: GalaxyShape = config.galaxyShape ?? shapes[Math.floor(rng() * shapes.length)];
+  const shape: GalaxyShape = config.galaxyShape ?? shapes[Math.floor(shapeRng() * shapes.length)];
 
-  // Get planet positions for chosen shape
-  let positions: Position[];
-  if (shape === 'arms') {
-    positions = placePlanetsArms(rng, planetCount, width, height);
-  } else if (shape === 'dense_core') {
-    positions = placePlanetsDenseCore(rng, planetCount, width, height);
-  } else if (shape === 'ring') {
-    positions = placePlanetsRing(rng, planetCount, width, height);
-  } else {
-    positions = placePlanetsScattered(rng, planetCount, width, height);
+  let positions: Position[] | null = null;
+  let rng = mulberry32(seed);
+
+  for (let attempt = 0; attempt < MAX_SPACING_ATTEMPTS; attempt++) {
+    rng = mulberry32(seed + attempt);
+    if (!config.galaxyShape) {
+      rng(); // consume shape-roll draw (shape fixed from seed above)
+    }
+
+    // Pre-normalize canvas is 2× the final grid — use a higher virtual floor during placement.
+    const virtualMinDistance = MIN_PLANET_DISTANCE * 2;
+
+    try {
+      if (shape === 'arms') {
+        positions = placePlanetsArms(rng, planetCount, width, height, virtualMinDistance);
+      } else if (shape === 'dense_core') {
+        positions = placePlanetsDenseCore(rng, planetCount, width, height, virtualMinDistance);
+      } else if (shape === 'ring') {
+        positions = placePlanetsRing(rng, planetCount, width, height, virtualMinDistance);
+      } else {
+        positions = placePlanetsScattered(rng, planetCount, width, height, virtualMinDistance);
+      }
+
+      enforceMinimumSpacing(positions, width, height);
+      ensureConnectivity(positions);
+      enforceMinimumSpacing(positions, width, height);
+
+      if (minPairwiseDistance(positions) >= MIN_PLANET_DISTANCE) {
+        break;
+      }
+      positions = null;
+    } catch {
+      positions = null;
+    }
   }
 
-  ensureConnectivity(positions);
+  if (positions === null || minPairwiseDistance(positions) < MIN_PLANET_DISTANCE) {
+    throw new Error(
+      `Failed to generate map with minimum planet spacing of ${MIN_PLANET_DISTANCE} clicks after ${MAX_SPACING_ATTEMPTS} attempts`,
+    );
+  }
 
   // Build planet objects from positions (name, class, buildings all drawn from rng here)
   const planets: Planet[] = positions.map((pos, i) => ({
@@ -472,6 +497,22 @@ export function generateMap(config: MapConfig): GameMap {
     productionSlider: 0.5,
     isHomePlanet: false,
   }));
+
+  const nameCounts = new Map<string, number>();
+  const romanSuffixes = ['II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+  for (const planet of planets) {
+    const baseName = planet.name;
+    const seen = nameCounts.get(baseName) ?? 0;
+    const occurrence = seen + 1;
+    nameCounts.set(baseName, occurrence);
+    if (occurrence > 1) {
+      const suffix =
+        occurrence <= romanSuffixes.length + 1
+          ? romanSuffixes[occurrence - 2]
+          : String(occurrence);
+      planet.name = `${baseName} ${suffix}`;
+    }
+  }
 
   return { width, height, planets };
 }

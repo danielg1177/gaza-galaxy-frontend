@@ -47,7 +47,7 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
 
 ## Turn Resolution Order
 1. **Validate** — current player and active game status.
-2. **Resolve eligible arrivals** — split `state.fleets` into fleets with `turnsRemaining <= 0` and `dispatchedInRound < roundNumber` vs still in transit; for each eligible fleet, `combatEngine.resolveArrival(rng, fleet, map, events, players, stillInTransit)`; apply optional `players` / `fleets` updates from `ResolveArrivalResult`; keep only still-in-transit fleets. (Safety net under normal play — round-wrap resolution handles fleets that hit zero on the prior wrap.)
+2. **Resolve eligible arrivals** — split `state.fleets` into fleets with `turnsRemaining <= 0` and `dispatchedInRound < roundNumber` vs still in transit; group eligible fleets by destination, merge same-owner fleets at each destination (summed `shipCount`), and sort so the current planet owner's merged fleet resolves first. After grouping, each destination checks total combatants (unique arriving owners + 1 if the garrison owner is not arriving). If ≥ 3, `resolveMultiwayCombat` is called once for that destination (one `combatRngCounter` slot). If ≤ 2, the existing `resolveArrival` sequential path runs unchanged. Apply optional `players` / `fleets` updates from `ResolveArrivalResult`; keep only still-in-transit fleets. (Safety net under normal play — round-wrap resolution handles fleets that hit zero on the prior wrap.)
 3. **Process `SEND_FLEET` actions** (in submission order):
    - Origin planet exists and is owned by `input.playerId`.
    - `shipCount >= 1` and `shipCount <= origin.shipCount` (may send entire garrison; ownership does not require ships on planet).
@@ -59,9 +59,10 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
 6. **Advance turn** — `turnNumber += 1`; if still `active`, `currentPlayerId` moves to the next non-eliminated player in `state.players` array order (wrap around).
 7. **Round-wrap check** — compute whether turn order wrapped (`nextPlayerIndex <= currentPlayerIndex`).
 8. **Round tick (wrap only)** — on wrap only:
+   - `productionEngine.runProduction(map, players, state.roundNumber, events)` runs once for the completed round (using pre-combat ownership)
    - `movementEngine.advanceFleets` decrements all fleet `turnsRemaining` by 1
-   - For each fleet in `arrived`, `combatEngine.resolveArrival(rng, fleet, map, events, players, fleets)`; apply optional `players` / `fleets` updates; keep only `inTransit` in `fleets`
-   - `productionEngine.runProduction(map, players, state.roundNumber, events)` runs once for the completed round
+   - Group `arrived` fleets by destination, merge same-owner fleets at each destination (summed `shipCount`), and sort so the current planet owner's merged fleet resolves first. After grouping, each destination checks total combatants (unique arriving owners + 1 if the garrison owner is not arriving). If ≥ 3, `resolveMultiwayCombat` is called once for that destination (one `combatRngCounter` slot). If ≤ 2, the existing `resolveArrival` sequential path runs unchanged. Apply optional `players` / `fleets` updates; keep only `inTransit` in `fleets`
+   - The defending planet's owner receives production before any attacker lands; a player who captures a planet does not receive its production on the turn of capture.
 9. **Advance round** — if wrap occurred, `roundNumber += 1`.
 
 ## Turn Order Logic
@@ -76,7 +77,7 @@ When exactly one player has `isEliminated !== true`, `status` becomes `'finished
 ## Stub Integration Points
 | Module | Function | Contract |
 |--------|----------|----------|
-| `combatEngine.ts` | `resolveArrival(rng, fleet, map, events?, players?, fleets?)` | Returns `ResolveArrivalResult` with updated `map`; optional `players` / `fleets` on home-planet elimination. |
+| `combatEngine.ts` | `resolveArrival(rng, fleet, map, roundNumber, events?, players?, fleets?)` | Returns `ResolveArrivalResult` with updated `map`; optional `players` / `fleets` on home-planet elimination; `roundNumber` stamped on `combat` / `fleet_arrived` turn-report events. |
 | `productionEngine.ts` | `runProduction(map, players, currentRound, events?)` | Returns updated `map` and `players`; optionally appends turn-report events. |
 | `movementEngine.ts` | `computeTurnsInTransit`, `createFleet`, `advanceFleets` | Transit time, fleet records, and per-turn fleet advance. See `docs/systems/movement.md`. |
 
@@ -88,7 +89,14 @@ When exactly one player has `isEliminated !== true`, `status` becomes `'finished
 
 The Zustand store (`src/store/gameStore.ts`) keeps human fleet dispatches in **`queuedOrders`** (`PendingFleet[]`) until **`endTurn()`**. Each confirm in the ship-count modal calls **`queueOrder`** only (no `GameState` mutation). **`endTurn()`** builds one `TurnInput`: all queued orders as `SEND_FLEET` actions (in queue order), then `{ type: 'END_TURN' }`, calls **`resolveTurn`**, then **`runAiTurnsUntilHuman`**, saves state, sets **`turnReport`** from aggregated `events`, and clears **`queuedOrders`**. **`cancelQueuedOrder(index)`** removes a queued row without touching the engine.
 
+## Stale fleet drain on load (Task 193)
+
+`loadGame` and `loadAsyncGame` call **`drainStaleFleets`**, which removes any fleet with `turnsRemaining <= 0` from `GameState.fleets` before the match resumes. Under normal play, round-wrap resolution leaves only `turnsRemaining > 0` fleets in state; persisted saves from before that invariant (or corrupted state) could otherwise re-enter the early-arrivals block at the next turn start and produce a phantom second combat on the same planet.
+
 ## Changelog
+- 2026-06-01: **Task 199** — multi-way combat wired into both arrival loops; `groupArrivalsByDestination`, `countTotalCombatants`, `buildCombatantList` helpers added to turnEngine.
+- 2026-06-01: **Task 193** — `roundNumber` on `combat` / `fleet_arrived` events via `resolveArrival(..., state.roundNumber, ...)`; `drainStaleFleets` on `loadGame` / `loadAsyncGame`.
+- 2026-05-31: **Pass-and-Play Automatic Turn Handoff** — when a player ends their turn in pass-and-play mode, the lock screen now auto-dismisses after 1.5 seconds, automatically advancing to the next human player's turn without requiring manual interaction. The "Start Turn" button remains visible and functional for manual override if desired.
 - 2026-05-29: **Task 126** — home-planet conquest elimination in `combatEngine`; `ResolveArrivalResult`; pass-and-play knockout via `eliminatedPlayerPendingKnockout` / `acknowledgeKnockout`; victory when one non-eliminated player remains.
 - 2026-05-28: **Task 104** — `resolveTurn` returns `ResolveTurnResult` with `events: TurnEvent[]`; store `turnReport` populated on `endTurn`.
 - 2026-05-28: **Task 76** — `processSendFleet` allows `shipCount === origin.shipCount`; removed minimum 1-ship garrison on origin.

@@ -33,12 +33,13 @@ Uses **mulberry32**, a self-contained 32-bit seeded PRNG. No `Math.random()` any
 1. Growth runs on a **virtual canvas** of `2 × width` by `2 × height` (soft bounds — no padded-edge rejection during growth).
 2. For each planet `0 .. planetCount - 1`, sample a candidate via `growthPosition` (up to 2000 attempts per planet):
    - **First planet:** placed at the virtual canvas centre (`round(virtualWidth/2)`, `round(virtualHeight/2)`) so growth expands outward symmetrically
-   - **Later planets:** pick a uniform-random parent from already-placed planets; sample distance `4 + rng() * 7` (uniform [4, 11] clicks); sample angle `0–2π`; candidate = `round(parent + dist × [cos θ, sin θ])`
+   - **Later planets:** pick a uniform-random parent from already-placed planets; sample distance `2.5 + rng() * 7` (uniform [2.5, 9.5] clicks); sample angle `0–2π`; candidate = `round(parent + dist × [cos θ, sin θ])`
    - Candidates outside the virtual canvas (`x < 0`, `x > virtualWidth − 1`, etc.) return `null` and the retry loop tries again (new parent/direction on next attempt)
-3. Reject candidates that violate minimum Euclidean distance from all already-placed planets (`MIN_PLANET_DISTANCE = 4`) — checks use virtual-space coordinates
+3. Reject candidates that violate minimum Euclidean distance from all already-placed planets — checks use virtual-space coordinates with a higher floor (`MIN_PLANET_DISTANCE × 2`) because normalization compresses the 2× virtual canvas into the final grid.
 4. Throw if placement fails after all attempts
-5. **Normalization pass:** after all planets are placed, compute the bounding box of virtual positions and scale/translate every planet into the configured grid with `PLANET_EDGE_PADDING = 2` applied (`innerW = width − 1 − 2×padding`, same for height). This prevents hard boundary walls from forcing the cluster to fill a rectangle.
-6. Assign id `planet-0`, `planet-1`, …
+5. **Normalization pass:** uniform scale (preserves distance ratios; independent X/Y stretch was shrinking pairs) maps the virtual bounding box into the configured grid with `PLANET_EDGE_PADDING = 2`.
+6. **Spacing enforcement pass:** `enforceMinimumSpacing` nudges any post-normalize/integer-rounding pairs closer than `MIN_PLANET_DISTANCE` apart in final grid coordinates (what `computeClickDistance` reports).
+7. Assign id `planet-0`, `planet-1`, …
 
 This produces varied irregular galaxy shapes (chains, arms, clusters) per seed (Task 92), replacing the symmetric central Gaussian blob (Tasks 89–91) and earlier multi-cluster layout (Task 86). The **`scattered`** galaxy shape uses this algorithm; see Galaxy Shapes below.
 
@@ -47,7 +48,7 @@ After shape placement and bounding-box normalization, `ensureConnectivity(positi
 
 - Treats planets as nodes in an undirected graph: an edge exists when Euclidean distance ≤ **11 clicks** (matches `BASE_FLEET_RANGE_CLICKS` in `movementEngine.ts`).
 - If Union-Find finds more than one component, repeatedly connects the two closest planets in different components by inserting **bridge planets** along the line between them.
-- Bridge count for a gap of distance `d`: `ceil(d / 11) - 1` intermediate positions at equal parametric steps; each bridge is placed at the rounded midpoint, with a small shell search (radius 0–3) for `MIN_PLANET_DISTANCE` clearance; if none found, the exact midpoint is forced (connectivity overrides spacing).
+- Bridge count for a gap of distance `d`: `ceil(d / 11) - 1` intermediate positions at equal parametric steps; each bridge is placed at the rounded midpoint, with a small shell search (radius 0–3) for `MIN_PLANET_DISTANCE` clearance; if none found, that bridge slot is skipped (connectivity no longer overrides spacing).
 - Bridge planets receive normal RNG-driven name, class, and attributes when `positions.map(...)` builds `Planet` objects (they append to the positions array).
 - Safety cap: 50 bridge iterations per map.
 - `spawnPlacer` is unaffected (reads final `planets[].position` only).
@@ -65,10 +66,10 @@ The shape controls the planet placement algorithm used.
 
 ### Minimum Distance Rule
 ```
-MIN_PLANET_DISTANCE = 4
+MIN_PLANET_DISTANCE = 2.5
 minDistance = MIN_PLANET_DISTANCE
 ```
-Minimum spacing is a fixed `4` clicks (grid cells) for all map presets (restored from 2 in Task 90).
+Minimum spacing is **2.5 clicks in final grid coordinates** (the same units `computeClickDistance` uses in the fleet dispatch UI). Placement checks a higher virtual-space floor before normalization; `enforceMinimumSpacing` corrects any pairs that slip below 2.5 after normalize/round (Task 171 fix).
 
 ### Preset Capacity Notes
 Planet count and grid dimensions are now computed dynamically from map size and player count. `planetCount = BASE[size] + (playerCount − 2) × PER_EXTRA[size]`. Grid: `gridSide = Math.ceil(Math.sqrt(planetCount × 90))` (square maps).
@@ -160,6 +161,8 @@ Opponent **gold** and **researchPoints** remain visible in the player list for n
 - What is the target planet count range per player count?
 
 ## Changelog
+- 2026-05-31: Task 171 fix — `MIN_PLANET_DISTANCE` now enforced in **final grid coordinates** after uniform normalize + `enforceMinimumSpacing`; connectivity bridge forced-placement removed; fixes sub-2.5 pairs (e.g. 1.4 clicks) caused by normalize compression and integer rounding.
+- 2026-05-31: Task 171 — `MIN_PLANET_DISTANCE` 4→2.5; `growthPosition` parent offset `4 + rng() * 7` → `2.5 + rng() * 7` ([2.5, 9.5] clicks, mean ~6.0); ~1.5 clicks closer on average; algorithms unchanged.
 - 2026-05-29: Bug fix — `ensureConnectivity` post-placement pass guarantees a single connected graph at base fleet range (11 clicks); inserts bridge planets along shortest inter-component gaps when normalization leaves disconnected clusters.
 - 2026-05-29: Task 119 — planet count and grid dimensions now computed dynamically from map size + player count; hardcoded presets removed; `MAP_SIZE_CONFIG` + `computeMapDimensions` helper in HomeScreen.
 - 2026-05-28: Task 93 — `growthPosition` parent distance uniform `4 + rng() * 7` ([4, 11] clicks); replaces triangular `4 + (rng() + rng()) * 4.5`.

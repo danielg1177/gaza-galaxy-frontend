@@ -66,7 +66,7 @@ Only zones containing at least one neutral planet are included in the usable lis
 ### Phase 2 — AIs
 1. Eligible pool = all 4 interior zones + all 4 edge zones (including zones already used by humans).
 2. Shuffle the pool.
-3. For each AI player in order: take the next unused zone with an available neutral planet, pick a random planet inside it. No minimum-separation check.
+3. For each AI player in order: take the next unused zone with an available neutral planet and pick a random planet that is at least `AI_MIN_SEPARATION_FROM_HUMAN[mapSize]` grid clicks from every human home planet. Candidate planets are filtered at selection time using the same Euclidean `computeClickDistance` formula as human-to-human separation.
 
 ### Apply assignment
 Mark each chosen planet with seeded class A–G, `isHomePlanet: true`, owner, `shipCount: 5`, and class-specific `buildingSlots` / starting gold via `HOME_PLANET_CLASS_CONFIG` — unchanged from prior implementation.
@@ -81,6 +81,16 @@ Mark each chosen planet with seeded class A–G, `isHomePlanet: true`, owner, `s
 
 Distance is Euclidean in grid coordinates: `sqrt((x₁−x₂)² + (y₁−y₂)²)`.
 
+## Minimum AI-to-Human Separation
+
+| Map size | Min click distance between any AI starting planet and any human starting planet |
+|----------|----------------------------------------------------------------------------------|
+| Small    | 30 clicks                                                                        |
+| Medium   | 40 clicks                                                                        |
+| Large    | 50 clicks                                                                        |
+
+Enforcement happens at planet-selection time (candidate filtering), not as a post-assignment batch check.
+
 ## Integration
 
 - Called after `generateMap()` from `gameStore.startNewGame`.
@@ -88,5 +98,6 @@ Distance is Euclidean in grid coordinates: `sqrt((x₁−x₂)² + (y₁−y₂)
 - Map generation does not set owners or `isHomePlanet`; this module owns starting positions.
 
 ## Changelog
+- 2026-05-31: Task 182 — AI min-distance from humans now enforced at planet-selection time; removed post-assignment batch check.
 - 2026-05-29: Task 127 — replaced 200-candidate scored-random search with zone-based placement (human edge zones, AI full pool, map-size min separation, options-object API, `MapSize` on `GameConfig`).
 - 2026-05-27: Implemented `placeSpawns` with 200-candidate random search and weighted fairness scoring. ~~*(superseded by Task 127)*~~

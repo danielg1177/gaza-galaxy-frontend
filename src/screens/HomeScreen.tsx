@@ -1,19 +1,38 @@
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
-import type { AiDifficulty } from '../game/aiEngine';
+import { AppTopBar } from '../components/AppTopBar';
 import type { MapSize } from '../game/types';
-import { useGameStore, type GameRecord, type PlayerSlot } from '../store/gameStore';
+import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
+import { ApiError } from '../services/apiClient';
+import {
+  acceptInvite,
+  createGame,
+  declineInvite,
+  deleteGame as deleteApiGame,
+  getGame,
+  isCurrentUserGameCreator,
+  listGames,
+  listInvites,
+  type ApiGame,
+  type ApiInvite,
+} from '../services/gamesService';
+import { useAuthStore } from '../store/authStore';
+import { generateInitialGameState, useGameStore, type GameConfig, type GameRecord, type PlayerSlot } from '../store/gameStore';
 
 const MAP_SIZE_CONFIG = {
   small: { base: 20, perExtra: 10 },
@@ -34,10 +53,31 @@ const MAP_SIZE_LABELS: Record<MapSize, string> = {
   large: 'Large',
 };
 
-const DEFAULT_PLAYER_SLOTS: PlayerSlot[] = [
-  { type: 'human', name: 'Commander' },
-  { type: 'ai', difficulty: 'normal' },
-];
+function getDefaultCampaignName(username: string | undefined): string {
+  const base = (username ?? 'Commander').trim() || 'Commander';
+  return `${base}'s Campaign`;
+}
+
+function resolveCampaignName(rawName: string, playerName: string): string {
+  const trimmed = rawName.trim();
+  if (trimmed.length > 0) {
+    return trimmed.slice(0, 100);
+  }
+  const commander = playerName.trim() || 'Commander';
+  return `${commander}'s Campaign`;
+}
+
+function isSoloGame(record: GameRecord): boolean {
+  if (record.asyncGameId != null) return false;
+  return record.config.playerSlots.slice(1).every((slot) => slot.type === 'ai');
+}
+
+function createDefaultPlayerSlots(slot0Name: string): PlayerSlot[] {
+  return [
+    { type: 'human', name: slot0Name },
+    { type: 'ai', difficulty: 'hard' },
+  ];
+}
 
 const BG_COLOR = '#f5f0eb';
 
@@ -53,12 +93,225 @@ const COLORS = {
 
 type HomeNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
 
+const ALERT_STATE_SORT_PRIORITY: Record<ApiGame['alertState'], number> = {
+  in_progress: 0,
+  your_turn: 1,
+  waiting: 2,
+  finished: 3,
+  waiting_for_players: 4,
+};
+
+type FinishedOutcome = 'victory' | 'defeat' | 'unknown';
+
+function sortAsyncGamesByAlertPriority(games: ApiGame[]): ApiGame[] {
+  return [...games].sort(
+    (a, b) =>
+      ALERT_STATE_SORT_PRIORITY[a.alertState] -
+      ALERT_STATE_SORT_PRIORITY[b.alertState],
+  );
+}
+
+function getFinishedOutcome(game: ApiGame, username: string | undefined): FinishedOutcome {
+  if (game.alertState !== 'finished' && game.status !== 'finished') {
+    return 'unknown';
+  }
+
+  if (username == null || username === '') {
+    return 'unknown';
+  }
+
+  const nonAiPlayers = game.players.filter((player) => !player.isAi);
+  if (!nonAiPlayers.some((player) => player.inGameName === username)) {
+    return 'unknown';
+  }
+
+  const nonEliminatedNonAi = nonAiPlayers.filter((player) => !player.isEliminated);
+  if (
+    nonEliminatedNonAi.length === 1 &&
+    nonEliminatedNonAi[0].inGameName === username
+  ) {
+    return 'victory';
+  }
+
+  if (nonEliminatedNonAi.length === 1) {
+    return 'defeat';
+  }
+
+  const userPlayer = nonAiPlayers.find((player) => player.inGameName === username);
+  if (userPlayer?.isEliminated) {
+    return 'defeat';
+  }
+
+  return 'unknown';
+}
+
+function AsyncGameCard({
+  game,
+  isLoading,
+  anyCardLoading,
+  currentUsername,
+  canDelete,
+  isDeleting,
+  onPress,
+  onDelete,
+}: {
+  game: ApiGame;
+  isLoading: boolean;
+  anyCardLoading: boolean;
+  currentUsername: string | undefined;
+  canDelete: boolean;
+  isDeleting: boolean;
+  onPress: () => void;
+  onDelete: () => void;
+}) {
+  const playerNames = game.players.map((player) => player.inGameName).join(', ');
+  const isTappable =
+    game.status === 'in_progress' &&
+    (game.alertState === 'your_turn' ||
+      game.alertState === 'in_progress' ||
+      game.alertState === 'waiting');
+  const isProminent =
+    game.alertState === 'your_turn' || game.alertState === 'in_progress';
+  const prominentAccentColor =
+    game.alertState === 'in_progress' ? '#e07820' : COLORS.accent;
+  const finishedOutcome = getFinishedOutcome(game, currentUsername);
+
+  let subtitle: string;
+  if (game.status === 'waiting_for_players') {
+    subtitle = 'Waiting for players...';
+  } else if (game.status === 'finished') {
+    subtitle = 'Finished';
+  } else {
+    subtitle = `Round ${game.roundNumber} · ${game.currentPlayerName}'s turn`;
+  }
+
+  const cardStyle = [
+    styles.gameCard,
+    isProminent && {
+      borderLeftWidth: 4,
+      borderLeftColor: prominentAccentColor,
+    },
+    !isProminent &&
+      (game.alertState === 'waiting' || game.alertState === 'waiting_for_players') &&
+      styles.gameCardMuted,
+    !isTappable && styles.gameCardDisabled,
+    isLoading && styles.gameCardLoading,
+  ];
+
+  const badge = (() => {
+    switch (game.alertState) {
+      case 'your_turn':
+        return (
+          <View style={styles.asyncAlertBadgeYourTurn}>
+            <Text style={styles.asyncAlertBadgeYourTurnText}>YOUR TURN</Text>
+          </View>
+        );
+      case 'in_progress':
+        return (
+          <View style={styles.asyncAlertBadgeInProgress}>
+            <Text style={styles.asyncAlertBadgeInProgressText}>IN PROGRESS</Text>
+          </View>
+        );
+      case 'waiting_for_players':
+        return (
+          <Text style={styles.asyncAlertBadgeWaitingText}>Waiting...</Text>
+        );
+      case 'finished':
+        if (finishedOutcome === 'victory') {
+          return (
+            <View style={styles.asyncAlertBadgeVictory}>
+              <Text style={styles.asyncAlertBadgeFinishedText}>VICTORY</Text>
+            </View>
+          );
+        }
+        if (finishedOutcome === 'defeat') {
+          return (
+            <View style={styles.asyncAlertBadgeDefeat}>
+              <Text style={styles.asyncAlertBadgeFinishedText}>DEFEAT</Text>
+            </View>
+          );
+        }
+        return (
+          <View style={styles.asyncAlertBadgeFinished}>
+            <Text style={styles.asyncAlertBadgeFinishedMutedText}>FINISHED</Text>
+          </View>
+        );
+      default:
+        return null;
+    }
+  })();
+
+  const deleteControl = canDelete ? (
+    <Pressable
+      style={({ pressed }) => [
+        styles.asyncGameDeleteButton,
+        pressed && styles.asyncGameDeleteButtonPressed,
+      ]}
+      onPress={(event) => {
+        event.stopPropagation();
+        onDelete();
+      }}
+      disabled={isDeleting || anyCardLoading}
+      hitSlop={8}
+    >
+      {isDeleting ? (
+        <ActivityIndicator size="small" color="#c0392b" />
+      ) : (
+        <Text style={styles.asyncGameDeleteButtonText}>Delete</Text>
+      )}
+    </Pressable>
+  ) : null;
+
+  const content = (
+    <>
+      <View style={styles.asyncGameCardHeader}>
+        <Text style={[styles.gameCardName, styles.asyncGameCardTitle]}>{game.name}</Text>
+        <View style={styles.asyncGameCardHeaderActions}>
+          {badge}
+          {deleteControl}
+        </View>
+      </View>
+      <Text style={styles.gameCardPlayers}>{playerNames}</Text>
+      <Text
+        style={[
+          styles.asyncGameSubtitle,
+          game.status === 'waiting_for_players' && styles.asyncGameSubtitleMuted,
+        ]}
+      >
+        {subtitle}
+      </Text>
+      {isLoading && (
+        <ActivityIndicator style={styles.asyncGameCardLoader} color={COLORS.accent} />
+      )}
+    </>
+  );
+
+  if (!isTappable) {
+    return <View style={cardStyle}>{content}</View>;
+  }
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        ...cardStyle,
+        pressed && !isLoading && !isDeleting && styles.gameCardPressed,
+      ]}
+      onPress={onPress}
+      disabled={isLoading || isDeleting || anyCardLoading}
+    >
+      {content}
+    </Pressable>
+  );
+}
+
 function GameCard({
   record,
   onPress,
+  onDelete,
 }: {
   record: GameRecord;
   onPress: () => void;
+  onDelete?: () => void;
 }) {
   const { state } = record;
   const humanPlayer = state.players.find((p) => !p.isAI);
@@ -73,12 +326,36 @@ function GameCard({
     outcomeLabel = state.winnerId === humanId ? 'VICTORY' : 'DEFEAT';
   }
 
+  const deleteControl =
+    onDelete != null ? (
+      <Pressable
+        style={({ pressed }) => [
+          styles.asyncGameDeleteButton,
+          pressed && styles.asyncGameDeleteButtonPressed,
+        ]}
+        onPress={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        hitSlop={8}
+      >
+        <Text style={styles.asyncGameDeleteButtonText}>Delete</Text>
+      </Pressable>
+    ) : null;
+
   return (
     <Pressable
       style={({ pressed }) => [styles.gameCard, pressed && styles.gameCardPressed]}
       onPress={onPress}
     >
-      <Text style={styles.gameCardName}>{record.name}</Text>
+      {onDelete != null ? (
+        <View style={styles.asyncGameCardHeader}>
+          <Text style={[styles.gameCardName, styles.asyncGameCardTitle]}>{record.name}</Text>
+          <View style={styles.asyncGameCardHeaderActions}>{deleteControl}</View>
+        </View>
+      ) : (
+        <Text style={styles.gameCardName}>{record.name}</Text>
+      )}
       <Text style={styles.gameCardPlayers}>{playerNames}</Text>
       <View style={styles.gameCardFooter}>
         {state.status === 'active' && currentPlayer !== undefined && (
@@ -97,18 +374,135 @@ function GameCard({
 
 export default function HomeScreen() {
   const navigation = useNavigation<HomeNavigationProp>();
+  const { currentUser } = useAuthStore();
   const games = useGameStore((s) => s.games);
+  const _hasHydrated = useGameStore((s) => s._hasHydrated);
   const startNewGame = useGameStore((s) => s.startNewGame);
+  const aiObserverMode = useGameStore((s) => s.aiObserverMode);
+  const setAiObserverMode = useGameStore((s) => s.setAiObserverMode);
   const loadGame = useGameStore((s) => s.loadGame);
+  const loadAsyncGame = useGameStore((s) => s.loadAsyncGame);
+  const deleteLocalGame = useGameStore((s) => s.deleteGame);
+
+  const localGames = useMemo(
+    () => games.filter((record) => record.asyncGameId == null),
+    [games],
+  );
+
+  const soloGames = useMemo(
+    () => localGames.filter(isSoloGame),
+    [localGames],
+  );
+
+  const passAndPlayGames = useMemo(
+    () => localGames.filter((record) => !isSoloGame(record)),
+    [localGames],
+  );
 
   const [isCreating, setIsCreating] = useState(false);
-  const [playerSlots, setPlayerSlots] = useState<PlayerSlot[]>(DEFAULT_PLAYER_SLOTS);
+  const [gameName, setGameName] = useState(() =>
+    getDefaultCampaignName(currentUser?.username),
+  );
+  const [playerSlots, setPlayerSlots] = useState<PlayerSlot[]>(() =>
+    createDefaultPlayerSlots(currentUser?.username ?? 'Commander'),
+  );
   const [playMode, setPlayMode] = useState<'passAndPlay' | 'asyncMultiplayer'>('passAndPlay');
   const [mapSize, setMapSize] = useState<MapSize>('medium');
+  const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [invites, setInvites] = useState<ApiInvite[]>([]);
+  const [inviteLoadingId, setInviteLoadingId] = useState<number | null>(null);
+  const [asyncGames, setAsyncGames] = useState<ApiGame[]>([]);
+  const [asyncGamesLoading, setAsyncGamesLoading] = useState(false);
+  const [loadingGameId, setLoadingGameId] = useState<number | null>(null);
+  const [deletingGameId, setDeletingGameId] = useState<number | null>(null);
+  /** Games created this session when the list API omits creator fields. */
+  const [sessionCreatedGameIds, setSessionCreatedGameIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const isFirstAsyncGamesLoad = useRef(true);
+  const [friendPickerSlotIndex, setFriendPickerSlotIndex] = useState<number | null>(null);
+  const [friends, setFriends] = useState<Friend[]>([]);
+
+  const sortedAsyncGames = useMemo(
+    () => sortAsyncGamesByAlertPriority(asyncGames),
+    [asyncGames],
+  );
+
+  useEffect(() => {
+    if (playMode !== 'asyncMultiplayer') {
+      setFriendPickerSlotIndex(null);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const list = await getFriends();
+        setFriends(list);
+      } catch {
+        setFriends([]);
+      }
+    })();
+  }, [playMode]);
+
+  const refreshAsyncGames = useCallback(async () => {
+    const isFirstLoad = isFirstAsyncGamesLoad.current;
+    if (isFirstLoad) {
+      setAsyncGamesLoading(true);
+    }
+
+    try {
+      const list = await listGames();
+      const userId = useAuthStore.getState().currentUser?.id;
+      setAsyncGames(
+        list.map((game) =>
+          sessionCreatedGameIds.has(game.id) && userId != null
+            ? {
+                ...game,
+                createdByUserId: game.createdByUserId ?? userId,
+                isCreator: game.isCreator ?? true,
+              }
+            : game,
+        ),
+      );
+    } catch {
+      if (isFirstLoad) {
+        setAsyncGames([]);
+      }
+    } finally {
+      if (isFirstLoad) {
+        setAsyncGamesLoading(false);
+        isFirstAsyncGamesLoad.current = false;
+      }
+    }
+  }, [sessionCreatedGameIds]);
+
+  const refreshOnFocus = useCallback(() => {
+    void refreshAsyncGames();
+
+    void (async () => {
+      try {
+        const requests = await getFriendRequests();
+        setPendingRequestCount(requests.length);
+      } catch {
+        // Swallow errors — badge hidden when fetch fails (e.g. backend offline).
+      }
+    })();
+
+    void (async () => {
+      try {
+        const pendingInvites = await listInvites();
+        setInvites(pendingInvites);
+      } catch {
+        // Swallow errors — invites section hidden when fetch fails.
+      }
+    })();
+  }, [refreshAsyncGames]);
+
+  useFocusEffect(refreshOnFocus);
 
   const addPlayerSlot = () => {
     setPlayerSlots((prev) =>
-      prev.length >= 8 ? prev : [...prev, { type: 'ai', difficulty: 'normal' }],
+      prev.length >= 8 ? prev : [...prev, { type: 'ai', difficulty: 'hard' }],
     );
   };
 
@@ -123,7 +517,7 @@ export default function HomeScreen() {
         if (type === 'human') {
           return { type: 'human', name: slot.name };
         }
-        return { type: 'ai', difficulty: slot.difficulty ?? 'normal' };
+        return { type: 'ai', difficulty: 'hard' };
       }),
     );
   };
@@ -136,35 +530,222 @@ export default function HomeScreen() {
     );
   };
 
-  const setSlotDifficulty = (index: number, difficulty: AiDifficulty) => {
+  const selectFriendForSlot = (index: number, friend: Friend) => {
     setPlayerSlots((prev) =>
-      prev.map((slot, i) => (i === index ? { type: 'ai', difficulty } : slot)),
+      prev.map((slot, i) =>
+        i === index && slot.type === 'human'
+          ? { ...slot, name: friend.user.username, userId: friend.user.id }
+          : slot,
+      ),
+    );
+    setFriendPickerSlotIndex(null);
+  };
+
+  const clearSlotFriend = (index: number) => {
+    setPlayerSlots((prev) =>
+      prev.map((slot, i) =>
+        i === index && slot.type === 'human'
+          ? { ...slot, name: '', userId: undefined }
+          : slot,
+      ),
     );
   };
 
+  const [isLaunching, setIsLaunching] = useState(false);
+
   const handleLaunch = () => {
     const { width, height, planetCount } = computeMapDimensions(mapSize, playerSlots.length);
+    const playerName = (playerSlots[0]?.name ?? '').trim() || 'Commander';
+    const campaignName = resolveCampaignName(gameName, playerName);
 
-    startNewGame({
-      playerName: (playerSlots[0]?.name ?? '').trim() || 'Commander',
+    if (playMode === 'passAndPlay') {
+      startNewGame({
+        playerName,
+        gameName: campaignName,
+        playerSlots,
+        mapSize,
+        mapWidth: width,
+        mapHeight: height,
+        planetCount,
+        playMode,
+      });
+      navigation.navigate('Game', {});
+      return;
+    }
+
+    const allOpponentsAreAI = playerSlots.slice(1).every((slot) => slot.type === 'ai');
+    if (allOpponentsAreAI && playMode === 'asyncMultiplayer') {
+      startNewGame({
+        playerName,
+        gameName: campaignName,
+        playerSlots,
+        mapSize,
+        mapWidth: width,
+        mapHeight: height,
+        planetCount,
+        playMode: 'passAndPlay',
+      });
+      navigation.navigate('Game', {});
+      return;
+    }
+
+    // Async multiplayer — generate the initial state client-side and create on the backend.
+    // The backend stores state_json directly so no engine script is required.
+    const seed = Date.now();
+    const config: GameConfig = {
+      playerName,
       playerSlots,
       mapSize,
       mapWidth: width,
       mapHeight: height,
       planetCount,
-      playMode,
-    });
-    navigation.navigate('Game');
+      playMode: 'asyncMultiplayer',
+    };
+    const initialState = generateInitialGameState(config, seed);
+
+    setIsLaunching(true);
+    void (async () => {
+      try {
+        const response = await createGame({
+          name: campaignName,
+          playMode: 'async_multiplayer',
+          mapConfig: { mapSize, mapWidth: width, mapHeight: height, planetCount, seed },
+          playerSlots: playerSlots.map((slot) => ({
+            type: slot.type,
+            userId: slot.userId ?? null,
+            name: (slot.name ?? '').trim() || (slot.type === 'ai' ? 'AI' : 'Player'),
+            ...(slot.type === 'ai' ? { difficulty: 'hard' } : {}),
+          })),
+          stateJson: JSON.stringify(initialState),
+        });
+        setSessionCreatedGameIds((prev) => new Set(prev).add(response.game.id));
+        loadAsyncGame({
+          ...response.game,
+          stateJson: response.stateJson,
+          inProgressActions: null,
+          latestEvents: [],
+        });
+        setIsLaunching(false);
+        navigation.navigate('Game', {});
+      } catch {
+        setIsLaunching(false);
+        Alert.alert('Error', 'Could not create game. Check your connection and try again.');
+      }
+    })();
   };
 
   const handleResume = (id: string) => {
     loadGame(id);
-    navigation.navigate('Game');
+    navigation.navigate('Game', {});
+  };
+
+  const handleDeleteLocalGame = (record: GameRecord) => {
+    Alert.alert(
+      'Delete Game',
+      'Are you sure you want to delete this game? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteLocalGame(record.id) },
+      ],
+    );
+  };
+
+  const handleOpenAsyncGame = (gameId: number) => {
+    if (loadingGameId !== null) {
+      return;
+    }
+    setLoadingGameId(gameId);
+    void (async () => {
+      try {
+        const detail = await getGame(gameId);
+        loadAsyncGame(detail);
+        setLoadingGameId(null);
+        navigation.navigate('Game', { isReadOnly: detail.alertState === 'waiting' });
+      } catch {
+        setLoadingGameId(null);
+        Alert.alert('Load Failed', 'Could not load game. Check your connection.');
+      }
+    })();
+  };
+
+  const handleAcceptInvite = (invite: ApiInvite) => {
+    setInviteLoadingId(invite.id);
+    void (async () => {
+      try {
+        const result = await acceptInvite(invite.id);
+        setInvites((prev) => prev.filter((item) => item.id !== invite.id));
+        if (result.gameStarted) {
+          await refreshAsyncGames();
+        }
+      } catch {
+        Alert.alert('Error', 'Could not accept invite.');
+      } finally {
+        setInviteLoadingId(null);
+      }
+    })();
+  };
+
+  const handleDeleteAsyncGame = (game: ApiGame) => {
+    Alert.alert(
+      'Delete Game',
+      `Permanently delete "${game.name}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            setDeletingGameId(game.id);
+            void (async () => {
+              try {
+                await deleteApiGame(game.id);
+                setAsyncGames((prev) => prev.filter((item) => item.id !== game.id));
+                setSessionCreatedGameIds((prev) => {
+                  const next = new Set(prev);
+                  next.delete(game.id);
+                  return next;
+                });
+                const localRecord = games.find((record) => record.asyncGameId === game.id);
+                if (localRecord) {
+                  deleteLocalGame(localRecord.id);
+                }
+              } catch (err) {
+                const message =
+                  err instanceof ApiError
+                    ? err.message
+                    : 'Could not delete game. Check your connection.';
+                Alert.alert('Delete Failed', message);
+              } finally {
+                setDeletingGameId(null);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  const handleDeclineInvite = (invite: ApiInvite) => {
+    setInviteLoadingId(invite.id);
+    void (async () => {
+      try {
+        await declineInvite(invite.id);
+        setInvites((prev) => prev.filter((item) => item.id !== invite.id));
+      } catch {
+        Alert.alert('Error', 'Could not decline invite.');
+      } finally {
+        setInviteLoadingId(null);
+      }
+    })();
   };
 
   if (isCreating) {
     return (
       <SafeAreaView style={styles.safeArea}>
+        <AppTopBar
+          pendingRequestCount={pendingRequestCount}
+          onFriendsPress={() => navigation.navigate('Friends')}
+        />
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -182,6 +763,20 @@ export default function HomeScreen() {
             <Text style={styles.title}>Launch{'\n'}Campaign</Text>
             <View style={styles.titleRule} />
             <Text style={styles.subtitle}>Configure your campaign before entering the galaxy.</Text>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Campaign name</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Galaxy Conquest"
+              placeholderTextColor={COLORS.textMuted}
+              value={gameName}
+              onChangeText={setGameName}
+              autoCapitalize="words"
+              autoCorrect={false}
+              maxLength={100}
+            />
           </View>
 
           <View style={styles.section}>
@@ -232,49 +827,51 @@ export default function HomeScreen() {
                       </View>
                     )}
                   </View>
-                  {slot.type === 'human' && (
-                    <TextInput
-                      style={styles.slotNameInput}
-                      placeholder="Player name"
-                      placeholderTextColor={COLORS.textMuted}
-                      value={slot.name ?? ''}
-                      onChangeText={(text) => setSlotName(index, text)}
-                      autoCapitalize="words"
-                      autoCorrect={false}
-                      multiline={false}
-                    />
-                  )}
-                  {slot.type === 'ai' && (
-                    <View style={styles.difficultyRow}>
-                      <Text style={styles.difficultyLabel}>Difficulty</Text>
-                      <View style={styles.difficultyToggle}>
-                        {(['easy', 'normal', 'hard'] as const).map((level) => (
-                          <Pressable
-                            key={level}
-                            style={({ pressed }) => [
-                              styles.difficultyChip,
-                              (slot.difficulty ?? 'normal') === level &&
-                                styles.difficultyChipSelected,
-                              pressed &&
-                                (slot.difficulty ?? 'normal') !== level &&
-                                styles.difficultyChipPressed,
-                            ]}
-                            onPress={() => setSlotDifficulty(index, level)}
+                  {slot.type === 'human' &&
+                    (index === 0 || playMode === 'passAndPlay' ? (
+                      <TextInput
+                        style={styles.slotNameInput}
+                        placeholder="Player name"
+                        placeholderTextColor={COLORS.textMuted}
+                        value={slot.name ?? ''}
+                        onChangeText={(text) => setSlotName(index, text)}
+                        autoCapitalize="words"
+                        autoCorrect={false}
+                        multiline={false}
+                      />
+                    ) : (
+                      <View style={styles.friendPickerRow}>
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.friendPickerSelect,
+                            pressed && styles.friendPickerSelectPressed,
+                          ]}
+                          onPress={() => setFriendPickerSlotIndex(index)}
+                        >
+                          <Text
+                            style={
+                              slot.name?.trim()
+                                ? styles.friendPickerSelectedText
+                                : styles.friendPickerPlaceholderText
+                            }
                           >
-                            <Text
-                              style={[
-                                styles.difficultyChipText,
-                                (slot.difficulty ?? 'normal') === level &&
-                                  styles.difficultyChipTextSelected,
-                              ]}
-                            >
-                              {level === 'easy' ? 'Easy' : level === 'normal' ? 'Normal' : 'Hard'}
-                            </Text>
+                            {slot.name?.trim() || 'Select a friend'}
+                          </Text>
+                        </Pressable>
+                        {slot.userId != null && (
+                          <Pressable
+                            style={({ pressed }) => [
+                              styles.friendPickerClearButton,
+                              pressed && styles.friendPickerClearButtonPressed,
+                            ]}
+                            onPress={() => clearSlotFriend(index)}
+                            hitSlop={8}
+                          >
+                            <Text style={styles.friendPickerClearText}>✕</Text>
                           </Pressable>
-                        ))}
+                        )}
                       </View>
-                    </View>
-                  )}
+                    ))}
                 </View>
               ))}
             </View>
@@ -342,7 +939,6 @@ export default function HomeScreen() {
               <Pressable
                 style={({ pressed }) => [
                   styles.playModeCard,
-                  styles.playModeCardComingSoon,
                   playMode === 'asyncMultiplayer' && styles.playModeCardSelected,
                   pressed && playMode !== 'asyncMultiplayer' && styles.playModeCardPressed,
                 ]}
@@ -351,14 +947,18 @@ export default function HomeScreen() {
                 <Text
                   style={[
                     styles.playModeTitle,
-                    styles.playModeTitleComingSoon,
                     playMode === 'asyncMultiplayer' && styles.playModeTitleSelected,
                   ]}
                 >
-                  Async Multiplayer
+                  Play with Friends
                 </Text>
-                <Text style={[styles.playModeSubtitle, styles.playModeSubtitleComingSoon]}>
-                  Separate devices (coming soon)
+                <Text
+                  style={[
+                    styles.playModeSubtitle,
+                    playMode === 'asyncMultiplayer' && styles.playModeSubtitleSelected,
+                  ]}
+                >
+                  Separate devices
                 </Text>
               </Pressable>
             </View>
@@ -388,19 +988,116 @@ export default function HomeScreen() {
             </View>
           </View>
 
+          {playerSlots.some((slot) => slot.type === 'ai') && (
+            <View style={styles.section}>
+              <View style={styles.observerToggleRow}>
+                <View style={styles.observerToggleLabels}>
+                  <Text style={styles.observerToggleTitle}>Watch AI Turns</Text>
+                  <Text style={styles.observerToggleSubtitle}>
+                    Pause after each AI turn to review its moves
+                  </Text>
+                </View>
+                <Switch
+                  value={aiObserverMode}
+                  onValueChange={setAiObserverMode}
+                  trackColor={{ false: COLORS.border, true: COLORS.accentDim }}
+                  thumbColor={aiObserverMode ? COLORS.accent : COLORS.panel}
+                />
+              </View>
+            </View>
+          )}
+
           <Pressable
-            style={({ pressed }) => [styles.launchButton, pressed && styles.launchButtonPressed]}
-            onPress={handleLaunch}
+            style={({ pressed }) => [styles.launchButton, (pressed || isLaunching) && styles.launchButtonPressed]}
+            onPress={isLaunching ? undefined : handleLaunch}
+            disabled={isLaunching}
           >
-            <Text style={styles.launchButtonText}>Launch Campaign</Text>
+            {isLaunching ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.launchButtonText}>Launch Campaign</Text>
+            )}
           </Pressable>
         </ScrollView>
+
+        <Modal
+          visible={friendPickerSlotIndex !== null}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setFriendPickerSlotIndex(null)}
+        >
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setFriendPickerSlotIndex(null)}
+          >
+            <Pressable style={styles.friendPickerModalCard} onPress={() => {}}>
+              <View style={styles.friendPickerModalHeader}>
+                <Text style={styles.friendPickerModalTitle}>Pick a Friend</Text>
+                <Pressable
+                  onPress={() => setFriendPickerSlotIndex(null)}
+                  hitSlop={12}
+                >
+                  <Text style={styles.friendPickerModalClose}>✕</Text>
+                </Pressable>
+              </View>
+
+              {friends.length === 0 ? (
+                <View style={styles.friendPickerEmptyState}>
+                  <Text style={styles.friendPickerEmptyText}>
+                    No friends yet — add friends first
+                  </Text>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.friendPickerGoButton,
+                      pressed && styles.friendPickerGoButtonPressed,
+                    ]}
+                    onPress={() => {
+                      setFriendPickerSlotIndex(null);
+                      navigation.navigate('Friends');
+                    }}
+                  >
+                    <Text style={styles.friendPickerGoButtonText}>Go to Friends</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <ScrollView
+                  style={styles.friendPickerList}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {friends.map((friend) => (
+                    <Pressable
+                      key={friend.friendshipId}
+                      style={({ pressed }) => [
+                        styles.friendPickerListRow,
+                        pressed && styles.friendPickerListRowPressed,
+                      ]}
+                      onPress={() => {
+                        if (friendPickerSlotIndex !== null) {
+                          selectFriendForSlot(friendPickerSlotIndex, friend);
+                        }
+                      }}
+                    >
+                      <Text style={styles.friendPickerListRowText}>
+                        {friend.user.username}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
+            </Pressable>
+          </Pressable>
+        </Modal>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <AppTopBar
+        pendingRequestCount={pendingRequestCount}
+        onFriendsPress={() => navigation.navigate('Friends')}
+      />
       <View style={styles.lobbyContainer}>
         <ScrollView
           contentContainerStyle={styles.lobbyScrollContent}
@@ -413,25 +1110,132 @@ export default function HomeScreen() {
             <Text style={styles.subtitle}>Select a campaign or launch a new one.</Text>
           </View>
 
-          {games.length === 0 ? (
-            <Text style={styles.emptyMessage}>No active campaigns.{'\n'}Start a new one below.</Text>
-          ) : (
-            <View style={styles.gameList}>
-              {games.map((record) => (
-                <GameCard
-                  key={record.id}
-                  record={record}
-                  onPress={() => handleResume(record.id)}
-                />
-              ))}
+          {invites.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.label}>Game Invites ({invites.length})</Text>
+              <View style={styles.inviteList}>
+                {invites.map((invite) => {
+                  const isLoading = inviteLoadingId === invite.id;
+
+                  return (
+                    <View key={invite.id} style={styles.inviteCard}>
+                      <Text style={styles.inviteGameName}>{invite.game.name}</Text>
+                      <Text style={styles.inviteFromText}>
+                        From: {invite.inviter.username}
+                      </Text>
+                      {isLoading ? (
+                        <ActivityIndicator
+                          style={styles.inviteLoadingIndicator}
+                          color={COLORS.accent}
+                        />
+                      ) : (
+                        <View style={styles.inviteActionsRow}>
+                          <Pressable
+                            style={({ pressed }) => [
+                              styles.inviteAcceptButton,
+                              pressed && styles.inviteAcceptButtonPressed,
+                            ]}
+                            onPress={() => handleAcceptInvite(invite)}
+                          >
+                            <Text style={styles.inviteAcceptButtonText}>Accept</Text>
+                          </Pressable>
+                          <Pressable
+                            style={({ pressed }) => [
+                              styles.inviteDeclineButton,
+                              pressed && styles.inviteDeclineButtonPressed,
+                            ]}
+                            onPress={() => handleDeclineInvite(invite)}
+                          >
+                            <Text style={styles.inviteDeclineButtonText}>Decline</Text>
+                          </Pressable>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
             </View>
           )}
+
+          {(asyncGamesLoading || asyncGames.length > 0) && (
+            <View style={styles.section}>
+              <Text style={styles.label}>Play with Friends</Text>
+              {asyncGamesLoading ? (
+                <ActivityIndicator
+                  style={styles.asyncGamesSectionLoader}
+                  color={COLORS.accent}
+                />
+              ) : (
+                <View style={styles.gameList}>
+                  {sortedAsyncGames.map((game) => (
+                    <AsyncGameCard
+                      key={game.id}
+                      game={game}
+                      isLoading={loadingGameId === game.id}
+                      anyCardLoading={loadingGameId !== null || deletingGameId !== null}
+                      currentUsername={currentUser?.username}
+                      canDelete={isCurrentUserGameCreator(
+                        game,
+                        currentUser?.id,
+                        currentUser?.username,
+                      )}
+                      isDeleting={deletingGameId === game.id}
+                      onPress={() => handleOpenAsyncGame(game.id)}
+                      onDelete={() => handleDeleteAsyncGame(game)}
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
+          {_hasHydrated && soloGames.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.label}>Solos</Text>
+              <View style={styles.gameList}>
+                {soloGames.map((record) => (
+                  <GameCard
+                    key={record.id}
+                    record={record}
+                    onPress={() => handleResume(record.id)}
+                    onDelete={() => handleDeleteLocalGame(record)}
+                  />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {_hasHydrated && passAndPlayGames.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.label}>Pass & Play</Text>
+              <View style={styles.gameList}>
+                {passAndPlayGames.map((record) => (
+                  <GameCard
+                    key={record.id}
+                    record={record}
+                    onPress={() => handleResume(record.id)}
+                    onDelete={() => handleDeleteLocalGame(record)}
+                  />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {_hasHydrated &&
+          localGames.length === 0 &&
+          asyncGames.length === 0 &&
+          !asyncGamesLoading ? (
+            <Text style={styles.emptyMessage}>No active campaigns.{'\n'}Start a new one below.</Text>
+          ) : null}
         </ScrollView>
 
         <View style={styles.lobbyFooter}>
           <Pressable
             style={({ pressed }) => [styles.newCampaignButton, pressed && styles.launchButtonPressed]}
-            onPress={() => setIsCreating(true)}
+            onPress={() => {
+              setGameName(getDefaultCampaignName(currentUser?.username));
+              setIsCreating(true);
+            }}
           >
             <Text style={styles.launchButtonText}>New Campaign</Text>
           </Pressable>
@@ -502,6 +1306,72 @@ const styles = StyleSheet.create({
     marginTop: 48,
     letterSpacing: 0.5,
   },
+  inviteList: {
+    gap: 10,
+  },
+  inviteCard: {
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    padding: 16,
+    gap: 10,
+  },
+  inviteGameName: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  inviteFromText: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    letterSpacing: 0.3,
+  },
+  inviteActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  inviteAcceptButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+  },
+  inviteAcceptButtonPressed: {
+    opacity: 0.85,
+  },
+  inviteAcceptButtonText: {
+    color: COLORS.background,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  inviteDeclineButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+  },
+  inviteDeclineButtonPressed: {
+    borderColor: COLORS.textMuted,
+    opacity: 0.85,
+  },
+  inviteDeclineButtonText: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  inviteLoadingIndicator: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
   gameList: {
     gap: 12,
   },
@@ -514,6 +1384,131 @@ const styles = StyleSheet.create({
   },
   gameCardPressed: {
     borderColor: COLORS.accent,
+  },
+  gameCardDisabled: {
+    opacity: 0.75,
+  },
+  gameCardMuted: {
+    opacity: 0.9,
+  },
+  gameCardLoading: {
+    opacity: 0.7,
+  },
+  asyncGameCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 6,
+  },
+  asyncGameCardTitle: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  asyncGameCardHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
+  asyncGameDeleteButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e8b4b0',
+    backgroundColor: '#fdf5f4',
+    minWidth: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  asyncGameDeleteButtonPressed: {
+    opacity: 0.85,
+    borderColor: '#c0392b',
+  },
+  asyncGameDeleteButtonText: {
+    color: '#c0392b',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  asyncAlertBadgeYourTurn: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  asyncAlertBadgeYourTurnText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  asyncAlertBadgeInProgress: {
+    backgroundColor: '#e07820',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  asyncAlertBadgeInProgressText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  asyncAlertBadgeWaitingText: {
+    color: '#9a8a50',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    flexShrink: 0,
+  },
+  asyncAlertBadgeVictory: {
+    backgroundColor: '#2e8a50',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  asyncAlertBadgeDefeat: {
+    backgroundColor: '#c0392b',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  asyncAlertBadgeFinished: {
+    backgroundColor: COLORS.border,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  asyncAlertBadgeFinishedText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  asyncAlertBadgeFinishedMutedText: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  asyncGameSubtitle: {
+    color: COLORS.text,
+    fontSize: 13,
+    letterSpacing: 0.3,
+  },
+  asyncGameSubtitleMuted: {
+    color: COLORS.textMuted,
+    fontStyle: 'italic',
+  },
+  asyncGameCardLoader: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  asyncGamesSectionLoader: {
+    marginVertical: 16,
+    alignSelf: 'center',
   },
   gameCardName: {
     color: COLORS.text,
@@ -707,45 +1702,136 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     letterSpacing: 0.3,
   },
-  difficultyRow: {
+  friendPickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+    gap: 8,
   },
-  difficultyLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  difficultyToggle: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  difficultyChip: {
-    paddingVertical: 4,
+  friendPickerSelect: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 6,
     paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  friendPickerSelectPressed: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accentDim,
+  },
+  friendPickerSelectedText: {
+    color: COLORS.text,
+    fontSize: 14,
+    letterSpacing: 0.3,
+  },
+  friendPickerPlaceholderText: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    letterSpacing: 0.3,
+    fontStyle: 'italic',
+  },
+  friendPickerClearButton: {
+    width: 32,
+    height: 32,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  difficultyChipSelected: {
+  friendPickerClearButtonPressed: {
+    borderColor: COLORS.textMuted,
+    opacity: 0.8,
+  },
+  friendPickerClearText: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    lineHeight: 16,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  friendPickerModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: '70%',
+    backgroundColor: COLORS.panel,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 16,
+  },
+  friendPickerModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  friendPickerModalTitle: {
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  friendPickerModalClose: {
+    color: COLORS.textMuted,
+    fontSize: 18,
+    lineHeight: 20,
+  },
+  friendPickerEmptyState: {
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 12,
+  },
+  friendPickerEmptyText: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  friendPickerGoButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
     backgroundColor: COLORS.accentDim,
+    borderWidth: 1,
     borderColor: COLORS.accent,
   },
-  difficultyChipPressed: {
-    borderColor: COLORS.textMuted,
+  friendPickerGoButtonPressed: {
+    opacity: 0.85,
   },
-  difficultyChipText: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-  difficultyChipTextSelected: {
+  friendPickerGoButtonText: {
     color: COLORS.accent,
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  friendPickerList: {
+    maxHeight: 320,
+  },
+  friendPickerListRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.background,
+    marginBottom: 8,
+  },
+  friendPickerListRowPressed: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accentDim,
+  },
+  friendPickerListRowText: {
+    color: COLORS.text,
+    fontSize: 15,
+    letterSpacing: 0.3,
   },
   slotActionsRow: {
     flexDirection: 'row',
@@ -808,13 +1894,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  playModeCardComingSoon: {
-    opacity: 0.65,
-  },
   playModeCardSelected: {
     backgroundColor: COLORS.accentDim,
     borderColor: COLORS.accent,
-    opacity: 1,
   },
   playModeCardPressed: {
     borderColor: COLORS.textMuted,
@@ -825,9 +1907,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.5,
   },
-  playModeTitleComingSoon: {
-    color: COLORS.textMuted,
-  },
   playModeTitleSelected: {
     color: COLORS.accent,
   },
@@ -837,9 +1916,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 15,
     letterSpacing: 0.3,
-  },
-  playModeSubtitleComingSoon: {
-    color: COLORS.border,
   },
   playModeSubtitleSelected: {
     color: COLORS.text,
@@ -879,6 +1955,34 @@ const styles = StyleSheet.create({
   },
   mapSizeDetailSelected: {
     color: COLORS.text,
+  },
+  observerToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+  },
+  observerToggleLabels: {
+    flex: 1,
+  },
+  observerToggleTitle: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  observerToggleSubtitle: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 6,
+    lineHeight: 15,
+    letterSpacing: 0.3,
   },
   newCampaignButton: {
     backgroundColor: COLORS.accent,

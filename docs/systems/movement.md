@@ -103,7 +103,7 @@ Simulates one turn of fleet movement for all fleets:
 
 ### Client UI
 
-Fleet dispatch is initiated in `GameScreen` via a **long-press (300ms) and drag** from an owned planet to a destination planet. On release over a valid in-range target, a ship-count modal confirms the order; `gameStore.confirmPendingFleet` calls `queueOrder` (appends to `queuedOrders` without resolving the turn). The player presses **End Turn** to call `endTurn()`, which batches all queued orders as `SEND_FLEET` actions plus `END_TURN` in one `resolveTurn` call. Tap-to-select still shows planet info in the bottom panel; the previous tap-based destination chips and Send button were removed.
+Fleet dispatch is initiated in `GameScreen` via touch-and-drag from an owned planet to a destination planet. On release over a valid in-range target, a ship-count modal confirms the order; the stepper supports − / + / **All**, and the ship count is **tappable** to open a numeric `TextInput` (digits only, clamped to `0…max` on blur or keyboard submit, where `max` is garrison minus other queued outbound from that planet this turn). `gameStore.confirmPendingFleet` calls `queueOrder` (appends to `queuedOrders` without resolving the turn). The player presses **End Turn** to call `endTurn()`, which batches all queued orders as `SEND_FLEET` actions plus `END_TURN` in one `resolveTurn` call.
 
 ### Fleet visualization (`GameScreen`)
 
@@ -131,6 +131,7 @@ No randomness. Same positions and fleet list always produce the same transit tim
 
 ## Changelog
 
+- 2026-06-01: Fleet dispatch modal — tap ship count to type a value; clamped to `0…max` on blur/submit; − / + / **All** unchanged.
 - 2026-05-28: In-transit and queued-departure fleet markers use arrow-head polygons (tip toward destination) instead of circles; ship-count labels use owner color (same as marker).
 - 2026-05-28: Task 76 — removed minimum 1-ship garrison on dispatch; `shipCount` may equal `origin.shipCount`.
 - 2026-05-28: Task 74 — round-wrap `advanceFleets` arrivals resolved immediately in `turnEngine`; updated `advanceFleets` comment.

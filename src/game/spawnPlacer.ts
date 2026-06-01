@@ -4,6 +4,12 @@ const INITIAL_HOME_SHIP_COUNT = 5;
 const EDGE_INNER_MARGIN = 3;
 const EDGE_BAND_DEPTH_FRACTION = 0.28;
 const HUMAN_SEPARATION_RETRY_LIMIT = 50;
+const AI_MIN_SEPARATION_RETRY_LIMIT = 50;
+const AI_MIN_SEPARATION_FROM_HUMAN: Record<MapSize, number> = {
+  small: 30,
+  medium: 40,
+  large: 50,
+};
 
 const HUMAN_MIN_SEPARATION: Record<MapSize, number> = {
   small: 30,
@@ -117,6 +123,8 @@ function neutralPlanetsInZone(
   map: GameMap,
   zone: Zone,
   excludedPlanetIndices: Set<number>,
+  humanPositions: Position[] = [],
+  minDistanceFromHuman: number = 0,
 ): number[] {
   const indices: number[] = [];
   for (let i = 0; i < map.planets.length; i++) {
@@ -124,9 +132,19 @@ function neutralPlanetsInZone(
     if (planet.owner !== 'neutral' || excludedPlanetIndices.has(i)) {
       continue;
     }
-    if (planetInZone(planet, zone)) {
-      indices.push(i);
+    if (!planetInZone(planet, zone)) {
+      continue;
     }
+    if (
+      humanPositions.length > 0 &&
+      humanPositions.some(
+        (humanPosition) =>
+          computeClickDistance(planet.position, humanPosition) < minDistanceFromHuman,
+      )
+    ) {
+      continue;
+    }
+    indices.push(i);
   }
   return indices;
 }
@@ -140,8 +158,16 @@ function pickRandomPlanetInZone(
   zone: Zone,
   excludedPlanetIndices: Set<number>,
   rng: () => number,
+  humanPositions: Position[] = [],
+  minDistanceFromHuman: number = 0,
 ): number | undefined {
-  const candidates = neutralPlanetsInZone(map, zone, excludedPlanetIndices);
+  const candidates = neutralPlanetsInZone(
+    map,
+    zone,
+    excludedPlanetIndices,
+    humanPositions,
+    minDistanceFromHuman,
+  );
   if (candidates.length === 0) {
     return undefined;
   }
@@ -232,36 +258,68 @@ function assignAis(
   edgeZones: Zone[],
   interiorZones: Zone[],
   humanAssignments: Map<string, number>,
+  mapSize: MapSize,
   rng: () => number,
 ): Map<string, number> {
-  const assignedPlanetIndices = new Set(humanAssignments.values());
-  const allZones = [...interiorZones, ...edgeZones];
-  const shuffledZones = fisherYatesShuffle(allZones, rng);
-  const usedZones = new Set<Zone>();
-  const assignment = new Map<string, number>();
+  const humanPositions = [...humanAssignments.values()].map(
+    (index) => map.planets[index].position,
+  );
+  const minDistance = AI_MIN_SEPARATION_FROM_HUMAN[mapSize];
+  let lastAssignment = new Map<string, number>();
 
-  for (const playerId of aiPlayerIds) {
-    let placed = false;
-    for (const zone of shuffledZones) {
-      if (usedZones.has(zone)) {
-        continue;
+  for (let attempt = 0; attempt < AI_MIN_SEPARATION_RETRY_LIMIT; attempt++) {
+    const assignedPlanetIndices = new Set(humanAssignments.values());
+    const allZones = [...interiorZones, ...edgeZones];
+    const shuffledZones = fisherYatesShuffle(allZones, rng);
+    const usedZones = new Set<Zone>();
+    const assignment = new Map<string, number>();
+    let failed = false;
+
+    for (const playerId of aiPlayerIds) {
+      let placed = false;
+      for (const zone of shuffledZones) {
+        if (usedZones.has(zone)) {
+          continue;
+        }
+        const planetIndex = pickRandomPlanetInZone(
+          map,
+          zone,
+          assignedPlanetIndices,
+          rng,
+          humanPositions,
+          minDistance,
+        );
+        if (planetIndex === undefined) {
+          continue;
+        }
+        usedZones.add(zone);
+        assignedPlanetIndices.add(planetIndex);
+        assignment.set(playerId, planetIndex);
+        placed = true;
+        break;
       }
-      const planetIndex = pickRandomPlanetInZone(map, zone, assignedPlanetIndices, rng);
-      if (planetIndex === undefined) {
-        continue;
+      if (!placed) {
+        failed = true;
+        break;
       }
-      usedZones.add(zone);
-      assignedPlanetIndices.add(planetIndex);
-      assignment.set(playerId, planetIndex);
-      placed = true;
-      break;
     }
-    if (!placed) {
-      throw new Error(`Cannot place AI spawn for player ${playerId}`);
+
+    if (failed) {
+      lastAssignment = assignment;
+      continue;
+    }
+
+    lastAssignment = assignment;
+
+    if (!failed) {
+      return assignment;
     }
   }
 
-  return assignment;
+  console.warn(
+    'AI min-separation from human not met after 50 attempts, using last assignment',
+  );
+  return lastAssignment;
 }
 
 function applyAssignment(
@@ -334,6 +392,7 @@ export function placeSpawns(options: PlaceSpawnsOptions): SpawnPlacementResult {
     edgeZones,
     interiorZones,
     humanAssignments,
+    mapSize,
     rng,
   );
 

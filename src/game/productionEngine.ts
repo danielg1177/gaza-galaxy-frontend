@@ -82,6 +82,7 @@ export function runProduction(
           events.push({
             kind: 'build_complete',
             planetName: planet.name,
+            planetId: planet.id,
             buildingType: building.type,
           });
         }
@@ -110,6 +111,16 @@ export function runProduction(
     let troopAccumulator = planet.troopAccumulator + rawTroopOutput;
     const wholeTroops = Math.floor(troopAccumulator);
     troopAccumulator -= wholeTroops;
+
+    if (wholeTroops >= 1 && events !== undefined) {
+      events.push({
+        kind: 'troop_produced',
+        planetName: planet.name,
+        planetId: planet.id,
+        ownerName: owner.name,
+        troopsAdded: wholeTroops,
+      });
+    }
 
     goldTotals.set(planet.owner, (goldTotals.get(planet.owner) ?? 0) + Math.floor(rawGoldOutput));
     researchTotals.set(

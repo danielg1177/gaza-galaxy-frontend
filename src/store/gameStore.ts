@@ -11,30 +11,47 @@ import {
 } from '../game/productionEngine';
 import { generateMap } from '../game/mapGenerator';
 import { HOME_PLANET_CLASS_CONFIG, placeSpawns } from '../game/spawnPlacer';
-import { resolveTurn, advanceToNextNonEliminatedPlayer, type ResolveTurnResult } from '../game/turnEngine';
+import {
+  resolveTurn,
+  advanceToNextNonEliminatedPlayer,
+  type PlayerAction,
+  type ResolveTurnResult,
+  type TurnInput,
+} from '../game/turnEngine';
 import type {
   AiPlayerState,
   BuildingType,
   GameMap,
   GameState,
   MapSize,
+  Planet,
   PlayMode,
   Player,
   TurnEvent,
 } from '../game/types';
 import { useMemo } from 'react';
+import { Alert } from 'react-native';
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { ApiGameDetail } from '../services/gamesService';
+import { ApiError } from '../services/apiClient';
+import { submitTurn } from '../services/gamesService';
 
 export interface PlayerSlot {
   type: 'human' | 'ai';
   /** Optional display name for human slots. */
   name?: string;
+  /** Async multiplayer human invite target; undefined for AI, pass-and-play, or unassigned slots. */
+  userId?: number;
   /** Only relevant when type === 'ai'. */
   difficulty?: AiDifficulty;
 }
 
 export interface GameConfig {
   playerName: string;
+  /** User-chosen campaign title shown on the Command Center. */
+  gameName?: string;
   /** Length 2–8; slot 0 is always the local human player. */
   playerSlots: PlayerSlot[];
   mapSize: MapSize;
@@ -49,6 +66,11 @@ export interface GameRecord {
   name: string;
   state: GameState;
   config: GameConfig;
+  /** Backend game id when loaded from the async multiplayer API. */
+  asyncGameId?: number;
+  /** Un-dismissed battle report events; persisted for local games until modal close. */
+  pendingTurnReport?: TurnEvent[];
+  pendingTurnReportAcknowledged?: boolean;
 }
 
 export interface PendingFleet {
@@ -65,6 +87,7 @@ export type QueueBuildOrderResult =
 
 export interface GameStore {
   games: GameRecord[];
+  _hasHydrated: boolean;
   activeGameId: string | null;
   selectedPlanetId: string | null;
   pendingFleet: PendingFleet | null;
@@ -79,8 +102,18 @@ export interface GameStore {
   eliminatedPlayerPendingKnockout: boolean;
   /** Human players knocked out on their own round-wrap endTurn; farewell shown at next natural turn slot. */
   pendingFarewellPlayerIds: string[];
+  /** True while async turn submission API call is in flight. */
+  isSubmittingTurn: boolean;
+  /** Set after successful async turn submit; GameScreen navigates home then clears. */
+  shouldReturnHome: boolean;
+  /** Session preference: pause after each AI turn to review moves before advancing. */
+  aiObserverMode: boolean;
+  showingAiObserver: boolean;
+  pendingAiTurnInput: TurnInput | null;
+  pendingAiPlayerId: string | null;
   startNewGame: (config: GameConfig) => void;
   loadGame: (id: string) => void;
+  loadAsyncGame: (detail: ApiGameDetail) => void;
   deleteGame: (id: string) => void;
   getActiveRecord: () => GameRecord | null;
   selectPlanet: (planetId: string | null) => void;
@@ -94,9 +127,15 @@ export interface GameStore {
   demolishBuilding: (planetId: string, buildingIndex: number) => void;
   setProductionSlider: (planetId: string, value: number) => void;
   endTurn: () => void;
+  advanceStagedAiTurn: () => void;
   acknowledgeKnockout: () => void;
   dismissLockScreen: () => void;
   resetGame: () => void;
+  clearReturnHome: () => void;
+  clearPendingTurnReport: () => void;
+  setAiObserverMode: (value: boolean) => void;
+  clearAiObserver: () => void;
+  isAsyncGame: () => boolean;
   getVisibleGameState: () => GameState | null;
 }
 
@@ -110,6 +149,17 @@ const mulberry32 = (seed: number): (() => number) => {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 };
+
+function drainStaleFleets(state: GameState): GameState {
+  if (!state.fleets.some((fleet) => fleet.turnsRemaining <= 0)) {
+    return state;
+  }
+  return {
+    ...state,
+    // drain stale turnsRemaining=0 fleets that may have persisted before the fix
+    fleets: state.fleets.filter((fleet) => fleet.turnsRemaining > 0),
+  };
+}
 
 function createPlayerIds(count: number): string[] {
   return Array.from({ length: count }, (_, i) => `player-${i}`);
@@ -155,7 +205,7 @@ function buildPlayers(
       isAI,
     };
     if (isAI) {
-      player.difficulty = slot.difficulty ?? 'normal';
+      player.difficulty = 'hard';
     }
     return player;
   });
@@ -192,12 +242,16 @@ function buildVisibleState(state: GameState, viewingPlayerId: string): GameState
   };
 }
 
-function visibleStateForRecord(record: GameRecord | null): GameState | null {
+function visibleStateForRecord(
+  record: GameRecord | null,
+  overrideViewerId?: string | null,
+): GameState | null {
   if (record === null) {
     return null;
   }
   const gameState = record.state;
-  const viewingPlayerId = getLocalHumanPlayerId(gameState);
+  const viewingPlayerId =
+    overrideViewerId != null ? overrideViewerId : getLocalHumanPlayerId(gameState);
   if (viewingPlayerId === undefined) {
     return gameState;
   }
@@ -263,8 +317,121 @@ function findFarewellInPath(
   return null;
 }
 
-export const useGameStore = create<GameStore>((set, get) => ({
+/**
+ * Generates the initial GameState for a given config without touching the store.
+ * Used both by startNewGame (local pass-and-play) and by the async game creation
+ * flow to produce a state_json that is sent to the backend.
+ */
+export function generateInitialGameState(config: GameConfig, seed: number): GameState {
+  const playerCount = config.playerSlots.length;
+  const playerIds = createPlayerIds(playerCount);
+  const map = generateMap({
+    seed,
+    width: config.mapWidth,
+    height: config.mapHeight,
+    planetCount: config.planetCount,
+    playerCount,
+  });
+  const humanPlayerIds: string[] = [];
+  const aiPlayerIds: string[] = [];
+  config.playerSlots.forEach((slot, index) => {
+    if (slot.type === 'human') {
+      humanPlayerIds.push(playerIds[index]);
+    } else {
+      aiPlayerIds.push(playerIds[index]);
+    }
+  });
+  const { map: mapWithSpawns, homePlanetClassByPlayerId } = placeSpawns({
+    map,
+    humanPlayerIds,
+    aiPlayerIds,
+    mapSize: config.mapSize,
+    rng: mulberry32(seed + 1),
+  });
+  const aiNameRng = mulberry32(seed + 2);
+  const players = buildPlayers(
+    mapWithSpawns,
+    playerIds,
+    homePlanetClassByPlayerId,
+    config,
+    aiNameRng,
+  );
+  const initialAiStates: Record<string, AiPlayerState> = {};
+  const baseState: GameState = {
+    map: mapWithSpawns,
+    players,
+    fleets: [],
+    turnNumber: 1,
+    roundNumber: 1,
+    currentPlayerId: players[0].id,
+    seed,
+    playMode: config.playMode,
+    status: 'active',
+    winnerId: null,
+  };
+  for (const player of players) {
+    if (player.isAI) {
+      initialAiStates[player.id] = updateAiObservation(baseState, player.id, undefined);
+    }
+  }
+  return { ...baseState, aiStates: initialAiStates };
+}
+
+function buildPlayerReports(
+  events: TurnEvent[],
+  players: Player[],
+  planets?: Planet[],
+): {
+  archive: Record<string, TurnEvent[]>;
+  turnReport: Record<string, TurnEvent[]>;
+} {
+  const archive: Record<string, TurnEvent[]> = {};
+  const report: Record<string, TurnEvent[]> = {};
+  for (const event of events) {
+    if (event.kind === 'combat' || event.kind === 'multiway_combat') {
+      for (const player of players) {
+        if (player.isAI) continue;
+        const involved =
+          event.kind === 'combat'
+            ? event.attackerName === player.name || event.defenderName === player.name
+            : event.participants.some((p) => p.name === player.name);
+        if (involved) {
+          (archive[player.id] ??= []).push(event);
+          (report[player.id] ??= []).push(event);
+        }
+      }
+      continue;
+    }
+    if (event.kind === 'fleet_arrived') {
+      const owner = players.find((p) => !p.isAI && p.name === event.attackerName);
+      if (owner) (report[owner.id] ??= []).push(event);
+      continue;
+    }
+    if (event.kind === 'research_levelup') {
+      const owner = players.find((p) => !p.isAI && p.name === event.playerName);
+      if (owner) (report[owner.id] ??= []).push(event);
+      continue;
+    }
+    if (event.kind === 'build_complete') {
+      const planet = planets?.find((pl) =>
+        event.planetId !== undefined ? pl.id === event.planetId : pl.name === event.planetName,
+      );
+      if (planet) {
+        const owner = players.find((p) => !p.isAI && p.id === planet.owner);
+        if (owner) (report[owner.id] ??= []).push(event);
+      }
+      continue;
+    }
+    // troop_produced: informational only, no archive or report entry
+  }
+  return { archive, turnReport: report };
+}
+
+export const useGameStore = create<GameStore>()(
+  persist(
+    (set, get) => ({
   games: [],
+  _hasHydrated: false,
   activeGameId: null,
   selectedPlanetId: null,
   pendingFleet: null,
@@ -275,65 +442,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
   playerTurnReportByPlayerId: {},
   eliminatedPlayerPendingKnockout: false,
   pendingFarewellPlayerIds: [],
+  isSubmittingTurn: false,
+  shouldReturnHome: false,
+  aiObserverMode: false,
+  showingAiObserver: false,
+  pendingAiTurnInput: null,
+  pendingAiPlayerId: null,
 
   startNewGame: (config) => {
     const seed = Date.now();
-    const playerCount = config.playerSlots.length;
-    const playerIds = createPlayerIds(playerCount);
-    const map = generateMap({
-      seed,
-      width: config.mapWidth,
-      height: config.mapHeight,
-      planetCount: config.planetCount,
-      playerCount,
-    });
-    const humanPlayerIds: string[] = [];
-    const aiPlayerIds: string[] = [];
-    config.playerSlots.forEach((slot, index) => {
-      if (slot.type === 'human') {
-        humanPlayerIds.push(playerIds[index]);
-      } else {
-        aiPlayerIds.push(playerIds[index]);
-      }
-    });
-    const { map: mapWithSpawns, homePlanetClassByPlayerId } = placeSpawns({
-      map,
-      humanPlayerIds,
-      aiPlayerIds,
-      mapSize: config.mapSize,
-      rng: mulberry32(seed + 1),
-    });
-    const aiNameRng = mulberry32(seed + 2);
-    const players = buildPlayers(
-      mapWithSpawns,
-      playerIds,
-      homePlanetClassByPlayerId,
-      config,
-      aiNameRng,
-    );
-    // Build initial AI fog-of-war state: each AI player starts with memory of their
-    // home planet and any planets within sensor range of it.
-    const initialAiStates: Record<string, AiPlayerState> = {};
-    const baseState: GameState = {
-      map: mapWithSpawns,
-      players,
-      fleets: [],
-      turnNumber: 1,
-      roundNumber: 1,
-      currentPlayerId: players[0].id,
-      seed,
-      playMode: config.playMode,
-      status: 'active',
-      winnerId: null,
-    };
-    for (const player of players) {
-      if (player.isAI) {
-        initialAiStates[player.id] = updateAiObservation(baseState, player.id, undefined);
-      }
-    }
-    const state: GameState = { ...baseState, aiStates: initialAiStates };
-    const id = Date.now().toString();
-    const name = `Game ${get().games.length + 1}`;
+    const state = generateInitialGameState(config, seed);
+    const id = seed.toString();
+    const name =
+      config.gameName?.trim() ||
+      `${config.playerName.trim() || 'Commander'}'s Campaign`;
     const record: GameRecord = { id, name, state, config };
     set({
       games: [...get().games, record],
@@ -347,22 +469,113 @@ export const useGameStore = create<GameStore>((set, get) => ({
       playerTurnReportByPlayerId: {},
       eliminatedPlayerPendingKnockout: false,
       pendingFarewellPlayerIds: [],
+      isSubmittingTurn: false,
+      shouldReturnHome: false,
     });
   },
 
-  loadGame: (id) =>
+  loadGame: (id) => {
+    const record = get().games.find((g) => g.id === id);
+    const pending = record?.pendingTurnReport;
+    const hasPending = pending !== undefined && pending.length > 0;
+    let restoredArchive: Record<string, TurnEvent[]> = {};
+    let restoredTurnReport: Record<string, TurnEvent[]> = {};
+    if (hasPending && record !== undefined) {
+      const { archive, turnReport } = buildPlayerReports(
+        pending,
+        record.state.players,
+        record.state.map.planets,
+      );
+      restoredArchive = archive;
+      restoredTurnReport = turnReport;
+    }
     set({
       activeGameId: id,
       selectedPlanetId: null,
       pendingFleet: null,
       queuedOrders: [],
-      showingLockScreen: false,
-      turnReport: [],
-      playerBattleArchiveByPlayerId: {},
-      playerTurnReportByPlayerId: {},
+      showingLockScreen: hasPending && !record?.pendingTurnReportAcknowledged,
+      turnReport: pending ?? [],
+      games: get().games.map((g) => {
+        if (g.id !== id) return g;
+        return { ...g, state: drainStaleFleets(g.state) };
+      }),
+      playerBattleArchiveByPlayerId: restoredArchive,
+      playerTurnReportByPlayerId: restoredTurnReport,
       eliminatedPlayerPendingKnockout: false,
       pendingFarewellPlayerIds: [],
-    }),
+      isSubmittingTurn: false,
+      shouldReturnHome: false,
+    });
+  },
+
+  loadAsyncGame: (detail) => {
+    const inProgress = detail.inProgressActions;
+    const hasMidTurnSave =
+      inProgress != null &&
+      inProgress.partialStateJson != null &&
+      inProgress.partialStateJson.length > 0;
+
+    let state: GameState;
+    let queuedOrders: PendingFleet[];
+
+    if (hasMidTurnSave) {
+      state = JSON.parse(inProgress.partialStateJson) as GameState;
+      queuedOrders = inProgress.queuedOrders.map((order) => ({
+        fromPlanetId: order.fromPlanetId,
+        toPlanetId: order.toPlanetId,
+        shipCount: order.shipCount,
+      }));
+    } else {
+      state = JSON.parse(detail.stateJson) as GameState;
+      queuedOrders = [];
+    }
+    state = drainStaleFleets({ ...state, playMode: 'asyncMultiplayer' });
+
+    const recordId = String(detail.id);
+    const record: GameRecord = {
+      id: recordId,
+      name: detail.name,
+      asyncGameId: detail.id,
+      state,
+      config: {
+        playMode: 'asyncMultiplayer',
+        playerName: '',
+        playerSlots: [],
+        mapSize: 'medium',
+        mapWidth: state.map.width,
+        mapHeight: state.map.height,
+        planetCount: state.map.planets.length,
+      },
+    };
+    const { games } = get();
+    const existingIndex = games.findIndex((g) => g.id === recordId);
+    const nextGames =
+      existingIndex >= 0
+        ? games.map((g, i) => (i === existingIndex ? record : g))
+        : [...games, record];
+
+    const hasEvents = detail.isMyTurn && (detail.latestEvents?.length ?? 0) > 0;
+    const asyncReports = hasEvents
+      ? buildPlayerReports(detail.latestEvents!, state.players, state.map.planets)
+      : null;
+
+    set({
+      games: nextGames,
+      activeGameId: recordId,
+      selectedPlanetId: null,
+      pendingFleet: null,
+      queuedOrders,
+      showingLockScreen: false,
+      turnReport: detail.isMyTurn ? (detail.latestEvents ?? []) : [],
+      playerBattleArchiveByPlayerId: asyncReports?.archive ?? {},
+      playerTurnReportByPlayerId: asyncReports?.turnReport ?? {},
+      eliminatedPlayerPendingKnockout: false,
+      pendingFarewellPlayerIds: [],
+      isSubmittingTurn: false,
+      shouldReturnHome: false,
+    });
+  },
 
   deleteGame: (id) => {
     const { games, activeGameId } = get();
@@ -625,16 +838,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
     const gameState = record.state;
+    const preTurnNumber = gameState.turnNumber;
+    const preRoundNumber = gameState.roundNumber;
     const humanPlayer = gameState.players.find(
       (p) => p.id === gameState.currentPlayerId && !p.isAI,
     );
     if (humanPlayer === undefined) {
       return;
     }
-    const { queuedOrders } = get();
+    const { queuedOrders: queuedOrdersSnapshot } = get();
+    const asyncGameId = record.asyncGameId;
+    const isAsync = asyncGameId != null;
     const input = {
       actions: [
-        ...queuedOrders.map((o) => ({
+        ...queuedOrdersSnapshot.map((o) => ({
           type: 'SEND_FLEET' as const,
           fromPlanetId: o.fromPlanetId,
           toPlanetId: o.toPlanetId,
@@ -644,7 +861,41 @@ export const useGameStore = create<GameStore>((set, get) => ({
       ],
       playerId: humanPlayer.id,
     };
-    const { state: nextState, events } = runAiTurnsUntilHuman(resolveTurn(gameState, input));
+    const humanResult = resolveTurn(gameState, input);
+    if (get().aiObserverMode) {
+      const resolvedState = stripTurnEvents(humanResult);
+      const nextPlayer = resolvedState.players.find(
+        (p) => p.id === resolvedState.currentPlayerId,
+      );
+      if (
+        nextPlayer !== undefined &&
+        nextPlayer.isAI &&
+        !nextPlayer.isEliminated
+      ) {
+        const aiInput = computeAiTurn(resolvedState, resolvedState.currentPlayerId);
+        set({
+          games: get().games.map((g) =>
+            g.id === record.id ? { ...g, state: resolvedState } : g,
+          ),
+          showingAiObserver: true,
+          pendingAiTurnInput: aiInput,
+          pendingAiPlayerId: resolvedState.currentPlayerId,
+          showingLockScreen: false,
+          queuedOrders: aiInput.actions
+            .filter(
+              (a): a is Extract<PlayerAction, { type: 'SEND_FLEET' }> =>
+                a.type === 'SEND_FLEET',
+            )
+            .map((a) => ({
+              fromPlanetId: a.fromPlanetId,
+              toPlanetId: a.toPlanetId,
+              shipCount: a.shipCount,
+            })),
+        });
+        return;
+      }
+    }
+    const { state: nextState, events } = runAiTurnsUntilHuman(humanResult);
 
     const outgoingPlayerId = gameState.currentPlayerId;
     const knockoutHumanIds = findNewlyEliminatedHumanIds(events, nextState.players);
@@ -681,80 +932,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
     delete newArchive[humanPlayer.id];
     const newTurnReport = { ...get().playerTurnReportByPlayerId };
     delete newTurnReport[humanPlayer.id];
-    for (const event of events) {
-      if (event.kind === 'combat') {
-        for (const player of finalState.players) {
-          if (player.isAI) {
-            continue;
-          }
-          if (
-            event.attackerName === player.name ||
-            event.defenderName === player.name
-          ) {
-            const existing = newArchive[player.id];
-            if (existing === undefined) {
-              newArchive[player.id] = [event];
-            } else {
-              existing.push(event);
-            }
-            const reportExisting = newTurnReport[player.id];
-            if (reportExisting === undefined) {
-              newTurnReport[player.id] = [event];
-            } else {
-              reportExisting.push(event);
-            }
-          }
-        }
-        continue;
+    const { archive: builtArchive, turnReport: builtTurnReport } =
+      buildPlayerReports(events, finalState.players, finalState.map.planets);
+    for (const [playerId, playerEvents] of Object.entries(builtArchive)) {
+      const existing = newArchive[playerId];
+      if (existing === undefined) {
+        newArchive[playerId] = playerEvents;
+      } else {
+        existing.push(...playerEvents);
       }
-      if (event.kind === 'fleet_arrived') {
-        const owner = finalState.players.find(
-          (p) => !p.isAI && p.name === event.attackerName,
-        );
-        if (owner !== undefined) {
-          const existing = newTurnReport[owner.id];
-          if (existing === undefined) {
-            newTurnReport[owner.id] = [event];
-          } else {
-            existing.push(event);
-          }
-        }
-        continue;
-      }
-      if (event.kind === 'research_levelup') {
-        const owner = finalState.players.find(
-          (p) => !p.isAI && p.name === event.playerName,
-        );
-        if (owner !== undefined) {
-          const existing = newTurnReport[owner.id];
-          if (existing === undefined) {
-            newTurnReport[owner.id] = [event];
-          } else {
-            existing.push(event);
-          }
-        }
-        continue;
-      }
-      if (event.kind === 'build_complete') {
-        const planet = finalState.map.planets.find(
-          (p) => p.name === event.planetName,
-        );
-        const owner = finalState.players.find(
-          (p) => !p.isAI && p.id === planet?.owner,
-        );
-        if (owner !== undefined) {
-          const existing = newTurnReport[owner.id];
-          if (existing === undefined) {
-            newTurnReport[owner.id] = [event];
-          } else {
-            existing.push(event);
-          }
-        }
+    }
+    for (const [playerId, playerEvents] of Object.entries(builtTurnReport)) {
+      const existing = newTurnReport[playerId];
+      if (existing === undefined) {
+        newTurnReport[playerId] = playerEvents;
+      } else {
+        existing.push(...playerEvents);
       }
     }
     set({
       games: get().games.map((g) =>
-        g.id === record.id ? { ...g, state: finalState } : g,
+        g.id === record.id
+          ? {
+              ...g,
+              state: finalState,
+              pendingTurnReport: events,
+              pendingTurnReportAcknowledged: false,
+            }
+          : g,
       ),
       queuedOrders: [],
       selectedPlanetId: null,
@@ -764,6 +969,133 @@ export const useGameStore = create<GameStore>((set, get) => ({
       eliminatedPlayerPendingKnockout: pendingKnockout,
       pendingFarewellPlayerIds: newPendingFarewellIds,
       ...(showLock ? { showingLockScreen: true } : {}),
+    });
+
+    if (!isAsync || !asyncGameId) {
+      return;
+    }
+
+    const submitActions = queuedOrdersSnapshot.map((o) => ({
+      type: 'SEND_FLEET' as const,
+      fromPlanetId: o.fromPlanetId,
+      toPlanetId: o.toPlanetId,
+      shipCount: o.shipCount,
+    }));
+
+    set({ isSubmittingTurn: true });
+
+    void (async () => {
+      try {
+        await submitTurn(asyncGameId, {
+          actions: submitActions,
+          resultingState: finalState,
+          turnNumber: preTurnNumber,
+          roundNumber: preRoundNumber,
+          events,
+        });
+        get().resetGame();
+        set({ isSubmittingTurn: false, shouldReturnHome: true });
+      } catch (err) {
+        const alertBody =
+          err instanceof ApiError
+            ? `Server returned ${err.status}: ${err.message}`
+            : 'Could not submit your turn. You have been returned to the lobby.';
+        Alert.alert('Submit Failed', alertBody);
+        set({ isSubmittingTurn: false, shouldReturnHome: true });
+      }
+    })();
+  },
+
+  advanceStagedAiTurn: () => {
+    const { pendingAiTurnInput, pendingAiPlayerId } = get();
+    if (pendingAiTurnInput === null) {
+      return;
+    }
+    const record = get().getActiveRecord();
+    if (record === null) {
+      return;
+    }
+    const gameState = record.state;
+    const aiResult = resolveTurn(gameState, pendingAiTurnInput);
+    const nextState = stripTurnEvents(aiResult);
+    const outgoingPlayerId = pendingAiPlayerId ?? gameState.currentPlayerId;
+
+    const currentPlayer = nextState.players.find(
+      (p) => p.id === nextState.currentPlayerId,
+    );
+    if (
+      currentPlayer !== undefined &&
+      currentPlayer.isAI &&
+      !currentPlayer.isEliminated &&
+      get().aiObserverMode
+    ) {
+      const nextInput = computeAiTurn(nextState, nextState.currentPlayerId);
+      set({
+        games: get().games.map((g) =>
+          g.id === record.id ? { ...g, state: nextState } : g,
+        ),
+        pendingAiTurnInput: nextInput,
+        pendingAiPlayerId: nextState.currentPlayerId,
+        queuedOrders: nextInput.actions
+          .filter(
+            (a): a is Extract<PlayerAction, { type: 'SEND_FLEET' }> =>
+              a.type === 'SEND_FLEET',
+          )
+          .map((a) => ({
+            fromPlanetId: a.fromPlanetId,
+            toPlanetId: a.toPlanetId,
+            shipCount: a.shipCount,
+          })),
+      });
+      return;
+    }
+
+    get().clearAiObserver();
+
+    const knockoutHumanIds = findNewlyEliminatedHumanIds(
+      aiResult.events,
+      nextState.players,
+    );
+    const deferredKnockouts = knockoutHumanIds.filter(
+      (id) => id === outgoingPlayerId,
+    );
+    const immediateKnockouts = knockoutHumanIds.filter(
+      (id) => id !== outgoingPlayerId,
+    );
+    let newPendingFarewellIds = [
+      ...get().pendingFarewellPlayerIds,
+      ...deferredKnockouts,
+    ];
+    let finalState = nextState;
+    let pendingKnockout = false;
+    if (nextState.playMode === 'passAndPlay' && nextState.status === 'active') {
+      const farewellInPath = findFarewellInPath(
+        outgoingPlayerId,
+        nextState.currentPlayerId,
+        nextState.players,
+        newPendingFarewellIds,
+      );
+      if (farewellInPath !== null) {
+        finalState = { ...nextState, currentPlayerId: farewellInPath };
+        pendingKnockout = true;
+        newPendingFarewellIds = newPendingFarewellIds.filter(
+          (id) => id !== farewellInPath,
+        );
+      } else if (immediateKnockouts.length > 0) {
+        finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
+        pendingKnockout = true;
+      }
+    }
+
+    const showLock =
+      finalState.playMode === 'passAndPlay' && finalState.status === 'active';
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id ? { ...g, state: finalState } : g,
+      ),
+      showingLockScreen: showLock,
+      eliminatedPlayerPendingKnockout: pendingKnockout,
+      pendingFarewellPlayerIds: newPendingFarewellIds,
     });
   },
 
@@ -809,7 +1141,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
-  dismissLockScreen: () => set({ showingLockScreen: false }),
+  dismissLockScreen: () =>
+    set({
+      games: get().games.map((g) =>
+        g.id === get().activeGameId
+          ? { ...g, pendingTurnReportAcknowledged: true }
+          : g,
+      ),
+      showingLockScreen: false,
+    }),
 
   resetGame: () => {
     const { activeGameId } = get();
@@ -827,11 +1167,47 @@ export const useGameStore = create<GameStore>((set, get) => ({
       playerTurnReportByPlayerId: {},
       eliminatedPlayerPendingKnockout: false,
       pendingFarewellPlayerIds: [],
+      isSubmittingTurn: false,
+      shouldReturnHome: false,
     });
   },
 
+  clearReturnHome: () => set({ shouldReturnHome: false }),
+
+  clearPendingTurnReport: () => {
+    set({ turnReport: [] });
+  },
+
+  setAiObserverMode: (value) => set({ aiObserverMode: value }),
+
+  clearAiObserver: () =>
+    set({
+      showingAiObserver: false,
+      pendingAiTurnInput: null,
+      pendingAiPlayerId: null,
+      queuedOrders: [],
+    }),
+
+  isAsyncGame: () => {
+    const record = get().getActiveRecord();
+    return record?.asyncGameId != null;
+  },
+
   getVisibleGameState: () => visibleStateForRecord(get().getActiveRecord()),
-}));
+    }),
+    {
+      name: 'strategic-commander-local-games',
+      storage: createJSONStorage(() => AsyncStorage),
+      version: 1,
+      partialize: (state) => ({
+        games: state.games.filter((g) => !g.asyncGameId),
+      }),
+      onRehydrateStorage: () => () => {
+        useGameStore.setState({ _hasHydrated: true });
+      },
+    },
+  ),
+);
 
 /** Fog-of-war view for the active game; safe to use in React (stable snapshot). */
 export function useVisibleGameState(): GameState | null {
@@ -842,5 +1218,14 @@ export function useVisibleGameState(): GameState | null {
     }
     return s.games.find((g) => g.id === id) ?? null;
   });
-  return useMemo(() => visibleStateForRecord(activeRecord), [activeRecord]);
+  const showingAiObserver = useGameStore((s) => s.showingAiObserver);
+  const pendingAiPlayerId = useGameStore((s) => s.pendingAiPlayerId);
+  return useMemo(
+    () =>
+      visibleStateForRecord(
+        activeRecord,
+        showingAiObserver ? pendingAiPlayerId : null,
+      ),
+    [activeRecord, showingAiObserver, pendingAiPlayerId],
+  );
 }

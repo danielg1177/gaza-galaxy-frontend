@@ -31,10 +31,18 @@ export type BuildingType = 'factory' | 'researchLab';
  * A notable event emitted during turn resolution for the turn report UI.
  */
 export type TurnEvent =
-  | { kind: 'fleet_arrived'; planetName: string; attackerName: string; shipCount: number }
+  | {
+      kind: 'fleet_arrived';
+      planetName: string;
+      planetId?: string;
+      attackerName: string;
+      shipCount: number;
+      roundNumber?: number;
+    }
   | {
       kind: 'combat';
       planetName: string;
+      planetId?: string;
       attackerName: string;
       defenderName: string;
       attackerWon: boolean;
@@ -44,9 +52,38 @@ export type TurnEvent =
       defenderShipsBefore: number;
       remainingShips: number;
       isHomePlanetConquest?: boolean;
+      roundNumber?: number;
+    }
+  | {
+      kind: 'multiway_combat';
+      planetName: string;
+      planetId?: string;
+      participants: Array<{
+        name: string;
+        ownerId: OwnerId;
+        shipsBefore: number;
+        survived: boolean;
+      }>;
+      winnerName: string;
+      winnerId: OwnerId;
+      remainingShips: number;
+      roundNumber?: number;
+      isHomePlanetConquest?: true;
     }
   | { kind: 'research_levelup'; playerName: string; newLevel: number }
-  | { kind: 'build_complete'; planetName: string; buildingType: 'factory' | 'researchLab' };
+  | {
+      kind: 'build_complete';
+      planetName: string;
+      planetId?: string;
+      buildingType: 'factory' | 'researchLab';
+    }
+  | {
+      kind: 'troop_produced';
+      planetName: string;
+      planetId?: string;
+      ownerName: string;
+      troopsAdded: number;
+    };
 
 /**
  * How a match is played: shared device (pass-and-play) or async across devices.

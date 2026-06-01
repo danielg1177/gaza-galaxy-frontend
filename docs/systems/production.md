@@ -180,8 +180,17 @@ When `events` is supplied:
 |---------|------------|---------|
 | Tech level increases in level-up loop | `research_levelup` | `playerName`, `newLevel` |
 | Building finished construction this round | `build_complete` | `planetName`, `buildingType` (`factory` \| `researchLab`) |
+| Whole troops added to planet garrison | `troop_produced` | `planetName`, `ownerName`, `troopsAdded` |
+
+`troop_produced` fires only when `Math.floor(troopAccumulator)` after adding this turn's `rawTroopOutput` yields at least one whole troop (`troopsAdded >= 1`). Fractional-only rounds emit nothing.
+
+**Client display:** `troop_produced` is still emitted during `runProduction` (and may be included in async `events` payloads) but is **not shown** in the Battle Report modal or the ⋮ Turn Report — troop production counts are hidden from all players in the UI.
 
 Build completion is detected at the start of `runProduction` when `builtOnRound === currentRound` (emitted at the round wrap where the building was placed; visible in the ⋮ Report at the start of the next round, when `builtOnRound < currentRound` makes it active).
+
+## Troop accumulator on capture
+
+When a planet changes owner in `combatEngine.resolveArrival` (neutral capture or enemy-combat victory), `troopAccumulator` is set to `0`. The new owner starts fractional production from scratch on their first post-capture production tick.
 
 ## Client build-order feedback
 
@@ -189,6 +198,9 @@ Build completion is detected at the start of `runProduction` when `builtOnRound 
 
 ## Changelog
 
+- 2026-06-01: Removed all `troop_produced` UI — no Battle Report cards or ⋮ Report Production section; store no longer routes the event to per-player turn reports.
+- 2026-06-01: ~~Bug fix — `troop_produced` routed to planet owner only in `playerTurnReportByPlayerId`.~~ *(superseded — UI removed entirely)*
+- 2026-06-01: Task 192 — `troop_produced` turn-report event when whole troops are added; `troopAccumulator` reset on capture documented (implemented in `combatEngine`).
 - 2026-05-29: Task 124 — research points no longer subtracted on level-up; `RESEARCH_THRESHOLDS` is cumulative and points accumulate forever; level-up loop only increments `techLevel` when `researchPoints >= researchThreshold(techLevel)`.
 - 2026-05-29: Task 120 — replaced exponential formula with hand-tuned `RESEARCH_THRESHOLDS` lookup array [10, 23, 38, 58, 82, 113, 151, 198, 258, 333, 426, 542, 688, 869, 1097]; `researchThreshold(level)` now returns `RESEARCH_THRESHOLDS[level] ?? Infinity`; array exported.
 - 2026-05-29: Task 116 — `build_complete` emission condition changed from `builtOnRound === currentRound - 1` to `builtOnRound === currentRound` so Report **Built** aligns with building activation timing.
