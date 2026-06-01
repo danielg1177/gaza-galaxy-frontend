@@ -627,6 +627,7 @@ const PLANET_SIZE_SELECTED = Math.round((20 / 18) * CELL_SIZE);
 const PLANET_NAME_LABEL_WIDTH = Math.round((48 / 18) * CELL_SIZE);
 const PLANET_NAME_ABOVE_GAP = Math.max(1, Math.round((2 / 18) * CELL_SIZE));
 const PLANET_LABEL_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE));
+const PLANET_CLASS_FONT_SIZE = Math.max(2, Math.round((9 / 18) * CELL_SIZE));
 const PLANET_BATTLE_ICON_MARGIN = Math.max(1, Math.round((1 / 18) * CELL_SIZE));
 const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((9 / 18) * CELL_SIZE));
 const SHIP_COUNT_LABEL_MARGIN_TOP = Math.max(0, Math.round((2 / 18) * CELL_SIZE));
@@ -1231,6 +1232,22 @@ export default function GameScreen() {
     clearReturnHome();
     navigation.navigate('Home');
   }, [shouldReturnHome, clearReturnHome, navigation]);
+
+  useEffect(() => {
+    if (!isSubmittingTurn) {
+      return;
+    }
+    const timeoutId = setTimeout(() => {
+      if (useGameStore.getState().isSubmittingTurn) {
+        useGameStore.setState({ isSubmittingTurn: false });
+        showAlert(
+          'Submit Timed Out',
+          'The server took too long to respond. Check your connection and try End Turn again.',
+        );
+      }
+    }, 45_000);
+    return () => clearTimeout(timeoutId);
+  }, [isSubmittingTurn]);
 
   const localHumanPlayerId = useMemo(
     () => (gameState !== null ? getLocalHumanPlayerId(gameState) : undefined),
@@ -3545,8 +3562,8 @@ const styles = StyleSheet.create({
   },
   planetClassLabel: {
     color: 'rgba(255,255,255,0.85)',
-    fontSize: PLANET_LABEL_FONT_SIZE,
-    fontWeight: '700',
+    fontSize: PLANET_CLASS_FONT_SIZE,
+    fontWeight: '600',
     letterSpacing: 0,
   },
   planetClassLabelFogged: {

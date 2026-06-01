@@ -38,7 +38,7 @@ import { LOCAL_GAMES_STORAGE_KEY } from '../constants/app';
 import { ensureStorageMigrated } from '../utils/migrateStorage';
 import type { ApiGameDetail } from '../services/gamesService';
 import { ApiError } from '../services/apiClient';
-import { submitTurn } from '../services/gamesService';
+import { getGame, submitTurn } from '../services/gamesService';
 
 export interface PlayerSlot {
   type: 'human' | 'ai';
@@ -70,6 +70,11 @@ export interface GameRecord {
   config: GameConfig;
   /** Backend game id when loaded from the async multiplayer API. */
   asyncGameId?: number;
+  /** Server-authoritative counters from the last load (async). */
+  serverTurnNumber?: number;
+  serverRoundNumber?: number;
+  /** Whether it was the local user's turn when the async game was loaded. */
+  asyncIsMyTurn?: boolean;
   /** Un-dismissed battle report events; persisted for local games until modal close. */
   pendingTurnReport?: TurnEvent[];
   pendingTurnReportAcknowledged?: boolean;
@@ -532,13 +537,21 @@ export const useGameStore = create<GameStore>()(
       state = JSON.parse(detail.stateJson) as GameState;
       queuedOrders = [];
     }
-    state = drainStaleFleets({ ...state, playMode: 'asyncMultiplayer' });
+    state = drainStaleFleets({
+      ...state,
+      playMode: 'asyncMultiplayer',
+      turnNumber: detail.turnNumber,
+      roundNumber: detail.roundNumber,
+    });
 
     const recordId = String(detail.id);
     const record: GameRecord = {
       id: recordId,
       name: detail.name,
       asyncGameId: detail.id,
+      serverTurnNumber: detail.turnNumber,
+      serverRoundNumber: detail.roundNumber,
+      asyncIsMyTurn: detail.isMyTurn,
       state,
       config: {
         playMode: 'asyncMultiplayer',
@@ -840,17 +853,48 @@ export const useGameStore = create<GameStore>()(
       return;
     }
     const gameState = record.state;
-    const preTurnNumber = gameState.turnNumber;
-    const preRoundNumber = gameState.roundNumber;
+    const preTurnNumber = record.serverTurnNumber ?? gameState.turnNumber;
+    const preRoundNumber = record.serverRoundNumber ?? gameState.roundNumber;
     const humanPlayer = gameState.players.find(
       (p) => p.id === gameState.currentPlayerId && !p.isAI,
     );
     if (humanPlayer === undefined) {
+      console.error(
+        '[endTurn] No active human for currentPlayerId',
+        gameState.currentPlayerId,
+      );
+      showAlert(
+        'Cannot End Turn',
+        'The active player could not be resolved. Exit and reopen the game from the lobby.',
+      );
       return;
     }
-    const { queuedOrders: queuedOrdersSnapshot } = get();
+    if (humanPlayer.isEliminated) {
+      showAlert('Cannot End Turn', 'Your commander has been eliminated.');
+      return;
+    }
     const asyncGameId = record.asyncGameId;
     const isAsync = asyncGameId != null;
+    if (isAsync && record.asyncIsMyTurn === false) {
+      showAlert(
+        'Not Your Turn',
+        'It is no longer your turn. Return to the lobby and reopen the game when it is your turn.',
+      );
+      return;
+    }
+
+    const storeSnapshot = {
+      games: get().games,
+      queuedOrders: get().queuedOrders,
+      selectedPlanetId: get().selectedPlanetId,
+      turnReport: get().turnReport,
+      playerBattleArchiveByPlayerId: get().playerBattleArchiveByPlayerId,
+      playerTurnReportByPlayerId: get().playerTurnReportByPlayerId,
+      eliminatedPlayerPendingKnockout: get().eliminatedPlayerPendingKnockout,
+      pendingFarewellPlayerIds: get().pendingFarewellPlayerIds,
+      showingLockScreen: get().showingLockScreen,
+    };
+    const { queuedOrders: queuedOrdersSnapshot } = get();
     const input = {
       actions: [
         ...queuedOrdersSnapshot.map((o) => ({
@@ -863,7 +907,20 @@ export const useGameStore = create<GameStore>()(
       ],
       playerId: humanPlayer.id,
     };
-    const humanResult = resolveTurn(gameState, input);
+
+    let humanResult: ResolveTurnResult;
+    try {
+      humanResult = resolveTurn(gameState, input);
+    } catch (err) {
+      console.error('[endTurn] resolveTurn failed:', err);
+      showAlert(
+        'Turn Failed',
+        err instanceof Error
+          ? err.message
+          : 'Could not resolve your turn. Try exiting and reopening the game.',
+      );
+      return;
+    }
     if (get().aiObserverMode) {
       const resolvedState = stripTurnEvents(humanResult);
       const nextPlayer = resolvedState.players.find(
@@ -989,6 +1046,21 @@ export const useGameStore = create<GameStore>()(
 
     set({ isSubmittingTurn: true });
 
+    const restorePreSubmitSnapshot = () => {
+      set({
+        games: storeSnapshot.games,
+        queuedOrders: storeSnapshot.queuedOrders,
+        selectedPlanetId: storeSnapshot.selectedPlanetId,
+        turnReport: storeSnapshot.turnReport,
+        playerBattleArchiveByPlayerId: storeSnapshot.playerBattleArchiveByPlayerId,
+        playerTurnReportByPlayerId: storeSnapshot.playerTurnReportByPlayerId,
+        eliminatedPlayerPendingKnockout: storeSnapshot.eliminatedPlayerPendingKnockout,
+        pendingFarewellPlayerIds: storeSnapshot.pendingFarewellPlayerIds,
+        showingLockScreen: storeSnapshot.showingLockScreen,
+        isSubmittingTurn: false,
+      });
+    };
+
     void (async () => {
       try {
         await submitTurn(asyncGameId, {
@@ -1001,12 +1073,30 @@ export const useGameStore = create<GameStore>()(
         get().resetGame();
         set({ isSubmittingTurn: false, shouldReturnHome: true });
       } catch (err) {
+        console.error('[endTurn] submitTurn failed:', err);
+        restorePreSubmitSnapshot();
+
         const alertBody =
           err instanceof ApiError
             ? `Server returned ${err.status}: ${err.message}`
-            : 'Could not submit your turn. You have been returned to the lobby.';
+            : 'Could not submit your turn. Your moves were not saved — try again.';
+
+        if (
+          err instanceof ApiError &&
+          (err.status === 409 || err.status === 403 || err.status === 422)
+        ) {
+          try {
+            const fresh = await getGame(asyncGameId);
+            get().loadAsyncGame(fresh);
+            if (!fresh.isMyTurn) {
+              set({ shouldReturnHome: true });
+            }
+          } catch (reloadErr) {
+            console.error('[endTurn] Failed to reload game after submit error:', reloadErr);
+          }
+        }
+
         showAlert('Submit Failed', alertBody);
-        set({ isSubmittingTurn: false, shouldReturnHome: true });
       }
     })();
   },

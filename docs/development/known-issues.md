@@ -2,6 +2,21 @@
 
 ## Open Issues
 
+### Async End Turn appears to do nothing (intermittent) — mitigations added 2026-06-01
+
+**Symptom:** In a two-human async game, after several turns, tapping **End Turn** sometimes does nothing visible — gold does not change and the turn does not appear to end.
+
+**Likely causes identified:**
+1. **Silent early return** — `endTurn()` returned without feedback when `currentPlayerId` did not match an active human (e.g. stale in-memory state after the opponent submitted, or corrupt `currentPlayerId`).
+2. **Uncaught `resolveTurn` throw** — engine errors produced no user-visible alert.
+3. **Submit failed after local advance** — turn resolved locally first; API 409/403 left the player on the opponent's board without a clear recovery path (partially fixed earlier; now rolls back local state on failure).
+4. **Turn counter desync** — `state_json.turnNumber` could disagree with `games.turn_number`; submit sent stale values → 409. `loadAsyncGame` now overwrites counters from the API; submit uses `serverTurnNumber` / `serverRoundNumber`.
+5. **UX expectation** — gold and production only update on a **round wrap** (when play returns to the first player in turn order), not on every End Turn within the same round. Mid-round End Turn advances `currentPlayerId` but may not change gold.
+
+**Mitigations (2026-06-01):** Pre-submit `getGame()` validation, snapshot rollback on failed submit, user-visible alerts on all failure paths, 45s submit timeout, backend guard when submitted state still points at an AI without a `user_id`.
+
+---
+
 ### AI observer mode plumbing is unreachable (2026-06-01)
 
 **Context:** The **Watch AI Turns** setup toggle was removed from `HomeScreen`. The underlying store flag (`aiObserverMode`) and in-game observer UI in `GameScreen` / `gameStore` (`showingAiObserver`, `advanceStagedAiTurn`, etc.) remain but cannot be enabled.
