@@ -3,7 +3,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  AppState,
   Modal,
   Pressable,
   ScrollView,
@@ -13,6 +13,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { subscribeHomeRefresh } from '../services/homeRefreshEvents';
+import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { AppTopBar } from '../components/AppTopBar';
@@ -499,7 +501,29 @@ export default function HomeScreen() {
     })();
   }, [refreshAsyncGames]);
 
-  useFocusEffect(refreshOnFocus);
+  useFocusEffect(
+    useCallback(() => {
+      refreshOnFocus();
+
+      const intervalId = setInterval(() => {
+        refreshOnFocus();
+      }, 60_000);
+
+      const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+        if (nextState === 'active') {
+          refreshOnFocus();
+        }
+      });
+
+      const unsubscribeHomeRefresh = subscribeHomeRefresh(refreshOnFocus);
+
+      return () => {
+        clearInterval(intervalId);
+        appStateSubscription.remove();
+        unsubscribeHomeRefresh();
+      };
+    }, [refreshOnFocus]),
+  );
 
   const addPlayerSlot = () => {
     setPlayerSlots((prev) =>
@@ -630,7 +654,7 @@ export default function HomeScreen() {
         navigation.navigate('Game', {});
       } catch {
         setIsLaunching(false);
-        Alert.alert('Error', 'Could not create game. Check your connection and try again.');
+        showAlert('Error', 'Could not create game. Check your connection and try again.');
       }
     })();
   };
@@ -641,13 +665,10 @@ export default function HomeScreen() {
   };
 
   const handleDeleteLocalGame = (record: GameRecord) => {
-    Alert.alert(
+    showConfirm(
       'Delete Game',
       'Are you sure you want to delete this game? This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteLocalGame(record.id) },
-      ],
+      () => deleteLocalGame(record.id),
     );
   };
 
@@ -664,7 +685,7 @@ export default function HomeScreen() {
         navigation.navigate('Game', { isReadOnly: detail.alertState === 'waiting' });
       } catch {
         setLoadingGameId(null);
-        Alert.alert('Load Failed', 'Could not load game. Check your connection.');
+        showAlert('Load Failed', 'Could not load game. Check your connection.');
       }
     })();
   };
@@ -679,7 +700,7 @@ export default function HomeScreen() {
           await refreshAsyncGames();
         }
       } catch {
-        Alert.alert('Error', 'Could not accept invite.');
+        showAlert('Error', 'Could not accept invite.');
       } finally {
         setInviteLoadingId(null);
       }
@@ -687,15 +708,10 @@ export default function HomeScreen() {
   };
 
   const handleDeleteAsyncGame = (game: ApiGame) => {
-    Alert.alert(
+    showConfirm(
       'Delete Game',
       `Permanently delete "${game.name}"? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
+      () => {
             setDeletingGameId(game.id);
             void (async () => {
               try {
@@ -715,14 +731,12 @@ export default function HomeScreen() {
                   err instanceof ApiError
                     ? err.message
                     : 'Could not delete game. Check your connection.';
-                Alert.alert('Delete Failed', message);
+                showAlert('Delete Failed', message);
               } finally {
                 setDeletingGameId(null);
               }
             })();
-          },
-        },
-      ],
+      },
     );
   };
 
@@ -733,7 +747,7 @@ export default function HomeScreen() {
         await declineInvite(invite.id);
         setInvites((prev) => prev.filter((item) => item.id !== invite.id));
       } catch {
-        Alert.alert('Error', 'Could not decline invite.');
+        showAlert('Error', 'Could not decline invite.');
       } finally {
         setInviteLoadingId(null);
       }

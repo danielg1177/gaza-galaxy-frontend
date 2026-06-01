@@ -1,4 +1,5 @@
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { showConfirm } from '../utils/webAlert';
 import { useAuthStore } from '../store/authStore';
 
 const COLORS = {
@@ -55,16 +56,9 @@ export function AppTopBar({
   const logout = useAuthStore((s) => s.logout);
 
   const handleLogout = () => {
-    Alert.alert('Log out?', 'You will need to sign in again to continue.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log out',
-        style: 'destructive',
-        onPress: () => {
-          void logout();
-        },
-      },
-    ]);
+    showConfirm('Log out?', 'You will need to sign in again to continue.', () => {
+      void logout();
+    });
   };
 
   return (

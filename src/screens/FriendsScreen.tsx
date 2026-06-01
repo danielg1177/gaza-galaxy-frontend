@@ -3,7 +3,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { AppTopBar } from '../components/AppTopBar';
@@ -118,7 +118,7 @@ export default function FriendsScreen() {
     try {
       await loadLists();
     } catch (err) {
-      Alert.alert(
+      showAlert(
         'Refresh failed',
         err instanceof ApiError ? err.message : 'Could not refresh friends.',
       );
@@ -153,7 +153,7 @@ export default function FriendsScreen() {
       const results = await searchUsers(query);
       setSearchResults(results);
     } catch (err) {
-      Alert.alert(
+      showAlert(
         'Search failed',
         err instanceof ApiError ? err.message : 'Could not search users.',
       );
@@ -173,7 +173,7 @@ export default function FriendsScreen() {
         ) ?? null,
       );
     } catch (err) {
-      Alert.alert(
+      showAlert(
         'Request failed',
         err instanceof ApiError ? err.message : 'Could not send friend request.',
       );
@@ -193,7 +193,7 @@ export default function FriendsScreen() {
         ...prev,
       ]);
     } catch (err) {
-      Alert.alert(
+      showAlert(
         'Accept failed',
         err instanceof ApiError ? err.message : 'Could not accept friend request.',
       );
@@ -209,7 +209,7 @@ export default function FriendsScreen() {
       await declineFriendRequest(request.friendshipId);
       setRequests((prev) => prev.filter((r) => r.friendshipId !== request.friendshipId));
     } catch (err) {
-      Alert.alert(
+      showAlert(
         'Decline failed',
         err instanceof ApiError ? err.message : 'Could not decline friend request.',
       );
@@ -225,7 +225,7 @@ export default function FriendsScreen() {
       await removeFriend(friend.friendshipId);
       setFriends((prev) => prev.filter((f) => f.friendshipId !== friend.friendshipId));
     } catch (err) {
-      Alert.alert(
+      showAlert(
         'Remove failed',
         err instanceof ApiError ? err.message : 'Could not remove friend.',
       );
@@ -235,17 +235,10 @@ export default function FriendsScreen() {
   };
 
   const confirmRemove = (friend: Friend) => {
-    Alert.alert(
+    showConfirm(
       'Remove Friend',
       `Remove ${friend.user.username} from your friends?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: () => void handleRemove(friend),
-        },
-      ],
+      () => void handleRemove(friend),
     );
   };
 

@@ -39,3 +39,12 @@ Currently using Expo SDK **54**. Always reference versioned docs at https://docs
 ## Changelog
 - 2026-06-01: App package/slug renamed to `gaza-galaxy`; setup `cd` path updated.
 - 2026-05-27: File created.
+
+## PWA Build & Deploy
+1. Copy `.env.example` → `.env` and fill in both values.
+2. `npm run build:web` — outputs static bundle to `dist/`.
+3. Deploy `dist/` to any static host (Vercel, Netlify, Cloudflare Pages, etc.).
+4. The backend must be live at `EXPO_PUBLIC_API_URL`.
+**Installing on iOS:** Open in Safari → Share → "Add to Home Screen" → runs in standalone mode (requires iOS 16.4+ for push notifications).  
+**Installing on Android:** Chrome will auto-prompt after a couple of visits, or use the browser menu.
+**Push notifications:** Background push requires Backend Phase 9 tasks to be deployed (VAPID keys + `POST /api/push-subscription` endpoint). Without them the app works fully — push notifications just won't be delivered in the background.

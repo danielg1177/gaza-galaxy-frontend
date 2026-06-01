@@ -253,6 +253,31 @@ Two tasks fixing a JS main-thread freeze and a subsequent spawn-placement crash 
 
 ---
 
+## Phase 42 — PWA Launch
+
+**Status:** Not started. See `docs/tasks/backlog.md` Phase 42 for full task specifications.
+
+Converting the app from iPhone-only Expo native to a Progressive Web App (PWA) distributed over the web. Push notifications require a full Web Push (VAPID) implementation — `expo-notifications` does not support background push on the web platform. This phase also requires coordinated backend changes (see backend docs Phase 9).
+
+**Frontend tasks:**
+
+- ~~**Task 204**~~ — Frontend: Add PWA configuration to `app.json` (manifest, standalone display, theme color, static output) *(complete 2026-06-01)*
+- ~~**Task 205**~~ — Frontend: Audit and fix web compatibility for all packages (`@react-native-community/slider`, gesture handler, SVG, safe-area) *(complete 2026-06-01)*
+- ~~**Task 206**~~ — Frontend: Create PWA service worker (`public/sw.js`) — handle `push` and `notificationclick` events *(complete 2026-06-01)*
+- ~~**Task 207**~~ — Frontend: Replace `expo-notifications` push flow with Web Push API on the web platform (`pushNotificationService.ts` web branch + VAPID subscription) *(complete 2026-06-01)*
+- ~~**Task 208**~~ — Frontend: Handle service-worker-to-app `postMessage` deep link in `App.tsx` for web (mirror native notification deep-link handler) *(complete 2026-06-01)*
+- ~~**Task 209**~~ — Frontend: Add `build:web` script and document required `.env` vars (`EXPO_PUBLIC_VAPID_PUBLIC_KEY`, `EXPO_PUBLIC_API_URL`) *(complete 2026-06-01)*
+
+**Backend tasks (required — see `backend/docs/project/current-state.md` Phase 9):**
+
+- ~~**Backend Task 9.1**~~ — Generate VAPID key pair, add to `.env` *(complete 2026-06-01)*
+- ~~**Backend Task 9.2**~~ — Install `minishlink/web-push` PHP package *(complete 2026-06-01)*
+- ~~**Backend Task 9.3**~~ — Add `web_push_subscription` column to `users` table *(complete 2026-06-01)*
+- ~~**Backend Task 9.4**~~ — Add `POST /api/push-subscription` endpoint *(complete 2026-06-01)*
+- ~~**Backend Task 9.5**~~ — Update `NotificationService` to send Web Push to users with a web subscription *(complete 2026-06-01)*
+
+---
+
 ## Changelog
 - 2026-06-01: Phase 41 complete (Tasks 202–203) — large map launch crash: `enforceMinimumSpacing` O(n⁴) fixed + spawn placer guaranteed fallback for high player counts.
 - 2026-06-01: Phase 41 complete (Task 202) — large map launch freeze: `enforceMinimumSpacing` O(n⁴) fixed by capping outer iterations at 500.

@@ -7,7 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import FriendsScreen from './src/screens/FriendsScreen';
@@ -18,13 +18,20 @@ import RegisterScreen from './src/screens/RegisterScreen';
 import { setOnUnauthorized } from './src/services/apiClient';
 import { getGame } from './src/services/gamesService';
 import {
+  requestHomeRefresh,
+  shouldRefreshHomeFromNotification,
+} from './src/services/homeRefreshEvents';
+import {
   registerNotificationHandler,
   setupPushNotifications,
+  setupWebPushNotifications,
 } from './src/services/pushNotificationService';
 import { useAuthStore } from './src/store/authStore';
 import { useGameStore } from './src/store/gameStore';
 
-registerNotificationHandler();
+if (Platform.OS !== 'web') {
+  registerNotificationHandler();
+}
 
 export type RootStackParamList = {
   Login: undefined;
@@ -105,16 +112,68 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser !== null) {
-      void setupPushNotifications();
+      if (Platform.OS === 'web') {
+        void setupWebPushNotifications().catch(() => {});
+      } else {
+        void setupPushNotifications().catch(() => {});
+      }
     }
   }, [currentUser]);
 
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener(
+    if (Platform.OS !== 'web') return;
+    const params = new URLSearchParams(window.location.search);
+    const rawId = params.get('game_id');
+    if (rawId) {
+      pendingGameId.current = Number(rawId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !('serviceWorker' in navigator)) return;
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'NOTIFICATION_RECEIVED') {
+        if (shouldRefreshHomeFromNotification(event.data.event)) {
+          requestHomeRefresh();
+        }
+        return;
+      }
+      if (event.data?.type !== 'NOTIFICATION_CLICK') return;
+      const gameId = event.data.game_id as number | undefined;
+      if (!gameId) return;
+      pendingGameId.current = gameId;
+      void consumePendingGameIdRef.current();
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    const receivedSubscription = Notifications.addNotificationReceivedListener(
+      (notification) => {
+        const data = notification.request.content.data as Record<string, unknown> | undefined;
+        if (shouldRefreshHomeFromNotification(data?.event)) {
+          requestHomeRefresh();
+        }
+      },
+    );
+
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener(
       (response) => {
-        const gameId = parseNotificationGameId(
-          response.notification.request.content.data as Record<string, unknown> | undefined,
-        );
+        const data = response.notification.request.content.data as
+          | Record<string, unknown>
+          | undefined;
+        if (shouldRefreshHomeFromNotification(data?.event)) {
+          requestHomeRefresh();
+        }
+
+        const gameId = parseNotificationGameId(data);
         if (gameId === undefined) {
           return;
         }
@@ -126,7 +185,10 @@ export default function App() {
       },
     );
 
-    return () => subscription.remove();
+    return () => {
+      receivedSubscription.remove();
+      responseSubscription.remove();
+    };
   }, []);
 
   useEffect(() => {

@@ -24,7 +24,18 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "output": "single",
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png",
+      "name": "Gaza Galaxy",
+      "shortName": "Gaza Galaxy",
+      "description": "Async turn-based space strategy",
+      "themeColor": "#0a0a1a",
+      "backgroundColor": "#0a0a1a",
+      "display": "standalone",
+      "orientation": "portrait",
+      "startUrl": "/",
+      "scope": "/"
     }
   }
 }

@@ -215,6 +215,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-06-01: Fixed WorkletsError on web — disabled `worklets` and `reanimated` babel plugins in `babel.config.js` (web-only PWA; Reanimated's web polyfill handles everything without babel transformation).
 - 2026-06-01: Resolved large map launch crash (Phase 41, Tasks 202–203) — `enforceMinimumSpacing` O(n⁴) capped at 500; spawn placer guaranteed fallback for geometrically impossible AI placement.
 - 2026-06-01: Added open issue — duplicate planet names + name as identifier (Phase 39, Tasks 195–197).
 - 2026-06-01: Added open issue — battle report and map indicators missing on solo re-entry (Phase 38, Task 194).

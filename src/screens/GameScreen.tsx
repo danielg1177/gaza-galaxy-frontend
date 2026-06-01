@@ -4,7 +4,6 @@ import type { RouteProp } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated as RNAnimated,
   Modal,
   Pressable,
@@ -15,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Slider from '@react-native-community/slider';
+import { PlatformSlider } from '../components/PlatformSlider';
 import Svg, { G, Line, Polygon, Text as SvgText } from 'react-native-svg';
 import Animated, {
   runOnJS,
@@ -47,6 +46,7 @@ import {
   useGameStore,
   useVisibleGameState,
 } from '../store/gameStore';
+import { showAlert, showConfirm } from '../utils/webAlert';
 
 type GameNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Game'>;
 type GameRouteProp = RouteProp<RootStackParamList, 'Game'>;
@@ -1981,7 +1981,7 @@ export default function GameScreen() {
       },
       { scale: scale.value },
     ],
-  }));
+  }), [translateX, translateY, mapWidthSV, mapHeightSV, scale]);
 
   const cancelDrag = useCallback(() => {
     fleetDragActivatedRef.current = false;
@@ -2426,7 +2426,7 @@ export default function GameScreen() {
       navigation.navigate('Home');
     } catch (err) {
       console.error('[Exit Save] Failed:', err);
-      Alert.alert('Failed to save', 'Could not save your progress. Please try again.');
+      showAlert('Failed to save', 'Could not save your progress. Please try again.');
       setIsSavingExit(false);
     }
   }, [navigation]);
@@ -2454,17 +2454,10 @@ export default function GameScreen() {
       return;
     }
     if (building.builtOnRound < selectedRoundNumber) {
-      Alert.alert(
+      showConfirm(
         'Demolish building?',
         'This cannot be undone. You will not receive your gold back.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Demolish',
-            style: 'destructive',
-            onPress: () => demolishBuilding(selectedPlanet.id, slotIndex),
-          },
-        ],
+        () => demolishBuilding(selectedPlanet.id, slotIndex),
       );
     }
   };
@@ -3016,7 +3009,7 @@ export default function GameScreen() {
 
             {!showingAiObserver && selectedPlanetFactories > 0 && (
               <View style={styles.productionSliderSection}>
-                <Slider
+                <PlatformSlider
                   minimumValue={0}
                   maximumValue={1}
                   value={selectedPlanet?.productionSlider ?? 0.5}

@@ -30,7 +30,7 @@ import type {
   TurnEvent,
 } from '../game/types';
 import { useMemo } from 'react';
-import { Alert } from 'react-native';
+import { showAlert } from '../utils/webAlert';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -977,12 +977,15 @@ export const useGameStore = create<GameStore>()(
       return;
     }
 
-    const submitActions = queuedOrdersSnapshot.map((o) => ({
-      type: 'SEND_FLEET' as const,
-      fromPlanetId: o.fromPlanetId,
-      toPlanetId: o.toPlanetId,
-      shipCount: o.shipCount,
-    }));
+    const submitActions = [
+      ...queuedOrdersSnapshot.map((o) => ({
+        type: 'SEND_FLEET' as const,
+        fromPlanetId: o.fromPlanetId,
+        toPlanetId: o.toPlanetId,
+        shipCount: o.shipCount,
+      })),
+      { type: 'END_TURN' as const },
+    ];
 
     set({ isSubmittingTurn: true });
 
@@ -1002,7 +1005,7 @@ export const useGameStore = create<GameStore>()(
           err instanceof ApiError
             ? `Server returned ${err.status}: ${err.message}`
             : 'Could not submit your turn. You have been returned to the lobby.';
-        Alert.alert('Submit Failed', alertBody);
+        showAlert('Submit Failed', alertBody);
         set({ isSubmittingTurn: false, shouldReturnHome: true });
       }
     })();

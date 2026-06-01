@@ -4,6 +4,13 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
+## 2026-06-01 — Worklets/Reanimated Babel Plugin Disabled for Web-Only PWA
+**Decision:** Set `worklets: false, reanimated: false` in `babel-preset-expo` options and removed the manually-added `react-native-reanimated/plugin`. No worklet babel transformation runs.
+**Rationale:** `react-native-worklets` 0.5.1 throws `WorkletsError: createSerializableObject should never be called in JSWorklets` on web at module load time because the worklets babel plugin serializes `'worklet'`-annotated functions into descriptors that the runtime tries to register on a UI thread — a concept that doesn't exist on web. Since the app is a web-only PWA, the worklets system is entirely unnecessary: Reanimated's web polyfill runs all animations as CSS/JS on the single JS thread. `runOnUI`, `runOnJS`, and `'worklet'` directives become no-ops. `useSharedValue` / `useAnimatedStyle` continue working via Reanimated's web implementation.
+**Alternatives considered:** Downgrade `react-native-worklets` (version fragility); platform-conditional plugin (not supported by babel-preset-expo API); replace Reanimated with CSS (massive rewrite of 4400-line GameScreen).
+
+---
+
 ## 2026-06-01 — App Renamed to Gaza Galaxy
 **Decision:** The product display name is **Gaza Galaxy** (replacing "Strategic Commander"). Expo slug, npm package name, and AsyncStorage persist key use `gaza-galaxy` / `gaza-galaxy-local-games`. Legacy local saves migrate once from `strategic-commander-local-games` on startup.
 **Rationale:** User-facing rebrand; technical identifiers updated for consistency. Palm OS original game name "Strategic Commander" remains in `project-spec.md` as historical reference only.

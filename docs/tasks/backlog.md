@@ -5088,3 +5088,308 @@ Examples:
    ```
 
 7. `npx tsc --noEmit` must pass clean after the change.
+
+---
+
+## Phase 42 — PWA Launch
+
+Converting the app to a Progressive Web App (PWA). Work in order: Task 204 and 205 first (can be done together), then 206–208 (can be parallelised), Task 209 last.
+
+> **Push notification note:** `expo-notifications` has no support for background push on the web platform. Background push in a PWA requires the browser's native **Web Push API** (VAPID). This phase replaces the `expo-notifications` token flow with `PushManager.subscribe()` on web and requires coordinated backend changes (see `backend/docs/project/current-state.md` Phase 9). Without the backend changes, in-app foreground alerts still function — only background push will be absent.
+
+---
+
+### Task 204 — Frontend: Add PWA configuration to `app.json`
+
+**Goal:** Configure the `web` section of `app.json` so that `expo export --platform web` produces a proper PWA manifest with standalone display mode, a dark space theme, and the correct metadata for "Add to Home Screen" on iOS Safari and Android Chrome.
+
+**File:** `app.json`
+
+**Requirements:**
+
+Replace the existing minimal `web` block with:
+```json
+"web": {
+  "output": "static",
+  "bundler": "metro",
+  "favicon": "./assets/favicon.png",
+  "name": "Gaza Galaxy",
+  "shortName": "Gaza Galaxy",
+  "description": "Async turn-based space strategy",
+  "themeColor": "#0a0a1a",
+  "backgroundColor": "#0a0a1a",
+  "display": "standalone",
+  "orientation": "portrait",
+  "startUrl": "/",
+  "scope": "/"
+}
+```
+
+Key fields:
+- `output: 'static'` — required for `expo export --platform web` to produce a deployable static bundle.
+- `display: 'standalone'` — hides the browser address bar when installed to home screen; required for a native app feel.
+- `themeColor` / `backgroundColor: '#0a0a1a'` — sets OS-level chrome color to match the game's dark theme.
+
+After editing, run `expo start --web` and open DevTools → Application → Manifest; confirm all fields are populated and no manifest errors are shown.
+
+---
+
+### Task 205 — Frontend: Audit and fix web compatibility for all packages
+
+**Goal:** Identify every dependency that either lacks web support or requires extra configuration on web, and patch each one so that `expo start --web` runs without runtime errors or visually broken UI.
+
+**Packages to check and known issues:**
+
+1. **`@react-native-community/slider`** — the native module has no web renderer and will throw. Fix by creating a platform-aware wrapper:
+   - Create `src/components/PlatformSlider.tsx`:
+     ```typescript
+     import { Platform } from 'react-native';
+     import SliderNative from '@react-native-community/slider';
+
+     // Web fallback — inline input[type=range] styled to match
+     function SliderWeb(props: { value: number; minimumValue: number; maximumValue: number; onValueChange: (v: number) => void; style?: object }) {
+       return (
+         <input
+           type="range"
+           min={props.minimumValue}
+           max={props.maximumValue}
+           value={props.value}
+           step={0.01}
+           onChange={e => props.onValueChange(Number(e.target.value))}
+           style={{ width: '100%', accentColor: '#4a90e2', ...(props.style as object) }}
+         />
+       );
+     }
+
+     export const PlatformSlider = Platform.OS === 'web' ? SliderWeb : SliderNative;
+     ```
+   - Replace all imports of `Slider` from `@react-native-community/slider` in `GameScreen.tsx` with `PlatformSlider` from `src/components/PlatformSlider`.
+
+2. **`expo-notifications` on web** — `Notifications.requestPermissionsAsync()` and `getExpoPushTokenAsync()` throw on web. Gate the existing `setupPushNotifications()` call and `registerNotificationHandler()` call in `App.tsx` with `Platform.OS !== 'web'`. The web push path is handled separately in Task 207.
+
+3. **`react-native-gesture-handler`** — confirm `<GestureHandlerRootView style={{ flex: 1 }}>` wraps the root in `App.tsx` with no `Platform` guard (it must run on web too).
+
+4. **`react-native-svg`** — generally compatible on web. If SVG components fail to render, add a Metro alias in `metro.config.js`:
+   ```js
+   config.resolver.alias = {
+     'react-native-svg': require.resolve('react-native-svg/src/ReactNativeSVG.web.js'),
+   };
+   ```
+
+5. **`react-native-reanimated` v4** — has web support. Confirm `useAnimatedStyle` gestures and scale/translate animations work in the browser; follow the Reanimated web setup notes for v4 if the console shows initialization warnings.
+
+6. **`react-native-safe-area-context`** — works on web. Confirm `SafeAreaProvider` is present in `App.tsx` without a native-only platform gate.
+
+**Acceptance criteria:** Run `expo start --web`, navigate through HomeScreen → new game setup (confirm slider renders) → launch a Solo game → confirm the map renders with SVG fleet lines and gestures work. `npx tsc --noEmit` passes clean.
+
+---
+
+### Task 206 — Frontend: Create PWA service worker (`public/sw.js`)
+
+**Goal:** Add a service worker that (a) handles background `push` events from the backend's web push delivery and shows a system notification, (b) handles `notificationclick` to route the user into the correct game, and (c) claims the page on activation for immediate control.
+
+**File:** `public/sw.js` (the `public/` directory is served verbatim by Expo's static web export; create it if it does not exist)
+
+**Depends on:** Task 204 (PWA config) must be done so the service worker is served from the correct scope.
+
+**Requirements:**
+
+```js
+// public/sw.js
+
+self.addEventListener('install', () => { self.skipWaiting(); });
+self.addEventListener('activate', event => { event.waitUntil(clients.claim()); });
+
+// Background push → show system notification
+self.addEventListener('push', event => {
+  if (!event.data) return;
+  let payload;
+  try { payload = event.data.json(); } catch { payload = {}; }
+  const title = payload.title || 'Gaza Galaxy';
+  const options = {
+    body: payload.body || '',
+    icon: '/icon.png',
+    badge: '/icon.png',
+    data: payload.data || {},
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Notification tap → focus open window or open new window, pass game_id
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const gameId = event.notification.data?.game_id;
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.postMessage({ type: 'NOTIFICATION_CLICK', game_id: gameId });
+          return client.focus();
+        }
+      }
+      return clients.openWindow(gameId ? `/?game_id=${gameId}` : '/');
+    })
+  );
+});
+```
+
+**Notes:**
+- The push payload JSON shape mirrors the existing Expo push `data` field: `{ title, body, data: { game_id: number, event: "your_turn" | "game_started" | "game_finished" | "invite_received" | "game_cancelled" } }`. The backend (Task 9.5) must send this shape.
+- `client.postMessage` is consumed in Task 208 to trigger in-app navigation when the app is already open.
+- `icon: '/icon.png'` — Expo's static export places the app icon at `/icon.png`; confirm the exact path in the `dist/` output after `npm run build:web` and adjust if needed.
+
+---
+
+### Task 207 — Frontend: Web Push subscription registration in `pushNotificationService.ts`
+
+**Goal:** Add a web-platform code path to `src/services/pushNotificationService.ts` that requests Notification permission, registers the service worker, subscribes to push via `PushManager` with the VAPID public key, and uploads the `PushSubscription` JSON to `POST /api/push-subscription`.
+
+**Files:**
+- `src/services/pushNotificationService.ts` — add `setupWebPushNotifications()`
+- `App.tsx` — call `setupWebPushNotifications()` on the web platform post-login
+
+**Depends on:** Backend Phase 9 (Tasks 9.1, 9.4) must be deployed — specifically `EXPO_PUBLIC_VAPID_PUBLIC_KEY` must be set in `.env` and the `/api/push-subscription` endpoint must exist.
+
+**Requirements:**
+
+1. **Add VAPID key conversion helper** at the top of `pushNotificationService.ts`:
+   ```typescript
+   function urlBase64ToUint8Array(base64String: string): Uint8Array {
+     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+     const rawData = atob(base64);
+     return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+   }
+   ```
+
+2. **Add `setupWebPushNotifications()`** exported async function:
+   ```typescript
+   export async function setupWebPushNotifications(): Promise<void> {
+     if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+     const permission = await Notification.requestPermission();
+     if (permission !== 'granted') return;
+
+     const registration = await navigator.serviceWorker.register('/sw.js');
+     await navigator.serviceWorker.ready;
+
+     const vapidKey = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY;
+     if (!vapidKey) { console.warn('[Push] VAPID public key not configured'); return; }
+
+     let subscription = await registration.pushManager.getSubscription();
+     if (!subscription) {
+       subscription = await registration.pushManager.subscribe({
+         userVisibleOnly: true,
+         applicationServerKey: urlBase64ToUint8Array(vapidKey),
+       });
+     }
+
+     // Skip upload if subscription is unchanged
+     const subscriptionJson = JSON.stringify(subscription.toJSON());
+     const stored = await AsyncStorage.getItem('web_push_subscription');
+     if (stored === subscriptionJson) return;
+
+     await apiClient.post('/push-subscription', { subscription: subscription.toJSON() });
+     await AsyncStorage.setItem('web_push_subscription', subscriptionJson);
+   }
+   ```
+
+3. **Update `App.tsx`** — in the `useEffect` that calls `setupPushNotifications()`, branch on platform:
+   ```typescript
+   import { Platform } from 'react-native';
+   // ...
+   if (Platform.OS === 'web') {
+     setupWebPushNotifications().catch(() => {});
+   } else {
+     setupPushNotifications().catch(() => {});
+   }
+   ```
+   Also gate the existing `registerNotificationHandler()` call with `Platform.OS !== 'web'`.
+
+4. `npx tsc --noEmit` must pass clean.
+
+---
+
+### Task 208 — Frontend: Handle `NOTIFICATION_CLICK` postMessage deep link in `App.tsx` for web
+
+**Goal:** When the PWA is already open and the user taps a push notification, the service worker calls `client.postMessage({ type: 'NOTIFICATION_CLICK', game_id })`. `App.tsx` must listen for this and navigate to the game — mirroring the native deep-link handler from Task 148.
+
+**File:** `App.tsx`
+
+**Depends on:** Tasks 206 and 207.
+
+**Requirements:**
+
+1. **Warm-start (app open):** Add a `useEffect` in `App.tsx` gated on `Platform.OS === 'web'` that registers a `message` listener on `navigator.serviceWorker`:
+   ```typescript
+   useEffect(() => {
+     if (Platform.OS !== 'web' || !('serviceWorker' in navigator)) return;
+     const handler = (event: MessageEvent) => {
+       if (event.data?.type !== 'NOTIFICATION_CLICK') return;
+       const gameId = event.data.game_id;
+       if (!gameId) return;
+       pendingGameId.current = gameId;
+       consumePendingGameId();
+     };
+     navigator.serviceWorker.addEventListener('message', handler);
+     return () => navigator.serviceWorker.removeEventListener('message', handler);
+   }, [currentUser, isLoadingAuth]);
+   ```
+
+2. **Cold-start (app launched by service worker `openWindow('/?game_id=42')`):** Read `game_id` from `window.location.search` on mount:
+   ```typescript
+   useEffect(() => {
+     if (Platform.OS !== 'web') return;
+     const params = new URLSearchParams(window.location.search);
+     const rawId = params.get('game_id');
+     if (rawId) pendingGameId.current = Number(rawId);
+   }, []);
+   ```
+
+3. `consumePendingGameId()` is already implemented (Task 148) — no changes needed. The existing cold-start `useEffect` on `currentUser` that calls `consumePendingGameId()` after auth resolves will handle the web cold-start case automatically.
+
+4. `npx tsc --noEmit` must pass clean.
+
+---
+
+### Task 209 — Frontend: Add `build:web` script, `.env.example`, and deployment notes
+
+**Goal:** Make the PWA buildable and deployable by any dev with a single command. Document the required environment variables and hosting steps.
+
+**Files:**
+- `package.json` — add scripts
+- `.env.example` — create in `frontend/` root
+- `docs/development/setup.md` — add "PWA Build & Deploy" section
+
+**Requirements:**
+
+1. **`package.json` scripts:**
+   ```json
+   "build:web": "expo export --platform web",
+   "serve:web": "npx serve dist"
+   ```
+
+2. **`.env.example`** (create at `frontend/.env.example`):
+   ```
+   # Backend API base URL (no trailing slash)
+   EXPO_PUBLIC_API_URL=https://your-api-domain.com
+
+   # VAPID public key from the backend (run: php artisan vapid:generate)
+   EXPO_PUBLIC_VAPID_PUBLIC_KEY=your_vapid_public_key_here
+   ```
+
+3. **`docs/development/setup.md`** — add a section:
+   ```markdown
+   ## PWA Build & Deploy
+
+   1. Copy `.env.example` → `.env` and fill in both values.
+   2. `npm run build:web` — outputs static bundle to `dist/`.
+   3. Deploy `dist/` to any static host (Vercel, Netlify, Cloudflare Pages, etc.).
+   4. The backend must be live at `EXPO_PUBLIC_API_URL`.
+
+   **Installing on iOS:** Open in Safari → Share → "Add to Home Screen" → runs in standalone mode.
+   **Installing on Android:** Chrome will auto-prompt after a couple of visits, or use the browser menu.
+
+   **Push notification requirement:** iOS 16.4+ and Android Chrome support Web Push for installed PWAs.
+   Push notifications will be silent (no background delivery) until Backend Phase 9 tasks are deployed.
+   ```

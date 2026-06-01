@@ -269,7 +269,7 @@ export default function StrategicMapModal({
       },
       { scale: scale.value },
     ],
-  }));
+  }), [translateX, translateY, mapWidthSV, mapHeightSV, scale]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
