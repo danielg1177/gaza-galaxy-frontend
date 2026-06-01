@@ -218,7 +218,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
-- 2026-06-01: Fix immediate sign-out after login — `apiClient` skips global 401 logout on `/auth/*` bootstrap routes; `authStore` bumps `authGeneration` on login/register so a stale `logout()` from an expired token check cannot clear a new session.
+- 2026-06-01: Removed **Watch AI Turns** toggle from new-game setup on `HomeScreen`; `aiObserverMode` store flag remains (defaults `false`) with in-game observer plumbing unused until removed in a future cleanup.
 - 2026-06-01: Fix Expo **App entry not found** — `registerRootComponent` runs synchronously in `index.ts` again; legacy AsyncStorage migration runs on first Zustand persist `getItem` via `ensureStorageMigrated`.
 - 2026-06-01: `API_BASE_URL` in `src/services/apiClient.ts` set to production Railway backend (`https://gaza-galaxy-backend-production.up.railway.app/api`).
 - 2026-06-01: App renamed **Strategic Commander** → **Gaza Galaxy** — display title on Login/Register/HomeScreen; Expo `name`/`slug` and npm package `gaza-galaxy`; AsyncStorage persist key `gaza-galaxy-local-games` with one-time migration from legacy key; shared constants in `src/constants/app.ts`.

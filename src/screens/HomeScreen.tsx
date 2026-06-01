@@ -8,7 +8,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -381,8 +380,6 @@ export default function HomeScreen() {
   const games = useGameStore((s) => s.games);
   const _hasHydrated = useGameStore((s) => s._hasHydrated);
   const startNewGame = useGameStore((s) => s.startNewGame);
-  const aiObserverMode = useGameStore((s) => s.aiObserverMode);
-  const setAiObserverMode = useGameStore((s) => s.setAiObserverMode);
   const loadGame = useGameStore((s) => s.loadGame);
   const loadAsyncGame = useGameStore((s) => s.loadAsyncGame);
   const deleteLocalGame = useGameStore((s) => s.deleteGame);
@@ -1018,25 +1015,6 @@ export default function HomeScreen() {
               })}
             </View>
           </View>
-
-          {playerSlots.some((slot) => slot.type === 'ai') && (
-            <View style={styles.section}>
-              <View style={styles.observerToggleRow}>
-                <View style={styles.observerToggleLabels}>
-                  <Text style={styles.observerToggleTitle}>Watch AI Turns</Text>
-                  <Text style={styles.observerToggleSubtitle}>
-                    Pause after each AI turn to review its moves
-                  </Text>
-                </View>
-                <Switch
-                  value={aiObserverMode}
-                  onValueChange={setAiObserverMode}
-                  trackColor={{ false: COLORS.border, true: COLORS.accentDim }}
-                  thumbColor={aiObserverMode ? COLORS.accent : COLORS.panel}
-                />
-              </View>
-            </View>
-          )}
 
           <Pressable
             style={({ pressed }) => [styles.launchButton, (pressed || isLaunching) && styles.launchButtonPressed]}
@@ -1988,34 +1966,6 @@ const styles = StyleSheet.create({
   },
   mapSizeDetailSelected: {
     color: COLORS.text,
-  },
-  observerToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    backgroundColor: COLORS.panel,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 8,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-  },
-  observerToggleLabels: {
-    flex: 1,
-  },
-  observerToggleTitle: {
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-  observerToggleSubtitle: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginTop: 6,
-    lineHeight: 15,
-    letterSpacing: 0.3,
   },
   newCampaignButton: {
     backgroundColor: COLORS.accent,

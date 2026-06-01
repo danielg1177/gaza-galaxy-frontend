@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Remove "Watch AI Turns" from new-game setup
+**Completed:** 2026-06-01
+**Files modified:** `src/screens/HomeScreen.tsx`, `docs/development/current-state.md`
+**Notes:** Removed the observer-mode toggle, related store selectors, `Switch` import, and observer toggle styles from the campaign setup form. In-game observer plumbing (`aiObserverMode`, `showingAiObserver`, etc.) remains in the store and `GameScreen` but is unreachable (flag defaults `false`). `npx tsc --noEmit` passes clean.
+
+---
+
 ## App rename — Strategic Commander → Gaza Galaxy
 **Completed:** 2026-06-01
 **Files modified:**

@@ -2,6 +2,14 @@
 
 ## Open Issues
 
+### AI observer mode plumbing is unreachable (2026-06-01)
+
+**Context:** The **Watch AI Turns** setup toggle was removed from `HomeScreen`. The underlying store flag (`aiObserverMode`) and in-game observer UI in `GameScreen` / `gameStore` (`showingAiObserver`, `advanceStagedAiTurn`, etc.) remain but cannot be enabled.
+
+**Follow-up:** Remove dead observer-mode code paths in a future cleanup task, or restore the toggle if the feature is wanted again.
+
+---
+
 ### Duplicate planet names cause battle-report and map-indicator cross-contamination (2026-06-01)
 
 **Symptom:** Two planets can be generated with the same name (e.g. both "Red Shard"). Because battle-report events and map indicators use `planetName` as a lookup key, events from one planet bleed into the other — the wrong planet lights up on the map, and combat entries appear under the wrong planet in the report.
