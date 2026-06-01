@@ -1,26 +1,32 @@
 self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', event => { event.waitUntil(clients.claim()); });
+
+const pushChannel = new BroadcastChannel('home-push');
+
 self.addEventListener('push', event => {
   if (!event.data) return;
   let payload;
   try { payload = event.data.json(); } catch { payload = {}; }
   const title = payload.title || 'Gaza Galaxy';
+  const notificationData = payload.data || {};
   const options = {
     body: payload.body || '',
     icon: '/icon.png',
     badge: '/icon.png',
-    data: payload.data || {},
+    data: notificationData,
+  };
+  const refreshMessage = {
+    type: 'NOTIFICATION_RECEIVED',
+    event: notificationData.event,
+    game_id: notificationData.game_id,
   };
   event.waitUntil(
     Promise.all([
       self.registration.showNotification(title, options),
       clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+        pushChannel.postMessage(refreshMessage);
         for (const client of clientList) {
-          client.postMessage({
-            type: 'NOTIFICATION_RECEIVED',
-            event: payload.data?.event,
-            game_id: payload.data?.game_id,
-          });
+          client.postMessage(refreshMessage);
         }
       }),
     ]),

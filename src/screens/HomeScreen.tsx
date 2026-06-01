@@ -416,6 +416,7 @@ export default function HomeScreen() {
   const [inviteLoadingId, setInviteLoadingId] = useState<number | null>(null);
   const [asyncGames, setAsyncGames] = useState<ApiGame[]>([]);
   const [asyncGamesLoading, setAsyncGamesLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadingGameId, setLoadingGameId] = useState<number | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<number | null>(null);
   /** Games created this session when the list API omits creator fields. */
@@ -479,27 +480,42 @@ export default function HomeScreen() {
     }
   }, [sessionCreatedGameIds]);
 
-  const refreshOnFocus = useCallback(() => {
-    void refreshAsyncGames();
+  const refreshOnFocus = useCallback(
+    (options?: { showLoading?: boolean }) => {
+      const showLoading = options?.showLoading ?? false;
 
-    void (async () => {
-      try {
-        const requests = await getFriendRequests();
-        setPendingRequestCount(requests.length);
-      } catch {
-        // Swallow errors — badge hidden when fetch fails (e.g. backend offline).
-      }
-    })();
+      void (async () => {
+        if (showLoading) {
+          setIsRefreshing(true);
+        }
 
-    void (async () => {
-      try {
-        const pendingInvites = await listInvites();
-        setInvites(pendingInvites);
-      } catch {
-        // Swallow errors — invites section hidden when fetch fails.
-      }
-    })();
-  }, [refreshAsyncGames]);
+        try {
+          await refreshAsyncGames();
+
+          const [requestsResult, invitesResult] = await Promise.all([
+            getFriendRequests().catch(() => null),
+            listInvites().catch(() => null),
+          ]);
+
+          if (requestsResult !== null) {
+            setPendingRequestCount(requestsResult.length);
+          }
+          if (invitesResult !== null) {
+            setInvites(invitesResult);
+          }
+        } finally {
+          if (showLoading) {
+            setIsRefreshing(false);
+          }
+        }
+      })();
+    },
+    [refreshAsyncGames],
+  );
+
+  const handleManualRefresh = useCallback(() => {
+    refreshOnFocus({ showLoading: true });
+  }, [refreshOnFocus]);
 
   useFocusEffect(
     useCallback(() => {
@@ -1112,6 +1128,8 @@ export default function HomeScreen() {
       <AppTopBar
         pendingRequestCount={pendingRequestCount}
         onFriendsPress={() => navigation.navigate('Friends')}
+        onRefreshPress={handleManualRefresh}
+        isRefreshing={isRefreshing}
       />
       <View style={styles.lobbyContainer}>
         <ScrollView

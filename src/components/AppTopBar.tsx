@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { showConfirm } from '../utils/webAlert';
 import { useAuthStore } from '../store/authStore';
 
@@ -33,6 +33,32 @@ function FriendsNavButton({
   );
 }
 
+function RefreshButton({
+  isRefreshing,
+  onPress,
+}: {
+  isRefreshing: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.refreshButton,
+        pressed && !isRefreshing && styles.navButtonPressed,
+        isRefreshing && styles.refreshButtonDisabled,
+      ]}
+      onPress={onPress}
+      disabled={isRefreshing}
+    >
+      {isRefreshing ? (
+        <ActivityIndicator color={COLORS.accent} size="small" />
+      ) : (
+        <Text style={styles.refreshButtonText}>Refresh</Text>
+      )}
+    </Pressable>
+  );
+}
+
 function LogoutButton({ onPress }: { onPress: () => void }) {
   return (
     <Pressable
@@ -48,10 +74,14 @@ export function AppTopBar({
   pendingRequestCount,
   onFriendsPress,
   showFriendsButton = true,
+  onRefreshPress,
+  isRefreshing = false,
 }: {
   pendingRequestCount: number;
   onFriendsPress: () => void;
   showFriendsButton?: boolean;
+  onRefreshPress?: () => void;
+  isRefreshing?: boolean;
 }) {
   const logout = useAuthStore((s) => s.logout);
 
@@ -68,7 +98,12 @@ export function AppTopBar({
       ) : (
         <View style={styles.topBarSide} />
       )}
-      <LogoutButton onPress={handleLogout} />
+      <View style={styles.topBarActions}>
+        {onRefreshPress != null && (
+          <RefreshButton isRefreshing={isRefreshing} onPress={onRefreshPress} />
+        )}
+        <LogoutButton onPress={handleLogout} />
+      </View>
     </View>
   );
 }
@@ -84,6 +119,11 @@ const styles = StyleSheet.create({
   },
   topBarSide: {
     minWidth: 1,
+  },
+  topBarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   navButton: {
     position: 'relative',
@@ -119,6 +159,26 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 10,
     fontWeight: '700',
+  },
+  refreshButton: {
+    minWidth: 72,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: COLORS.accentDim,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshButtonDisabled: {
+    opacity: 0.7,
+  },
+  refreshButtonText: {
+    color: COLORS.accent,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
   logoutButton: {
     paddingVertical: 8,

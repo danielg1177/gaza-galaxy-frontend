@@ -19,7 +19,7 @@ import { setOnUnauthorized } from './src/services/apiClient';
 import { getGame } from './src/services/gamesService';
 import {
   requestHomeRefresh,
-  shouldRefreshHomeFromNotification,
+  setupPushHomeRefreshBridge,
 } from './src/services/homeRefreshEvents';
 import {
   registerNotificationHandler,
@@ -131,11 +131,10 @@ export default function App() {
 
   useEffect(() => {
     if (Platform.OS !== 'web' || !('serviceWorker' in navigator)) return;
-    const handler = (event: MessageEvent) => {
+
+    const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'NOTIFICATION_RECEIVED') {
-        if (shouldRefreshHomeFromNotification(event.data.event)) {
-          requestHomeRefresh();
-        }
+        requestHomeRefresh();
         return;
       }
       if (event.data?.type !== 'NOTIFICATION_CLICK') return;
@@ -144,9 +143,13 @@ export default function App() {
       pendingGameId.current = gameId;
       void consumePendingGameIdRef.current();
     };
-    navigator.serviceWorker.addEventListener('message', handler);
+
+    navigator.serviceWorker.addEventListener('message', handleMessage);
+    const unsubscribeBroadcast = setupPushHomeRefreshBridge();
+
     return () => {
-      navigator.serviceWorker.removeEventListener('message', handler);
+      navigator.serviceWorker.removeEventListener('message', handleMessage);
+      unsubscribeBroadcast();
     };
   }, []);
 
@@ -155,24 +158,17 @@ export default function App() {
       return;
     }
 
-    const receivedSubscription = Notifications.addNotificationReceivedListener(
-      (notification) => {
-        const data = notification.request.content.data as Record<string, unknown> | undefined;
-        if (shouldRefreshHomeFromNotification(data?.event)) {
-          requestHomeRefresh();
-        }
-      },
-    );
+    const receivedSubscription = Notifications.addNotificationReceivedListener(() => {
+      requestHomeRefresh();
+    });
 
     const responseSubscription = Notifications.addNotificationResponseReceivedListener(
       (response) => {
+        requestHomeRefresh();
+
         const data = response.notification.request.content.data as
           | Record<string, unknown>
           | undefined;
-        if (shouldRefreshHomeFromNotification(data?.event)) {
-          requestHomeRefresh();
-        }
-
         const gameId = parseNotificationGameId(data);
         if (gameId === undefined) {
           return;
