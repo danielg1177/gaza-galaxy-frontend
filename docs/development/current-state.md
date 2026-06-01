@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-01 (Fleet dispatch modal — tap ship count to type a value)
+2026-06-01 (App renamed to Gaza Galaxy)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -218,6 +218,10 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-01: Fix immediate sign-out after login — `apiClient` skips global 401 logout on `/auth/*` bootstrap routes; `authStore` bumps `authGeneration` on login/register so a stale `logout()` from an expired token check cannot clear a new session.
+- 2026-06-01: Fix Expo **App entry not found** — `registerRootComponent` runs synchronously in `index.ts` again; legacy AsyncStorage migration runs on first Zustand persist `getItem` via `ensureStorageMigrated`.
+- 2026-06-01: `API_BASE_URL` in `src/services/apiClient.ts` set to production Railway backend (`https://gaza-galaxy-backend-production.up.railway.app/api`).
+- 2026-06-01: App renamed **Strategic Commander** → **Gaza Galaxy** — display title on Login/Register/HomeScreen; Expo `name`/`slug` and npm package `gaza-galaxy`; AsyncStorage persist key `gaza-galaxy-local-games` with one-time migration from legacy key; shared constants in `src/constants/app.ts`.
 - 2026-06-01: Removed `troop_produced` from Battle Report and ⋮ Turn Report UI (no production count messages for any player).
 - 2026-06-01: Strategic map planet dots +25% size (`CELL_SIZE * 0.45 * 1.25`, ~10px at default cell size).
 - 2026-06-01: Strategic map modal — ⋮ menu **Map** opens `StrategicMapModal` with full-board planet overview (owned green, others muted), pinch-zoom, and pan; fit-to-viewport on open; `npx tsc --noEmit` passes clean.

@@ -2660,7 +2660,7 @@ Persist game state to the Laravel backend so players on different devices share 
 
 **Requirements:**
 1. Warm off-white background (`#f5f0eb`) matching HomeScreen.
-2. Centered card layout: app title "Strategic Commander" at top, username `TextInput`, password `TextInput` (secureTextEntry), "Sign In" button.
+2. Centered card layout: app title "Gaza Galaxy" at top, username `TextInput`, password `TextInput` (secureTextEntry), "Sign In" button.
 3. "New here? Create an account" link that navigates to RegisterScreen.
 4. "Sign In" button calls `authStore.login(username, password)`.
 5. Show inline error message below the form on failure (e.g. "Invalid username or password").
@@ -3518,7 +3518,7 @@ Pass & Play and Solo games currently live only in Zustand (in-memory). They surv
 
 **Requirements:**
 1. Import `persist` and `createJSONStorage` from `zustand/middleware` and `AsyncStorage` from `@react-native-async-storage/async-storage`.
-2. Wrap the `create(...)` call with `persist(...)`. Use the storage key `'strategic-commander-local-games'` and `version: 1`.
+2. Wrap the `create(...)` call with `persist(...)`. Use the storage key `'gaza-galaxy-local-games'` and `version: 1`.
 3. Use `partialize` to persist only the `games` array, filtered to local games (`asyncGameId == null`). All other state (`activeGameId`, `turnReport`, `isSubmittingTurn`, `shouldReturnHome`, etc.) must NOT be persisted — they are volatile session state.
    ```ts
    partialize: (state) => ({

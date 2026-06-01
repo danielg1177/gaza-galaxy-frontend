@@ -32,8 +32,9 @@ Matches store a `playMode` on `GameState` (set from `GameConfig` at creation):
 
 ### Session Persistence
 - On app launch, check AsyncStorage for stored token
-- If token exists: attempt `GET /api/auth/me` to verify validity; if valid go to HomeScreen; if 401 go to LoginScreen
+- If token exists: attempt `GET /api/auth/me` to verify validity; if valid go to HomeScreen; if 401 go to LoginScreen (`loadStoredAuth` clears storage; does not use the global 401 → logout callback)
 - If no token: go to LoginScreen
+- Login/register bump an internal `authGeneration` so an in-flight `logout()` from a prior expired-token check cannot wipe a session the user just created
 
 ---
 

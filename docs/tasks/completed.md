@@ -1,5 +1,19 @@
 # Completed Tasks
 
+## App rename — Strategic Commander → Gaza Galaxy
+**Completed:** 2026-06-01
+**Files modified:**
+- `src/constants/app.ts` — `APP_NAME`, storage keys
+- `src/utils/migrateStorage.ts` — one-time AsyncStorage key migration
+- `index.ts` — run migration before app register
+- `src/screens/LoginScreen.tsx`, `RegisterScreen.tsx`, `HomeScreen.tsx` — display title
+- `app.json`, `package.json` — Expo/npm identifiers
+- `src/store/gameStore.ts` — persist key
+- Docs: `project-spec.md`, `architecture.md`, `backend-build-instructions.md`, `setup.md`, `save-system.md`, `backlog.md`, `current-state.md`, `decisions.md`
+**Notes:** Palm OS original name retained in `project-spec.md` historical sections. `StrategicMapModal` and AI "strategic phase" naming unchanged (feature terminology, not product name). `npx tsc --noEmit` passes clean.
+
+---
+
 ## Fleet dispatch modal — tap ship count to type value
 **Completed:** 2026-06-01
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/systems/movement.md`, `docs/development/current-state.md`

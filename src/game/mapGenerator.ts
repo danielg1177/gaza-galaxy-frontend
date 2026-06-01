@@ -339,7 +339,9 @@ function enforceMinimumSpacing(positions: Position[], width: number, height: num
   const maxX = width - 1 - PLANET_EDGE_PADDING;
   const minY = PLANET_EDGE_PADDING;
   const maxY = height - 1 - PLANET_EDGE_PADDING;
-  const maxIter = positions.length * positions.length * 4;
+  // Cap at 500 to avoid O(n^4) freeze on large maps (e.g. 135 planets × n²×4 = 659M ops).
+  // This function only corrects rounding violations; convergence is fast in practice.
+  const maxIter = 500;
 
   for (let iter = 0; iter < maxIter; iter++) {
     let moved = false;

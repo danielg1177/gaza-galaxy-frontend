@@ -6,7 +6,7 @@
 ## Overview
 
 ### Pass-and-Play and Solo (AsyncStorage persisted)
-Pass-and-play and solo games are persisted to the device via Zustand's `persist` middleware backed by AsyncStorage. The `games[]` array (local records only — `asyncGameId == null`) is written to AsyncStorage under the key `'strategic-commander-local-games'` and reloaded automatically on every app start. Games survive app restarts and appear in the Solos / Pass & Play lobby sections exactly as the user left them.
+Pass-and-play and solo games are persisted to the device via Zustand's `persist` middleware backed by AsyncStorage. The `games[]` array (local records only — `asyncGameId == null`) is written to AsyncStorage under the key `'gaza-galaxy-local-games'` and reloaded automatically on every app start. On first launch after the app rename, data is migrated once from the legacy key `'strategic-commander-local-games'`. Games survive app restarts and appear in the Solos / Pass & Play lobby sections exactly as the user left them.
 
 ### Async Multiplayer (backend persisted)
 Async multiplayer games are persisted on the Laravel backend. The client uses:
@@ -127,6 +127,7 @@ HomeScreen shows both lists merged, with async games appearing first. A section 
 ---
 
 ## Changelog
+- 2026-06-01: App rename — persist key `gaza-galaxy-local-games`; legacy `strategic-commander-local-games` migrated on first persist read via `ensureStorageMigrated` (must not block `registerRootComponent` in `index.ts`).
 - 2026-06-01: Task 187 complete — `GameRecord.pendingTurnReport` persists undismissed battle reports for local games; `loadGame` restores to `turnReport`; `clearPendingTurnReport` on modal dismiss.
 - 2026-05-31: Phase 23 planned — Tasks 165–166 added. Local games (Pass & Play + Solo) will persist via Zustand `persist` + AsyncStorage. `save-system.md` updated to reflect the new architecture.
 - 2026-05-29: Task 146 complete — async open fetches fresh state before navigate; read-only spectator when `alert_state === 'waiting'`.

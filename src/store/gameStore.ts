@@ -34,6 +34,8 @@ import { Alert } from 'react-native';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LOCAL_GAMES_STORAGE_KEY } from '../constants/app';
+import { ensureStorageMigrated } from '../utils/migrateStorage';
 import type { ApiGameDetail } from '../services/gamesService';
 import { ApiError } from '../services/apiClient';
 import { submitTurn } from '../services/gamesService';
@@ -1196,8 +1198,15 @@ export const useGameStore = create<GameStore>()(
   getVisibleGameState: () => visibleStateForRecord(get().getActiveRecord()),
     }),
     {
-      name: 'strategic-commander-local-games',
-      storage: createJSONStorage(() => AsyncStorage),
+      name: LOCAL_GAMES_STORAGE_KEY,
+      storage: createJSONStorage(() => ({
+        getItem: async (name) => {
+          await ensureStorageMigrated();
+          return AsyncStorage.getItem(name);
+        },
+        setItem: (name, value) => AsyncStorage.setItem(name, value),
+        removeItem: (name) => AsyncStorage.removeItem(name),
+      })),
       version: 1,
       partialize: (state) => ({
         games: state.games.filter((g) => !g.asyncGameId),

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const API_BASE_URL = 'http://192.168.1.116:8000/api';
+export const API_BASE_URL =
+  'https://gaza-galaxy-backend-production.up.railway.app/api';
 
 export class ApiError extends Error {
   status: number;
@@ -18,6 +19,16 @@ let onUnauthorized: (() => void) | null = null;
 
 export function setOnUnauthorized(callback: () => void): void {
   onUnauthorized = callback;
+}
+
+/** Auth routes handle 401 locally; avoid global logout during login or session bootstrap. */
+function shouldNotifyUnauthorized(path: string): boolean {
+  return (
+    !path.startsWith('/auth/login') &&
+    !path.startsWith('/auth/register') &&
+    !path.startsWith('/auth/me') &&
+    !path.startsWith('/auth/logout')
+  );
 }
 
 async function request<T>(
@@ -41,7 +52,9 @@ async function request<T>(
   });
 
   if (response.status === 401) {
-    onUnauthorized?.();
+    if (shouldNotifyUnauthorized(path)) {
+      onUnauthorized?.();
+    }
     throw new ApiError('Unauthorized', 401);
   }
 

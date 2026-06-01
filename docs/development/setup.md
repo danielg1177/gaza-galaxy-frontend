@@ -9,7 +9,7 @@
 ## Installation
 ```bash
 git clone <repo>
-cd strategic-commander
+cd gaza-galaxy
 npm install
 ```
 
@@ -37,4 +37,5 @@ Must pass with zero errors before any commit.
 Currently using Expo SDK **54**. Always reference versioned docs at https://docs.expo.dev/versions/v54.0.0/ before using any Expo API.
 
 ## Changelog
+- 2026-06-01: App package/slug renamed to `gaza-galaxy`; setup `cd` path updated.
 - 2026-05-27: File created.

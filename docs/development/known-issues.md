@@ -28,6 +28,20 @@
 
 ## Resolved Issues
 
+### ~~Large map launch crash with 6+ players~~ (2026-06-01, resolved 2026-06-01)
+
+**Symptom:** Tapping "Launch" for a 2-human + 4-AI game on a Large map either froze the app indefinitely or threw `"No starting planet assigned for player player-5"`.
+
+**Root cause — freeze:** `enforceMinimumSpacing` in `mapGenerator.ts` set `maxIter = n² × 4`. For 135 planets (Large, 6P) that is 72,900 outer iterations × 9,045 pairwise checks = ~659 million operations on the JS main thread.
+
+**Root cause — crash:** `assignAis` in `spawnPlacer.ts` requires each AI to land in a unique zone AND be ≥50 clicks from all human home planets. With only 8 zones, 2 used by humans, and humans near opposite map edges, the overlap constraint made it geometrically impossible to place all 4 AIs. After 50 retries the incomplete assignment reached `placeSpawns`, which threw a hard error.
+
+**Fix (Phase 41, Tasks 202–203):**
+- Task 202: `maxIter` capped to `500` in `enforceMinimumSpacing`.
+- Task 203: `assignAis` now runs a guaranteed fallback after all retries — drops zone-uniqueness and human-separation constraints and places remaining AIs on any available neutral planet. `placeSpawns` also has a last-resort fallback before throwing.
+
+---
+
 ### ~~Two combat entries for the same planet in one battle report~~ (2026-06-01, resolved 2026-06-01)
 
 **Symptom:** Players saw duplicate combat (or combat + landing) lines for one planet and could not tell whether they were separate rounds or a bug.
@@ -201,6 +215,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-06-01: Resolved large map launch crash (Phase 41, Tasks 202–203) — `enforceMinimumSpacing` O(n⁴) capped at 500; spawn placer guaranteed fallback for geometrically impossible AI placement.
 - 2026-06-01: Added open issue — duplicate planet names + name as identifier (Phase 39, Tasks 195–197).
 - 2026-06-01: Added open issue — battle report and map indicators missing on solo re-entry (Phase 38, Task 194).
 - 2026-06-01: Resolved production-on-capture / invisible troop production (Task 192, Phase 36).

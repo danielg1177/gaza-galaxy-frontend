@@ -91,7 +91,7 @@ Sent from the invite-accept flow when the last invite is accepted and the game s
 Sent from `POST /api/games` when the game is created:
 - Send to: each invited user
 - Title: `"Game Invite"`
-- Body: `"{creator_username} invited you to play"`
+- Body: `"{creator_username} invited you to play Gaza Galaxy"`
 - Data: `{ game_id: {id}, event: "invite_received" }`
 
 ### Game finished

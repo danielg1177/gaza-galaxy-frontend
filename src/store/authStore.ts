@@ -26,6 +26,13 @@ export interface AuthStore {
   loadStoredAuth: () => Promise<void>;
 }
 
+/** Bumped on login/register so in-flight logout cannot clear a newer session. */
+let authGeneration = 0;
+
+function bumpAuthGeneration(): void {
+  authGeneration += 1;
+}
+
 export const useAuthStore = create<AuthStore>((set) => ({
   currentUser: null,
   token: null,
@@ -36,6 +43,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       '/auth/login',
       { username, password },
     );
+    bumpAuthGeneration();
     await AsyncStorage.setItem('auth_token', token);
     await AsyncStorage.setItem('current_user', JSON.stringify(user));
     set({ token, currentUser: user });
@@ -50,16 +58,21 @@ export const useAuthStore = create<AuthStore>((set) => ({
         password_confirmation: passwordConfirmation,
       },
     );
+    bumpAuthGeneration();
     await AsyncStorage.setItem('auth_token', token);
     await AsyncStorage.setItem('current_user', JSON.stringify(user));
     set({ token, currentUser: user });
   },
 
   logout: async () => {
+    const generationAtStart = authGeneration;
     try {
       await apiClient.post('/auth/logout');
     } catch {
       // Token may already be invalid; still clear local session.
+    }
+    if (generationAtStart !== authGeneration) {
+      return;
     }
     await AsyncStorage.removeItem('auth_token');
     await AsyncStorage.removeItem('current_user');

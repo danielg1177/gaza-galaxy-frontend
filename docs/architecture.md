@@ -1,7 +1,7 @@
 # Architecture
 
 ## Overview
-Strategic Commander is an asynchronous turn-based strategy game. The client is an Expo React Native app (iPhone only). The backend is a Laravel API.
+Gaza Galaxy is an asynchronous turn-based strategy game. The client is an Expo React Native app (iPhone only). The backend is a Laravel API.
 
 ## High-Level Architecture
 ```

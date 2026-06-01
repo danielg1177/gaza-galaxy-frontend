@@ -316,9 +316,24 @@ function assignAis(
     }
   }
 
-  console.warn(
-    'AI min-separation from human not met after 50 attempts, using last assignment',
-  );
+  // Fallback: zone uniqueness and human-separation constraints are dropped.
+  // This handles high player counts where strict constraints are geometrically impossible
+  // (e.g. 4 AIs on a large map where both humans occupy opposite edge zones).
+  const assignedPlanetIndices = new Set([
+    ...humanAssignments.values(),
+    ...lastAssignment.values(),
+  ]);
+  for (const playerId of aiPlayerIds) {
+    if (lastAssignment.has(playerId)) continue;
+    for (let i = 0; i < map.planets.length; i++) {
+      if (map.planets[i].owner === 'neutral' && !assignedPlanetIndices.has(i)) {
+        lastAssignment.set(playerId, i);
+        assignedPlanetIndices.add(i);
+        break;
+      }
+    }
+  }
+  console.warn('AI spawn fallback: zone/separation constraints unsatisfiable, remaining AIs placed on nearest available neutral planet');
   return lastAssignment;
 }
 
@@ -397,10 +412,22 @@ export function placeSpawns(options: PlaceSpawnsOptions): SpawnPlacementResult {
   );
 
   const assignmentByPlayer = new Map([...humanAssignments, ...aiAssignments]);
+  const usedIndices = new Set(assignmentByPlayer.values());
   const planetIndices = playerIds.map((id) => {
-    const index = assignmentByPlayer.get(id);
+    let index = assignmentByPlayer.get(id);
     if (index === undefined) {
-      throw new Error(`No starting planet assigned for player ${id}`);
+      // Last-resort fallback: pick any remaining neutral planet.
+      for (let i = 0; i < map.planets.length; i++) {
+        if (map.planets[i].owner === 'neutral' && !usedIndices.has(i)) {
+          index = i;
+          usedIndices.add(i);
+          break;
+        }
+      }
+      if (index === undefined) {
+        throw new Error(`No starting planet assigned for player ${id} and no neutral planets remain`);
+      }
+      console.warn(`Spawn fallback triggered for ${id}: placed on first available neutral planet`);
     }
     return index;
   });

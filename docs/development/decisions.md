@@ -4,6 +4,13 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
+## 2026-06-01 — App Renamed to Gaza Galaxy
+**Decision:** The product display name is **Gaza Galaxy** (replacing "Strategic Commander"). Expo slug, npm package name, and AsyncStorage persist key use `gaza-galaxy` / `gaza-galaxy-local-games`. Legacy local saves migrate once from `strategic-commander-local-games` on startup.
+**Rationale:** User-facing rebrand; technical identifiers updated for consistency. Palm OS original game name "Strategic Commander" remains in `project-spec.md` as historical reference only.
+**Alternatives considered:** Keep legacy storage key (rejected — inconsistent naming); wipe local saves on rename (rejected — migration preserves campaigns).
+
+---
+
 ## 2026-05-31 — AI Difficulty Standardized to Hard
 **Decision:** Remove the AI difficulty selector from game setup and always initialize AI players with `difficulty: 'hard'`.
 **Rationale:** Simplifies setup UX and avoids low-challenge accidental configurations; current design intent is that all AI opponents play with the strongest available behavior profile.

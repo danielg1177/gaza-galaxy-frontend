@@ -238,7 +238,24 @@ Three tasks to replace the sequential 1v1 arrival model with a simultaneous mele
 
 ---
 
+## Phase 41 — Bug Fix: Large Map Launch Crash (6-Player+)
+
+**Status:** Complete (2026-06-01).
+
+Two tasks fixing a JS main-thread freeze and a subsequent spawn-placement crash when launching with 6+ players on a Large map:
+
+- ~~**Task 202**~~ — Frontend: Cap `enforceMinimumSpacing` outer-iteration limit at 500 to eliminate O(n⁴) freeze for large planet counts *(complete 2026-06-01)*
+- ~~**Task 203**~~ — Frontend: Fix `assignAis` fallback in `spawnPlacer.ts` — after all retries exhausted, drop zone-uniqueness and human-separation constraints and place remaining AIs on any available neutral planet; harden `placeSpawns` with a last-resort fallback instead of a hard throw *(complete 2026-06-01)*
+
+**Root cause — Task 202:** For 6 players on Large, `planetCount = 135` and `gridSide = 111`. `enforceMinimumSpacing` used `maxIter = n² × 4 = 72,900` outer iterations, each scanning all `n(n−1)/2 = 9,045` planet pairs — ~659 million operations total. Fix: hard-cap `maxIter = 500`.
+
+**Root cause — Task 203:** `assignAis` uses `AI_MIN_SEPARATION_FROM_HUMAN = 50` clicks and requires each AI to land in a unique zone. With only 8 zones, 2 already used by humans, and both human home planets near opposite map edges, the "≥50 clicks from all humans" constraint eliminates most zone candidates — making it geometrically impossible to place 4 AIs. After 50 retries the function returned an incomplete assignment; `placeSpawns` then threw `"No starting planet assigned for player player-5"`.
+
+---
+
 ## Changelog
+- 2026-06-01: Phase 41 complete (Tasks 202–203) — large map launch crash: `enforceMinimumSpacing` O(n⁴) fixed + spawn placer guaranteed fallback for high player counts.
+- 2026-06-01: Phase 41 complete (Task 202) — large map launch freeze: `enforceMinimumSpacing` O(n⁴) fixed by capping outer iterations at 500.
 - 2026-06-01: Phase 38 expanded (Task 201 added) — added async multiplayer coverage: restore `playerBattleArchiveByPlayerId` in `loadAsyncGame`; phase renamed to "Battle Report and Turn Data Not Preserved for the Full Turn Duration (All Modes)".
 - 2026-06-01: Phase 40 complete (Tasks 198–200) — true multi-way combat for 3+ players at the same planet: melee algorithm, engine wiring, and battle report UI.
 - 2026-06-01: Phase 39 added (Tasks 195–197) — duplicate planet names + name used as identifier in event/report system.

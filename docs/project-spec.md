@@ -1,8 +1,8 @@
-# Strategic Commander Modern Remake — Project Specification
+# Gaza Galaxy — Project Specification
 
 ## Project Overview
 
-This project is a private modern remake/inspired recreation of the Palm OS game “Strategic Commander”.
+**Gaza Galaxy** is a private modern remake/inspired recreation of the Palm OS game “Strategic Commander”.
 
 The goal is NOT commercial release. The app is intended only for private use among friends on iPhone devices.
 

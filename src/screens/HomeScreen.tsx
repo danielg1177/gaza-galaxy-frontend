@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { AppTopBar } from '../components/AppTopBar';
+import { APP_NAME_UPPER } from '../constants/app';
 import type { MapSize } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
 import { ApiError } from '../services/apiClient';
@@ -1104,7 +1105,7 @@ export default function HomeScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
-            <Text style={styles.eyebrow}>STRATEGIC COMMANDER</Text>
+            <Text style={styles.eyebrow}>{APP_NAME_UPPER}</Text>
             <Text style={styles.title}>Command{'\n'}Center</Text>
             <View style={styles.titleRule} />
             <Text style={styles.subtitle}>Select a campaign or launch a new one.</Text>

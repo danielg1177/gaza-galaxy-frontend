@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
+import { APP_NAME } from '../constants/app';
 import { ApiError } from '../services/apiClient';
 import { useAuthStore } from '../store/authStore';
 
@@ -60,7 +61,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.card}>
-          <Text style={styles.title}>Strategic Commander</Text>
+          <Text style={styles.title}>{APP_NAME}</Text>
           <Text style={styles.subtitle}>Sign In</Text>
 
           <TextInput
