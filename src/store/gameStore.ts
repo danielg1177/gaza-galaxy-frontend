@@ -1047,6 +1047,9 @@ export const useGameStore = create<GameStore>()(
       eliminatedPlayerPendingKnockout: pendingKnockout,
       pendingFarewellPlayerIds: newPendingFarewellIds,
       ...(showLock ? { showingLockScreen: true } : {}),
+      // For async games start the submission flag in the same atomic update so
+      // that the battle-report modal closes before React can paint a stale frame.
+      ...(isAsync ? { isSubmittingTurn: true } : {}),
     });
 
     if (!isAsync || !asyncGameId) {
@@ -1062,8 +1065,6 @@ export const useGameStore = create<GameStore>()(
       })),
       { type: 'END_TURN' as const },
     ];
-
-    set({ isSubmittingTurn: true });
 
     const restorePreSubmitSnapshot = () => {
       set({

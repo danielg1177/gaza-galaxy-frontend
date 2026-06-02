@@ -3481,6 +3481,7 @@ export default function GameScreen() {
       <Modal
         visible={
           showBattleReportModal &&
+          !isSubmittingTurn &&
           (sortedBattleReportCombatEvents.length > 0 ||
             sortedBattleReportMultiwayEvents.length > 0)
         }
