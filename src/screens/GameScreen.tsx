@@ -1203,6 +1203,7 @@ export default function GameScreen() {
   const initialSnapGameIdRef = useRef<string | null>(null);
   const prevShowingLockScreenRef = useRef(showingLockScreen);
   const prevShowingLockScreenBattleRef = useRef(showingLockScreen);
+  const prevHumanCombatCountRef = useRef(0);
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
 
@@ -1392,6 +1393,19 @@ export default function GameScreen() {
       setShowBattleReportModal(true);
     }
   }, [showingLockScreen, humanCombatEvents]);
+
+  // For async games there is no lock screen to dismiss, so open the battle
+  // report as soon as combat events arrive (e.g. on game load or after the
+  // opponent's turn resolves). The showingLockScreen guard ensures this does
+  // not fire for pass-and-play, where endTurn batches the archive update
+  // together with showingLockScreen: true before this effect can run.
+  useEffect(() => {
+    const prev = prevHumanCombatCountRef.current;
+    prevHumanCombatCountRef.current = humanCombatEvents.length;
+    if (prev === 0 && humanCombatEvents.length > 0 && !showingLockScreen) {
+      setShowBattleReportModal(true);
+    }
+  }, [humanCombatEvents, showingLockScreen]);
 
   const selectedPlanet = useMemo(
     () => gameState?.map.planets.find((p) => p.id === selectedPlanetId),

@@ -2,6 +2,16 @@
 
 ## Open Issues
 
+### ~~Battle report did not auto-open at the start of an async turn~~ — fixed 2026-06-01
+
+~~**Symptom:** In async multiplayer, when a player opened their turn after the opponent submitted, the battle report modal never appeared automatically even when there were combat events. The fight icons showed on the map and the report was accessible via ⋮ menu, but it did not auto-open.~~
+
+~~**Root cause:** The only auto-open effect in `GameScreen` listened for the pass-and-play lock screen transitioning `true → false`. `loadAsyncGame` always sets `showingLockScreen: false`, so the transition never fired for async games.~~
+
+**Fix (2026-06-01):** Added a second opening effect in `GameScreen` that fires when `humanCombatEvents` goes from empty to non-empty while `showingLockScreen` is `false`. Pass-and-play is unaffected because `endTurn` batches `showingLockScreen: true` and the archive update atomically, so `showingLockScreen` is already `true` when the new effect fires.
+
+---
+
 ### Async End Turn appears to do nothing (intermittent) — mitigations added 2026-06-01
 
 **Symptom:** In a two-human async game, after several turns, tapping **End Turn** sometimes does nothing visible — gold does not change and the turn does not appear to end.
