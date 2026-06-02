@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## In-transit fleet tooltip — auto-dismiss and close button
+**Completed:** 2026-06-02
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/systems/movement.md`, `docs/tasks/completed.md`
+**Notes:** `FleetTooltipOverlay` shows owner, ships, and ETA on in-flight fleet tap; fades out after 4s (300ms animation); **✕** dismisses early; timer resets on another fleet tap. `npx tsc --noEmit` passes clean.
+
+---
+
 ## Async lobby — non-tappable when not your turn
 **Completed:** 2026-06-01
 **Files modified:** `src/screens/HomeScreen.tsx`, `App.tsx`, `docs/development/current-state.md`, `docs/systems/multiplayer.md`, `docs/systems/save-system.md`, `docs/systems/notifications.md`

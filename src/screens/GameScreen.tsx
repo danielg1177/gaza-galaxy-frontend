@@ -703,6 +703,109 @@ function getOwnerName(ownerId: OwnerId, players: Player[]): string {
   return players.find((p) => p.id === ownerId)?.name ?? ownerId;
 }
 
+const FLEET_TOOLTIP_VISIBLE_MS = 4000;
+const FLEET_TOOLTIP_FADE_MS = 300;
+
+type FleetTooltipData = {
+  fleet: Fleet;
+  absX: number;
+  absY: number;
+};
+
+function FleetTooltipOverlay({
+  tooltip,
+  players,
+  localHumanPlayerId,
+  onDismiss,
+}: {
+  tooltip: FleetTooltipData;
+  players: Player[];
+  localHumanPlayerId: string;
+  onDismiss: () => void;
+}) {
+  const opacity = useRef(new RNAnimated.Value(1)).current;
+  const autoDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearAutoDismissTimer = useCallback(() => {
+    if (autoDismissTimerRef.current !== null) {
+      clearTimeout(autoDismissTimerRef.current);
+      autoDismissTimerRef.current = null;
+    }
+  }, []);
+
+  const fadeOutAndDismiss = useCallback(() => {
+    clearAutoDismissTimer();
+    opacity.stopAnimation();
+    RNAnimated.timing(opacity, {
+      toValue: 0,
+      duration: FLEET_TOOLTIP_FADE_MS,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        onDismiss();
+      }
+    });
+  }, [clearAutoDismissTimer, onDismiss, opacity]);
+
+  useEffect(() => {
+    opacity.setValue(1);
+    clearAutoDismissTimer();
+    autoDismissTimerRef.current = setTimeout(() => {
+      fadeOutAndDismiss();
+    }, FLEET_TOOLTIP_VISIBLE_MS);
+    return clearAutoDismissTimer;
+  }, [tooltip.fleet.id, tooltip.absX, tooltip.absY, clearAutoDismissTimer, fadeOutAndDismiss, opacity]);
+
+  return (
+    <RNAnimated.View
+      style={[
+        styles.fleetTooltip,
+        {
+          opacity,
+          top: Math.max(8, tooltip.absY - 90),
+          left: Math.max(8, Math.min(tooltip.absX - 90, 300)),
+        },
+      ]}
+      pointerEvents="box-none"
+    >
+      <Pressable
+        style={styles.fleetTooltipClose}
+        onPress={fadeOutAndDismiss}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss fleet info"
+      >
+        <Text style={styles.fleetTooltipCloseText}>✕</Text>
+      </Pressable>
+      <View
+        style={[
+          styles.fleetTooltipAccent,
+          {
+            backgroundColor: getPlayerColor(
+              tooltip.fleet.ownerId,
+              localHumanPlayerId,
+              players,
+            ),
+          },
+        ]}
+      />
+      <View style={styles.fleetTooltipBody}>
+        <Text style={styles.fleetTooltipOwner}>
+          {getOwnerName(tooltip.fleet.ownerId, players)}
+        </Text>
+        <Text style={styles.fleetTooltipShips}>
+          {tooltip.fleet.shipCount} ships
+        </Text>
+        <Text style={styles.fleetTooltipTurns}>
+          {tooltip.fleet.turnsRemaining === 1
+            ? 'Arrives next round'
+            : `${tooltip.fleet.turnsRemaining} rounds remaining`}
+        </Text>
+      </View>
+    </RNAnimated.View>
+  );
+}
+
 function planetCenterPx(planet: Planet): { x: number; y: number } {
   return {
     x: planet.position.x * CELL_SIZE + CELL_SIZE / 2,
@@ -1479,6 +1582,10 @@ export default function GameScreen() {
 
   const dismissPlanetBattleReport = useCallback(() => {
     setPlanetBattleReportName(null);
+  }, []);
+
+  const dismissFleetTooltip = useCallback(() => {
+    setFleetTooltip(null);
   }, []);
 
   const dismissPlanetDetail = useCallback(() => {
@@ -3505,36 +3612,12 @@ export default function GameScreen() {
       )}
 
       {fleetTooltip !== null && gameState !== null && localHumanPlayerId !== undefined && (
-        <View
-          style={[
-            styles.fleetTooltip,
-            {
-              top: Math.max(8, fleetTooltip.absY - 90),
-              left: Math.max(8, Math.min(fleetTooltip.absX - 90, 300)),
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <View
-            style={[
-              styles.fleetTooltipAccent,
-              { backgroundColor: getPlayerColor(fleetTooltip.fleet.ownerId, localHumanPlayerId, gameState.players) },
-            ]}
-          />
-          <View style={styles.fleetTooltipBody}>
-            <Text style={styles.fleetTooltipOwner}>
-              {getOwnerName(fleetTooltip.fleet.ownerId, gameState.players)}
-            </Text>
-            <Text style={styles.fleetTooltipShips}>
-              {fleetTooltip.fleet.shipCount} ships
-            </Text>
-            <Text style={styles.fleetTooltipTurns}>
-              {fleetTooltip.fleet.turnsRemaining === 1
-                ? 'Arrives next round'
-                : `${fleetTooltip.fleet.turnsRemaining} rounds remaining`}
-            </Text>
-          </View>
-        </View>
+        <FleetTooltipOverlay
+          tooltip={fleetTooltip}
+          players={gameState.players}
+          localHumanPlayerId={localHumanPlayerId}
+          onDismiss={dismissFleetTooltip}
+        />
       )}
 
       {dragDistanceLabel !== null && (
@@ -4563,9 +4646,25 @@ const styles = StyleSheet.create({
   fleetTooltipAccent: {
     width: 4,
   },
+  fleetTooltipClose: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    zIndex: 2,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fleetTooltipCloseText: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   fleetTooltipBody: {
     paddingHorizontal: 10,
     paddingVertical: 8,
+    paddingTop: 22,
     gap: 2,
   },
   fleetTooltipOwner: {

@@ -121,6 +121,10 @@ For each fleet in `gameState.fleets`:
 
 `Fleet.totalTurns` is set in `createFleet` to the initial `turnsRemaining` at dispatch so the UI can compute progress without recomputing transit time. ~~Destination-cluster markers (arrow + dot below target planet)~~ removed 2026-05-27 (Task 25).
 
+### In-transit fleet tap tooltip (`GameScreen`)
+
+When the player taps the map and the hit resolves to an in-transit fleet (via `findFleetAtMapCoords`, not a planet), a floating tooltip appears near the tap showing owner name, ship count, and rounds remaining (`Arrives next round` when `turnsRemaining === 1`). The tooltip auto-fades out after **4 seconds** (300ms opacity animation) and includes a top-right **✕** to dismiss immediately with the same fade. Tapping another fleet resets the timer; tapping empty map or a planet clears the tooltip instantly.
+
 ## Determinism
 
 No randomness. Same positions and fleet list always produce the same transit times and advance results.
@@ -131,6 +135,7 @@ No randomness. Same positions and fleet list always produce the same transit tim
 
 ## Changelog
 
+- 2026-06-02: In-transit fleet tap tooltip — auto-dismiss after 4s with fade; manual **✕** dismiss in `GameScreen`.
 - 2026-06-01: Fleet dispatch modal — tap ship count to type a value; clamped to `0…max` on blur/submit; − / + / **All** unchanged.
 - 2026-05-28: In-transit and queued-departure fleet markers use arrow-head polygons (tip toward destination) instead of circles; ship-count labels use owner color (same as marker).
 - 2026-05-28: Task 76 — removed minimum 1-ship garrison on dispatch; `shipCount` may equal `origin.shipCount`.
