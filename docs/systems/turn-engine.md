@@ -47,6 +47,7 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
 
 ## Turn Resolution Order
 1. **Validate** — current player and active game status.
+1a. **Pre-compute round-wrap + run production early** — using the unmodified `state.players` array, compute whether this turn will wrap the player order (`preNextIndex <= preCurrentIndex`). If yes, call `productionEngine.runProduction` immediately (before any combat in step 2) and set `productionAlreadyRan = true`. This guarantees factory output is credited to every planet's garrison **before** any arriving fleet can attack — even if an early-arrival fleet (step 2 below) resolves combat this turn. On non-wrap turns this block is a no-op.
 2. **Resolve eligible arrivals** — split `state.fleets` into fleets with `turnsRemaining <= 0` and `dispatchedInRound < roundNumber` vs still in transit; group eligible fleets by destination, merge same-owner fleets at each destination (summed `shipCount`), and sort so the current planet owner's merged fleet resolves first. After grouping, each destination checks total combatants (unique arriving owners + 1 if the garrison owner is not arriving). If ≥ 3, `resolveMultiwayCombat` is called once for that destination (one `combatRngCounter` slot). If ≤ 2, the existing `resolveArrival` sequential path runs unchanged. Apply optional `players` / `fleets` updates from `ResolveArrivalResult`; keep only still-in-transit fleets. (Safety net under normal play — round-wrap resolution handles fleets that hit zero on the prior wrap.)
 3. **Process `SEND_FLEET` actions** (in submission order):
    - Origin planet exists and is owned by `input.playerId`.
@@ -59,7 +60,7 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
 6. **Advance turn** — `turnNumber += 1`; if still `active`, `currentPlayerId` moves to the next non-eliminated player in `state.players` array order (wrap around).
 7. **Round-wrap check** — compute whether turn order wrapped (`nextPlayerIndex <= currentPlayerIndex`).
 8. **Round tick (wrap only)** — on wrap only:
-   - `productionEngine.runProduction(map, players, state.roundNumber, events)` runs once for the completed round (using pre-combat ownership)
+   - `productionEngine.runProduction(map, players, state.roundNumber, events)` runs once for the completed round — **skipped** if `productionAlreadyRan` (production already ran before step 2)
    - `movementEngine.advanceFleets` decrements all fleet `turnsRemaining` by 1
    - Group `arrived` fleets by destination, merge same-owner fleets at each destination (summed `shipCount`), and sort so the current planet owner's merged fleet resolves first. After grouping, each destination checks total combatants (unique arriving owners + 1 if the garrison owner is not arriving). If ≥ 3, `resolveMultiwayCombat` is called once for that destination (one `combatRngCounter` slot). If ≤ 2, the existing `resolveArrival` sequential path runs unchanged. Apply optional `players` / `fleets` updates; keep only `inTransit` in `fleets`
    - The defending planet's owner receives production before any attacker lands; a player who captures a planet does not receive its production on the turn of capture.
@@ -94,6 +95,7 @@ The Zustand store (`src/store/gameStore.ts`) keeps human fleet dispatches in **`
 `loadGame` and `loadAsyncGame` call **`drainStaleFleets`**, which removes any fleet with `turnsRemaining <= 0` from `GameState.fleets` before the match resumes. Under normal play, round-wrap resolution leaves only `turnsRemaining > 0` fleets in state; persisted saves from before that invariant (or corrupted state) could otherwise re-enter the early-arrivals block at the next turn start and produce a phantom second combat on the same planet.
 
 ## Changelog
+- 2026-06-01: **Task 211** — production pre-runs before step 2 early-arrivals combat on round-wrap turns (`willRoundWrap` pre-computed from `state.players`; `productionAlreadyRan` guard prevents double-run in step 8).
 - 2026-06-01: **Task 199** — multi-way combat wired into both arrival loops; `groupArrivalsByDestination`, `countTotalCombatants`, `buildCombatantList` helpers added to turnEngine.
 - 2026-06-01: **Task 193** — `roundNumber` on `combat` / `fleet_arrived` events via `resolveArrival(..., state.roundNumber, ...)`; `drainStaleFleets` on `loadGame` / `loadAsyncGame`.
 - 2026-05-31: **Pass-and-Play Automatic Turn Handoff** — when a player ends their turn in pass-and-play mode, the lock screen now auto-dismisses after 1.5 seconds, automatically advancing to the next human player's turn without requiring manual interaction. The "Start Turn" button remains visible and functional for manual override if desired.

@@ -300,6 +300,26 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
   let fleets: Fleet[] = state.fleets.map((f) => ({ ...f }));
   let players: Player[] = state.players.map((p) => ({ ...p }));
 
+  // Pre-compute whether this turn is a round-wrap so production can run
+  // before any step-2 early-arrival combat — guarding against the case where
+  // an enemy fleet is resolved here before runProduction is ever called.
+  const preCurrentIndex = state.players.findIndex((p) => p.id === state.currentPlayerId);
+  const preNextId = nextNonEliminatedPlayerId(state.players, state.currentPlayerId);
+  const preNextIndex = state.players.findIndex((p) => p.id === preNextId);
+  const willRoundWrap = state.status === 'active' && preNextIndex <= preCurrentIndex;
+  let productionAlreadyRan = false;
+  if (willRoundWrap) {
+    const { map: productionMap, players: productionPlayers } = runProduction(
+      map,
+      players,
+      state.roundNumber,
+      events,
+    );
+    map = productionMap;
+    players = productionPlayers;
+    productionAlreadyRan = true;
+  }
+
   let eligibleArrivals: Fleet[] = [];
   let stillInTransit: Fleet[] = [];
   let combatRngCounter = 0;
@@ -441,14 +461,16 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
   const isRoundWrap = status === 'active' && nextPlayerIndex <= currentPlayerIndex;
 
   if (isRoundWrap) {
-    const { map: productionMap, players: productionPlayers } = runProduction(
-      map,
-      players,
-      state.roundNumber,
-      events,
-    );
-    map = productionMap;
-    players = productionPlayers;
+    if (!productionAlreadyRan) {
+      const { map: productionMap, players: productionPlayers } = runProduction(
+        map,
+        players,
+        state.roundNumber,
+        events,
+      );
+      map = productionMap;
+      players = productionPlayers;
+    }
 
     const { inTransit, arrived } = advanceFleets(fleets);
     fleets = inTransit;

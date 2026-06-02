@@ -5396,6 +5396,101 @@ self.addEventListener('notificationclick', event => {
 
 ---
 
+## Phase 44 — Bug Fix: Multiplayer — Factory Planet Attacked with 0 Troops Despite Active Production
+
+**Status:** Not started.
+
+**Symptom:** In multiplayer, a player sends all troops from a planet that has active factories set to full troop output (e.g. A-class, 15 factories, slider at 100%). On the next turn, an enemy attacks that planet with 1 troop and takes it. The battle report shows `0` defending troops, meaning the planet's production output was never added to the garrison before combat resolved.
+
+**Root cause:**
+
+`turnEngine.resolveTurn` has two paths where combat is resolved:
+
+1. **Step 2 — Early arrivals** (lines 303–371): resolves fleets with `turnsRemaining <= 0 && dispatchedInRound < state.roundNumber` at the *start* of any player's turn — **before `runProduction` is ever called**.
+2. **Step 8 — Round-wrap arrivals** (lines 443–511): resolves fleets that hit `turnsRemaining = 0` during `advanceFleets` — **after `runProduction` runs** (Phase 30 fix, Task 183).
+
+Phase 30 only fixed the round-wrap path. The early-arrivals block (step 2) has no production guard. Under normal play, step 2 should be empty (arrived fleets are immediately resolved and removed from `state.fleets` during the round-wrap block, and `drainStaleFleets` removes any `turnsRemaining <= 0` remnants on game load). However, in async multiplayer there are edge cases — mid-turn saves restored from `partialStateJson`, state transitions involving AI turns, or any future code path that bypasses `drainStaleFleets` — where step 2 can process enemy attacks before production runs. A defender with 0 garrison and 15 active factories shows 0 `defenderShipsBefore` in the battle report and the attacker wins instantly.
+
+**Fix overview:**
+
+Pre-compute a `willRoundWrap` flag at the very top of `resolveTurn`, before any fleet resolution or player actions are processed. Use it to run `runProduction` **once**, **before** the early-arrivals block. Remove (or guard with `!productionAlreadyRan`) the duplicate `runProduction` call inside the `isRoundWrap` block so production never runs twice in the same `resolveTurn` call.
+
+Pre-computing `willRoundWrap` uses `state.players` (unmodified at that point) to find the next non-eliminated player:
+
+```typescript
+// At the TOP of resolveTurn, before step 2
+const preCurrentIndex = state.players.findIndex((p) => p.id === state.currentPlayerId);
+const preNextId = nextNonEliminatedPlayerId(state.players, state.currentPlayerId);
+const preNextIndex = state.players.findIndex((p) => p.id === preNextId);
+const willRoundWrap = state.status === 'active' && preNextIndex <= preCurrentIndex;
+let productionAlreadyRan = false;
+
+// Run production BEFORE step 2 early arrivals when this turn is a round-wrap
+if (willRoundWrap) {
+  const { map: productionMap, players: productionPlayers } = runProduction(
+    map, players, state.roundNumber, events,
+  );
+  map = productionMap;
+  players = productionPlayers;
+  productionAlreadyRan = true;
+}
+```
+
+Then in the `isRoundWrap` block (step 8), skip the `runProduction` call if `productionAlreadyRan`:
+
+```typescript
+if (isRoundWrap) {
+  if (!productionAlreadyRan) {
+    const { map: productionMap, players: productionPlayers } = runProduction(
+      map, players, state.roundNumber, events,
+    );
+    map = productionMap;
+    players = productionPlayers;
+  }
+  // advanceFleets + combat unchanged …
+}
+```
+
+**Why pre-computing `willRoundWrap` from `state.players` is safe:**
+
+The pre-computation uses the player array before any this-turn eliminations. In the rare case where a player is eliminated during step 2 or step 3 of this same turn (changing who "next" is), production may run one extra time — but:
+- Production adds troops and gold; running it never corrupts state.
+- Forfeited (newly neutral) planets are skipped by `runProduction`, so eliminated players don't benefit.
+- The final `isRoundWrap` at step 7 still uses the post-action `players` array for correctness; the `productionAlreadyRan` guard prevents a double-run.
+
+**Edge cases preserved:**
+- Non-wrap turns: `willRoundWrap = false`, production never runs early, behavior unchanged.
+- Round-wrap turns with no early arrivals: production runs before step 2 (no arrivals), then step 8 skips the production call. Net result: identical to pre-fix behavior.
+- Round-wrap turns WITH early arrivals (the bug): production now runs first, defenders have their garrison topped up before any combat.
+
+---
+
+### Task 211 — Frontend: Guarantee production runs before combat in all `resolveTurn` code paths
+
+**File:** `frontend/src/game/turnEngine.ts`
+
+**Requirements:**
+
+1. At the very top of `resolveTurn` (after the guard clauses, before any fleet or action processing), compute `willRoundWrap` using `state.players` and `state.currentPlayerId` via the existing `nextNonEliminatedPlayerId` helper. Declare a `productionAlreadyRan` boolean (initially `false`).
+
+2. Immediately after that computation, if `willRoundWrap === true`, call `runProduction(map, players, state.roundNumber, events)` and set `productionAlreadyRan = true`. This covers all combat in step 2 (early arrivals).
+
+3. In the `isRoundWrap` block (current step 8), wrap the existing `runProduction` call in `if (!productionAlreadyRan)`. All other logic in step 8 (`advanceFleets`, arrival grouping, combat) is unchanged.
+
+4. Update `docs/systems/turn-engine.md` — revise the **Turn Resolution Order** to show that production now runs before step 2 on round-wrap turns:
+   - Before step 2: "Run production (round-wrap turns only, before any fleet arrival) — prevents 0-troop combat when owner sent all garrison same round."
+   - Step 8 note: "Production call skipped if already ran before step 2."
+
+5. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- Pass-and-play 2-player test: Player A sends all troops from a 15-factory A-class planet (100% troops slider). Player B sends 1 troop to that planet (adjacent, turnsRemaining = 1). Player A ends turn; Player B ends turn (triggers round wrap). Confirm battle report shows `defenderShipsBefore = 15` (not 0) and Player A holds the planet.
+- Confirm no double production: check gold and troop totals are not doubled on round-wrap turns. `runProduction` emits `troop_produced` events — confirm each planet emits at most one per round.
+- Multiplayer async regression: end turns normally in a 2-player async game for several rounds; confirm garrison counts grow as expected.
+
+---
+
 ## Phase 43 — Bug Fix: Battle Report Flashes Briefly After Ending Async Multiplayer Turn
 
 **Status:** Not started.

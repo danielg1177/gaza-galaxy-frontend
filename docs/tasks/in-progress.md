@@ -288,7 +288,19 @@ One task to stop the outgoing async player's own combat events from being writte
 
 ---
 
+## Phase 44 — Bug Fix: Multiplayer — Factory Planet Attacked with 0 Troops Despite Active Production
+
+**Status:** Complete (2026-06-01).
+
+One task to fix the multiplayer bug where all-troop-dispatched factory planets show 0 defending troops in the battle report and are captured by a single enemy troop, despite having 15+ factories set to full troop output:
+
+- ~~**Task 211**~~ — Frontend: Guarantee production runs before combat in all `resolveTurn` code paths (step 2 early arrivals + round-wrap step 8) *(complete 2026-06-01)*
+
+---
+
 ## Changelog
+- 2026-06-01: Phase 44 complete (Task 211) — production now pre-runs before step-2 early-arrivals combat on round-wrap turns; `productionAlreadyRan` guard prevents double-run in step 8.
+- 2026-06-01: Phase 44 added (Task 211) — multiplayer bug: factory planet loses to 1 troop after owner sends all troops; production must run before any combat in all resolveTurn paths.
 - 2026-06-01: Phase 43 complete (Task 210) — battle report no longer flashes after ending an async multiplayer turn.
 - 2026-06-01: Phase 41 complete (Tasks 202–203) — large map launch crash: `enforceMinimumSpacing` O(n⁴) fixed + spawn placer guaranteed fallback for high player counts.
 - 2026-06-01: Phase 41 complete (Task 202) — large map launch freeze: `enforceMinimumSpacing` O(n⁴) fixed by capping outer iterations at 500.
