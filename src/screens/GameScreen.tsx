@@ -3479,7 +3479,11 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={showBattleReportModal}
+        visible={
+          showBattleReportModal &&
+          (sortedBattleReportCombatEvents.length > 0 ||
+            sortedBattleReportMultiwayEvents.length > 0)
+        }
         transparent
         animationType="fade"
         onRequestClose={handleCloseBattleReport}
