@@ -12,16 +12,19 @@
 
 ---
 
-### Async End Turn appears to do nothing (intermittent) — mitigations added 2026-06-01
+### Async End Turn appears to do nothing (intermittent) — mitigations added 2026-06-01, primary fix 2026-06-01
 
-**Symptom:** In a two-human async game, after several turns, tapping **End Turn** sometimes does nothing visible — gold does not change and the turn does not appear to end.
+**Symptom:** In an async multiplayer game, tapping **End Turn** sometimes does nothing visible — the game state does not change, no alert is shown, and the backend never receives a POST.
 
-**Likely causes identified:**
+**Root cause (primary):** `endTurn()` called `runAiTurnsUntilHuman()` with **no surrounding try/catch**. Any exception thrown during AI turn resolution (inside `computeAiTurn` or the subsequent `resolveTurn` call) propagated silently up through `endTurn()` to the React Native `onPress` handler, which swallowed it. Because the exception fired before the `set({...})` state update and the `submitTurn` POST, both were silently skipped — no visible state change and no backend call.
+
+**Other contributing causes identified:**
 1. **Silent early return** — `endTurn()` returned without feedback when `currentPlayerId` did not match an active human (e.g. stale in-memory state after the opponent submitted, or corrupt `currentPlayerId`).
-2. **Uncaught `resolveTurn` throw** — engine errors produced no user-visible alert.
-3. **Submit failed after local advance** — turn resolved locally first; API 409/403 left the player on the opponent's board without a clear recovery path (partially fixed earlier; now rolls back local state on failure).
-4. **Turn counter desync** — `state_json.turnNumber` could disagree with `games.turn_number`; submit sent stale values → 409. `loadAsyncGame` now overwrites counters from the API; submit uses `serverTurnNumber` / `serverRoundNumber`.
-5. **UX expectation** — gold and production only update on a **round wrap** (when play returns to the first player in turn order), not on every End Turn within the same round. Mid-round End Turn advances `currentPlayerId` but may not change gold.
+2. **Submit failed after local advance** — turn resolved locally first; API 409/403 left the player on the opponent's board without a clear recovery path (partially fixed earlier; now rolls back local state on failure).
+3. **Turn counter desync** — `state_json.turnNumber` could disagree with `games.turn_number`; submit sent stale values → 409. `loadAsyncGame` now overwrites counters from the API; submit uses `serverTurnNumber` / `serverRoundNumber`.
+4. **UX expectation** — gold and production only update on a **round wrap** (when play returns to the first player in turn order), not on every End Turn within the same round. Mid-round End Turn advances `currentPlayerId` but may not change gold.
+
+**Fix (2026-06-01):** Wrapped the `runAiTurnsUntilHuman(humanResult)` call in `gameStore.ts` `endTurn()` with a try/catch that surfaces any exception as a "Turn Failed" alert and returns without mutating state. This matches the existing try/catch pattern on the human `resolveTurn` call just above it.
 
 **Mitigations (2026-06-01):** Pre-submit `getGame()` validation, snapshot rollback on failed submit, user-visible alerts on all failure paths, 45s submit timeout, backend guard when submitted state still points at an AI without a `user_id`.
 
@@ -248,6 +251,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-06-01: Fixed intermittent silent End Turn failure — wrapped `runAiTurnsUntilHuman` in try/catch in `gameStore.ts` `endTurn()`.
 - 2026-06-01: Fixed WorkletsError on web — disabled `worklets` and `reanimated` babel plugins in `babel.config.js` (web-only PWA; Reanimated's web polyfill handles everything without babel transformation).
 - 2026-06-01: Resolved large map launch crash (Phase 41, Tasks 202–203) — `enforceMinimumSpacing` O(n⁴) capped at 500; spawn placer guaranteed fallback for geometrically impossible AI placement.
 - 2026-06-01: Added open issue — duplicate planet names + name as identifier (Phase 39, Tasks 195–197).

@@ -4,7 +4,7 @@
     "slug": "gaza-galaxy",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/Space_Ship.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -17,7 +17,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/Space_Ship.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -26,7 +26,7 @@
     "web": {
       "output": "single",
       "bundler": "metro",
-      "favicon": "./assets/favicon.png",
+      "favicon": "./assets/Space_Ship.png",
       "name": "Gaza Galaxy",
       "shortName": "Gaza Galaxy",
       "description": "Async turn-based space strategy",

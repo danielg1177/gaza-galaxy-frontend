@@ -954,7 +954,22 @@ export const useGameStore = create<GameStore>()(
         return;
       }
     }
-    const { state: nextState, events } = runAiTurnsUntilHuman(humanResult);
+    let nextState: GameState;
+    let events: TurnEvent[];
+    try {
+      const aiResult = runAiTurnsUntilHuman(humanResult);
+      nextState = aiResult.state;
+      events = aiResult.events;
+    } catch (err) {
+      console.error('[endTurn] runAiTurnsUntilHuman failed:', err);
+      showAlert(
+        'Turn Failed',
+        err instanceof Error
+          ? err.message
+          : 'Could not process AI turns. Try exiting and reopening the game.',
+      );
+      return;
+    }
 
     const outgoingPlayerId = gameState.currentPlayerId;
     const knockoutHumanIds = findNewlyEliminatedHumanIds(events, nextState.players);
