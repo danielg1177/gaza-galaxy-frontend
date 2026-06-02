@@ -80,11 +80,12 @@ export default function App() {
 
     try {
       const detail = await getGame(gameId);
-      useGameStore.getState().loadAsyncGame(detail);
       navigationRef.current?.navigate('Home');
-      navigationRef.current?.navigate('Game', {
-        isReadOnly: detail.alertState === 'waiting',
-      });
+      if (detail.playMode === 'async_multiplayer' && !detail.isMyTurn) {
+        return;
+      }
+      useGameStore.getState().loadAsyncGame(detail);
+      navigationRef.current?.navigate('Game', {});
     } catch {
       // Silently ignore deep-link failures.
     }

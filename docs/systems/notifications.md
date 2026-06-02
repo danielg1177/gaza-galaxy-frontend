@@ -57,7 +57,7 @@ Implemented in `App.tsx` (Task 148):
 1. `Notifications.addNotificationResponseReceivedListener` extracts `game_id` from `response.notification.request.content.data` and stores it in a `pendingGameId` ref.
 2. **Cold start:** if auth is not yet resolved, the game ID waits in the ref; a `useEffect` on `currentUser` calls `consumePendingGameId()` once `currentUser` is non-null and `isLoadingAuth` is false.
 3. **Warm start:** if the user is already authenticated when the notification is tapped, `consumePendingGameId()` is invoked directly from the listener.
-4. `consumePendingGameId()` calls `getGame(gameId)`, `loadAsyncGame(detail)`, then navigates `Home` → `Game` with `{ isReadOnly: detail.alertState === 'waiting' }` via `useNavigationContainerRef`. All errors swallowed silently.
+4. `consumePendingGameId()` calls `getGame(gameId)`, navigates to `Home`, then opens `Game` only when `detail.isMyTurn` (loads via `loadAsyncGame` first). If it is not the player's turn, the user lands on Home with no game open. All errors swallowed silently.
 
 When a user taps a notification:
 1. Extract `game_id` from the notification data payload

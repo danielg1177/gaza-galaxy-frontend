@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Async lobby — non-tappable when not your turn
+**Completed:** 2026-06-01
+**Files modified:** `src/screens/HomeScreen.tsx`, `App.tsx`, `docs/development/current-state.md`, `docs/systems/multiplayer.md`, `docs/systems/save-system.md`, `docs/systems/notifications.md`
+**Notes:** **Play with Friends** cards use `isMyTurn` for tap eligibility (`your_turn` and `in_progress` only). Opponent-turn (`waiting`) cards show **Waiting...** badge and render as non-interactive. `handleOpenAsyncGame` and notification deep-link bail when `!isMyTurn`. Reverts Task 146 lobby spectator entry. `npx tsc --noEmit` passes clean.
+
+---
+
 ## Remove "Watch AI Turns" from new-game setup
 **Completed:** 2026-06-01
 **Files modified:** `src/screens/HomeScreen.tsx`, `docs/development/current-state.md`

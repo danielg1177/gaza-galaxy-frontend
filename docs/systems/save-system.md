@@ -104,7 +104,7 @@ When `endTurn` is called on an async multiplayer game:
 Fetched from `GET /api/games` on every HomeScreen focus event. Each entry includes `alert_state`:
 - `your_turn` — show bold indicator, high contrast card
 - `in_progress` — show orange badge "In Progress"
-- `waiting` — no badge, muted style
+- `waiting` — **Waiting...** badge, muted style, card not tappable (`!isMyTurn`)
 - `waiting_for_players` — show muted "Waiting for players..." label
 - `finished` — show "VICTORY" (green) or "DEFEAT" (red) label
 
@@ -127,6 +127,7 @@ HomeScreen shows both lists merged, with async games appearing first. A section 
 ---
 
 ## Changelog
+- 2026-06-01: Async lobby — `waiting` (`!isMyTurn`) cards non-tappable; only `your_turn` / `in_progress` open the game.
 - 2026-06-01: App rename — persist key `gaza-galaxy-local-games`; legacy `strategic-commander-local-games` migrated on first persist read via `ensureStorageMigrated` (must not block `registerRootComponent` in `index.ts`).
 - 2026-06-01: Task 187 complete — `GameRecord.pendingTurnReport` persists undismissed battle reports for local games; `loadGame` restores to `turnReport`; `clearPendingTurnReport` on modal dismiss.
 - 2026-05-31: Phase 23 planned — Tasks 165–166 added. Local games (Pass & Play + Solo) will persist via Zustand `persist` + AsyncStorage. `save-system.md` updated to reflect the new architecture.

@@ -74,6 +74,11 @@ function isSoloGame(record: GameRecord): boolean {
   return record.config.playerSlots.slice(1).every((slot) => slot.type === 'ai');
 }
 
+/** Turn-gating on the lobby applies only to online async games, not pass-and-play. */
+function isAsyncMultiplayerApiGame(game: ApiGame): boolean {
+  return game.playMode === 'async_multiplayer';
+}
+
 function createDefaultPlayerSlots(slot0Name: string): PlayerSlot[] {
   return [
     { type: 'human', name: slot0Name },
@@ -169,9 +174,7 @@ function AsyncGameCard({
   const playerNames = game.players.map((player) => player.inGameName).join(', ');
   const isTappable =
     game.status === 'in_progress' &&
-    (game.alertState === 'your_turn' ||
-      game.alertState === 'in_progress' ||
-      game.alertState === 'waiting');
+    (!isAsyncMultiplayerApiGame(game) || game.isMyTurn);
   const isProminent =
     game.alertState === 'your_turn' || game.alertState === 'in_progress';
   const prominentAccentColor =
@@ -213,6 +216,10 @@ function AsyncGameCard({
           <View style={styles.asyncAlertBadgeInProgress}>
             <Text style={styles.asyncAlertBadgeInProgressText}>IN PROGRESS</Text>
           </View>
+        );
+      case 'waiting':
+        return (
+          <Text style={styles.asyncAlertBadgeWaitingText}>Waiting...</Text>
         );
       case 'waiting_for_players':
         return (
@@ -306,6 +313,7 @@ function AsyncGameCard({
   );
 }
 
+/** Local pass-and-play and solo campaigns — always tappable so the active player can resume. */
 function GameCard({
   record,
   onPress,
@@ -689,13 +697,25 @@ export default function HomeScreen() {
     if (loadingGameId !== null) {
       return;
     }
+    const summary = asyncGames.find((g) => g.id === gameId);
+    if (
+      summary !== undefined &&
+      isAsyncMultiplayerApiGame(summary) &&
+      !summary.isMyTurn
+    ) {
+      return;
+    }
     setLoadingGameId(gameId);
     void (async () => {
       try {
         const detail = await getGame(gameId);
+        if (isAsyncMultiplayerApiGame(detail) && !detail.isMyTurn) {
+          setLoadingGameId(null);
+          return;
+        }
         loadAsyncGame(detail);
         setLoadingGameId(null);
-        navigation.navigate('Game', { isReadOnly: detail.alertState === 'waiting' });
+        navigation.navigate('Game', {});
       } catch {
         setLoadingGameId(null);
         showAlert('Load Failed', 'Could not load game. Check your connection.');
