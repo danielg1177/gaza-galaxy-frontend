@@ -782,8 +782,8 @@ function FleetTooltipOverlay({
       />
       <View style={styles.fleetTooltipBody}>
         <View style={styles.fleetTooltipHeader}>
-          <Text style={styles.fleetTooltipOwner} numberOfLines={1}>
-            {getOwnerName(tooltip.fleet.ownerId, players)}
+          <Text style={styles.fleetTooltipShips} numberOfLines={1}>
+            {tooltip.fleet.shipCount} ships
           </Text>
           <Pressable
             style={styles.fleetTooltipClose}
@@ -795,9 +795,6 @@ function FleetTooltipOverlay({
             <Text style={styles.fleetTooltipCloseText}>✕</Text>
           </Pressable>
         </View>
-        <Text style={styles.fleetTooltipShips}>
-          {tooltip.fleet.shipCount} ships
-        </Text>
         <Text style={styles.fleetTooltipTurns}>
           {tooltip.fleet.turnsRemaining === 1
             ? 'Arrives next round'
@@ -4636,7 +4633,7 @@ const styles = StyleSheet.create({
   fleetTooltip: {
     position: 'absolute',
     flexDirection: 'row',
-    backgroundColor: 'rgba(20, 18, 40, 0.92)',
+    backgroundColor: 'rgba(20, 18, 40, 0.78)',
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
@@ -4672,15 +4669,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  fleetTooltipOwner: {
-    flex: 1,
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 11,
-    fontWeight: '500',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
   fleetTooltipShips: {
+    flex: 1,
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '700',
