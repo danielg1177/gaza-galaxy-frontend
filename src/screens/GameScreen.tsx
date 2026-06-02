@@ -755,6 +755,38 @@ function findPlanetAtMapCoords(
   return best;
 }
 
+function findFleetAtMapCoords(
+  mapX: number,
+  mapY: number,
+  fleets: Fleet[],
+  planets: Planet[],
+  scale: number,
+): Fleet | undefined {
+  const hitRadius = Math.max(CELL_SIZE * 0.6, (CELL_SIZE * 1.8) / scale);
+  let best: Fleet | undefined;
+  let bestDist = Infinity;
+  for (const fleet of fleets) {
+    const originPlanet = planets.find((p) => p.id === fleet.originPlanetId);
+    const destPlanet = planets.find((p) => p.id === fleet.destinationPlanetId);
+    if (originPlanet === undefined || destPlanet === undefined) {
+      continue;
+    }
+    const progress = fleet.totalTurns > 0 ? 1 - fleet.turnsRemaining / fleet.totalTurns : 1;
+    const originCenter = planetCenterPx(originPlanet);
+    const destCenter = planetCenterPx(destPlanet);
+    const fleetX = originCenter.x + (destCenter.x - originCenter.x) * progress;
+    const fleetY = originCenter.y + (destCenter.y - originCenter.y) * progress;
+    const dx = mapX - fleetX;
+    const dy = mapY - fleetY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= hitRadius && dist < bestDist) {
+      bestDist = dist;
+      best = fleet;
+    }
+  }
+  return best;
+}
+
 function DragLine({
   startX,
   startY,
@@ -1193,6 +1225,11 @@ export default function GameScreen() {
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showStrategicMapModal, setShowStrategicMapModal] = useState(false);
   const [isSavingExit, setIsSavingExit] = useState(false);
+  const [fleetTooltip, setFleetTooltip] = useState<{
+    fleet: Fleet;
+    absX: number;
+    absY: number;
+  } | null>(null);
   const [editingOrderIndex, setEditingOrderIndex] = useState<number | null>(null);
   const [isEditingFleetShipCount, setIsEditingFleetShipCount] = useState(false);
   const [fleetShipCountDraft, setFleetShipCountDraft] = useState('');
@@ -2254,10 +2291,11 @@ export default function GameScreen() {
   );
 
   const handleMapTap = useCallback(
-    (localX: number, localY: number, s: number, tx: number, ty: number) => {
+    (localX: number, localY: number, s: number, tx: number, ty: number, absX: number, absY: number) => {
       const store = useGameStore.getState();
       const record = store.getActiveRecord();
       if (record === null) {
+        setFleetTooltip(null);
         return;
       }
       const freshHumanId = getLocalHumanPlayerId(record.state);
@@ -2265,6 +2303,7 @@ export default function GameScreen() {
         ? store.pendingAiPlayerId
         : freshHumanId;
       if (viewingPlayerId === undefined || viewingPlayerId === null) {
+        setFleetTooltip(null);
         return;
       }
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
@@ -2275,8 +2314,22 @@ export default function GameScreen() {
         s,
       );
       if (planet === undefined) {
+        const fleet = findFleetAtMapCoords(
+          mapPoint.x,
+          mapPoint.y,
+          record.state.fleets,
+          record.state.map.planets,
+          s,
+        );
+        if (fleet !== undefined) {
+          setFleetTooltip({ fleet, absX, absY });
+        } else {
+          setFleetTooltip(null);
+        }
         return;
       }
+
+      setFleetTooltip(null);
 
       const combat =
         humanCombatByPlanetKey.get(planet.id) ?? humanCombatByPlanetKey.get(planet.name);
@@ -2305,7 +2358,7 @@ export default function GameScreen() {
       store.selectPlanet(planet.id);
       setPlanetBattleReportName(null);
     },
-    [humanCombatByPlanetKey, setPlanetBattleReportName],
+    [humanCombatByPlanetKey, setPlanetBattleReportName, setFleetTooltip],
   );
 
   const planetTap = Gesture.Tap()
@@ -2317,6 +2370,8 @@ export default function GameScreen() {
         scale.value,
         translateX.value,
         translateY.value,
+        event.absoluteX,
+        event.absoluteY,
       );
     });
 
@@ -3449,6 +3504,39 @@ export default function GameScreen() {
         </Pressable>
       )}
 
+      {fleetTooltip !== null && gameState !== null && localHumanPlayerId !== undefined && (
+        <View
+          style={[
+            styles.fleetTooltip,
+            {
+              top: Math.max(8, fleetTooltip.absY - 90),
+              left: Math.max(8, Math.min(fleetTooltip.absX - 90, 300)),
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View
+            style={[
+              styles.fleetTooltipAccent,
+              { backgroundColor: getPlayerColor(fleetTooltip.fleet.ownerId, localHumanPlayerId, gameState.players) },
+            ]}
+          />
+          <View style={styles.fleetTooltipBody}>
+            <Text style={styles.fleetTooltipOwner}>
+              {getOwnerName(fleetTooltip.fleet.ownerId, gameState.players)}
+            </Text>
+            <Text style={styles.fleetTooltipShips}>
+              {fleetTooltip.fleet.shipCount} ships
+            </Text>
+            <Text style={styles.fleetTooltipTurns}>
+              {fleetTooltip.fleet.turnsRemaining === 1
+                ? 'Arrives next round'
+                : `${fleetTooltip.fleet.turnsRemaining} rounds remaining`}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {dragDistanceLabel !== null && (
         <View
           style={[styles.dragDistancePill, { bottom: insets.bottom + 120 }]}
@@ -4459,5 +4547,42 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '600',
+  },
+  fleetTooltip: {
+    position: 'absolute',
+    flexDirection: 'row',
+    backgroundColor: 'rgba(20, 18, 40, 0.92)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    overflow: 'hidden',
+    zIndex: 20,
+    minWidth: 140,
+    maxWidth: 200,
+  },
+  fleetTooltipAccent: {
+    width: 4,
+  },
+  fleetTooltipBody: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  fleetTooltipOwner: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  fleetTooltipShips: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  fleetTooltipTurns: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
