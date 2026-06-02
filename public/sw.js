@@ -11,8 +11,8 @@ self.addEventListener('push', event => {
   const notificationData = payload.data || {};
   const options = {
     body: payload.body || '',
-    icon: '/icon.png',
-    badge: '/icon.png',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
     data: notificationData,
   };
   const refreshMessage = {
