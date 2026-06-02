@@ -278,7 +278,18 @@ Converting the app from iPhone-only Expo native to a Progressive Web App (PWA) d
 
 ---
 
+## Phase 43 — Bug Fix: Battle Report Flashes Briefly After Ending Async Multiplayer Turn
+
+**Status:** Complete (2026-06-01).
+
+One task to stop the outgoing async player's own combat events from being written into `playerBattleArchiveByPlayerId` during `endTurn`, which causes the battle report modal to flash open immediately after tapping End Turn (before navigation home):
+
+- ~~**Task 210**~~ — Frontend: Do not populate the outgoing async player's battle archive during `endTurn` *(complete 2026-06-01)*
+
+---
+
 ## Changelog
+- 2026-06-01: Phase 43 complete (Task 210) — battle report no longer flashes after ending an async multiplayer turn.
 - 2026-06-01: Phase 41 complete (Tasks 202–203) — large map launch crash: `enforceMinimumSpacing` O(n⁴) fixed + spawn placer guaranteed fallback for high player counts.
 - 2026-06-01: Phase 41 complete (Task 202) — large map launch freeze: `enforceMinimumSpacing` O(n⁴) fixed by capping outer iterations at 500.
 - 2026-06-01: Phase 38 expanded (Task 201 added) — added async multiplayer coverage: restore `playerBattleArchiveByPlayerId` in `loadAsyncGame`; phase renamed to "Battle Report and Turn Data Not Preserved for the Full Turn Duration (All Modes)".

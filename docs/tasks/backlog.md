@@ -5393,3 +5393,69 @@ self.addEventListener('notificationclick', event => {
    **Push notification requirement:** iOS 16.4+ and Android Chrome support Web Push for installed PWAs.
    Push notifications will be silent (no background delivery) until Backend Phase 9 tasks are deployed.
    ```
+
+---
+
+## Phase 43 — Bug Fix: Battle Report Flashes Briefly After Ending Async Multiplayer Turn
+
+**Status:** Not started.
+
+When an async multiplayer player taps **End Turn**, they briefly see a battle report modal for the combat events that just resolved during *their own* turn — before the submit completes and navigation home occurs. This is wrong: the battle report should only appear at the **start** of a player's *next* turn, showing what happened on the **opponent's** turn.
+
+**Second observed variant:** A player may see the battle report flicker at the end of their turn even though they saw no battles during their turn — this happens when the round resolution (e.g. AI turns driven by `runAiTurnsUntilHuman`) produces combat events involving the outgoing player that resolve as part of the submit-time `endTurn` call.
+
+---
+
+### Task 210 — Frontend: Do not populate the outgoing async player's battle archive during `endTurn`
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Root cause:**
+
+`endTurn()` calls `buildPlayerReports(events, finalState.players, finalState.map.planets)` on all events from the just-resolved round. This builds a per-player archive that correctly includes the **outgoing** player's own combat events (e.g. Player A attacked Planet X). The archive is then merged into `newArchive` and committed via `set()`.
+
+Because the `set()` call happens *before* `isSubmittingTurn: true` is set and *before* the async `submitTurn` POST completes, `GameScreen`'s "async auto-open" effect fires immediately:
+
+```ts
+// GameScreen.tsx ~line 1402
+if (prev === 0 && humanCombatEvents.length > 0 && !showingLockScreen) {
+  setShowBattleReportModal(true);  // ← fires here, wrong timing
+}
+```
+
+The player sees the modal flash. A moment later `submitTurn` resolves → `resetGame()` + `shouldReturnHome: true` → navigate home.
+
+**Why the outgoing player's archive entry should be absent in async mode:**
+
+- In pass-and-play, building the outgoing player's archive is correct — those events will be shown to them when play cycles back around on the same device.
+- In async multiplayer, the outgoing player is about to navigate home. `loadAsyncGame` will overwrite `playerBattleArchiveByPlayerId` when they return for their next turn, using `latest_events` from the *opponent's* submitted turn. Temporarily writing the outgoing player's own events into the archive serves no purpose and triggers the spurious modal.
+
+**Fix:**
+
+After the archive merge loop in `endTurn()`, and before the main `set()` call, delete the outgoing player's entries from `newArchive` and `newTurnReport` when the game is async:
+
+```ts
+// After: for (const [playerId, playerEvents] of Object.entries(builtTurnReport)) { ... }
+// Before: set({ ... })
+
+if (isAsync) {
+  delete newArchive[humanPlayer.id];
+  delete newTurnReport[humanPlayer.id];
+}
+```
+
+This ensures:
+1. `playerBattleArchiveByPlayerId[humanPlayer.id]` is empty (or unchanged from pre-turn) when the `set()` fires.
+2. `humanCombatEvents.length` does not jump from 0 → N during the submit window.
+3. The "async auto-open" effect never fires on End Turn.
+4. The full `events` array (including Player A's combat events) is still sent to the backend as part of `submitTurn` — so Player B sees the correct battle report when they load the game.
+
+**Verification:**
+
+- End an async multiplayer turn that involves combat (send a fleet that resolves via AI turns). Confirm no battle report modal appears after tapping End Turn.
+- Start a fresh async turn where the opponent had combat events → confirm the battle report still opens correctly when loading the game (`loadAsyncGame` path — unaffected by this change).
+- Pass-and-play: confirm no change in battle report behaviour (the `isAsync` guard leaves that path untouched).
+
+**Estimated complexity:** Trivial — two `delete` lines guarded by `if (isAsync)`.
+
+---

@@ -1024,6 +1024,10 @@ export const useGameStore = create<GameStore>()(
         existing.push(...playerEvents);
       }
     }
+    if (isAsync) {
+      delete newArchive[humanPlayer.id];
+      delete newTurnReport[humanPlayer.id];
+    }
     set({
       games: get().games.map((g) =>
         g.id === record.id

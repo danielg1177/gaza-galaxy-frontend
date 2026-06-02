@@ -64,6 +64,23 @@
 
 ## Resolved Issues
 
+### ~~Battle report flashes briefly after ending an async multiplayer turn~~ (2026-06-01, resolved 2026-06-01)
+
+**Symptom:** In an async multiplayer game, tapping **End Turn** briefly showed the battle report modal for the outgoing player's own combat events before the submit completed and the app navigated home. A second variant: the flash occurred even when no battles were visible during the turn — combat produced by `runAiTurnsUntilHuman` (AI turns resolved as part of `endTurn`) involving the outgoing player triggered the same effect.
+
+**Root cause:** `endTurn()` called `buildPlayerReports(events, ...)` and merged the result (including the outgoing player's own combat entries) into `newArchive`. The `set()` committed this archive *before* `isSubmittingTurn: true` and before the async `submitTurn` POST fired. `GameScreen`'s "async auto-open" effect saw `humanCombatEvents` jump from 0 → N with `showingLockScreen: false` and opened the modal. The outgoing player's archive entry serves no purpose — `loadAsyncGame` overwrites it when they return for their next turn.
+
+**Fix (Phase 43, Task 210):** After the archive merge loop in `endTurn()`, added:
+```ts
+if (isAsync) {
+  delete newArchive[humanPlayer.id];
+  delete newTurnReport[humanPlayer.id];
+}
+```
+The full `events` array is still sent to the backend via `submitTurn`. Pass-and-play and solo paths are unaffected.
+
+---
+
 ### ~~Large map launch crash with 6+ players~~ (2026-06-01, resolved 2026-06-01)
 
 **Symptom:** Tapping "Launch" for a 2-human + 4-AI game on a Large map either froze the app indefinitely or threw `"No starting planet assigned for player player-5"`.
@@ -251,6 +268,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-06-01: Resolved battle report flash after async End Turn (Phase 43, Task 210).
 - 2026-06-01: Fixed intermittent silent End Turn failure — wrapped `runAiTurnsUntilHuman` in try/catch in `gameStore.ts` `endTurn()`.
 - 2026-06-01: Fixed WorkletsError on web — disabled `worklets` and `reanimated` babel plugins in `babel.config.js` (web-only PWA; Reanimated's web polyfill handles everything without babel transformation).
 - 2026-06-01: Resolved large map launch crash (Phase 41, Tasks 202–203) — `enforceMinimumSpacing` O(n⁴) capped at 500; spawn placer guaranteed fallback for geometrically impossible AI placement.
