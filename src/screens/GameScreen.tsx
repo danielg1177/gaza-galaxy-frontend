@@ -763,20 +763,11 @@ function FleetTooltipOverlay({
         {
           opacity,
           top: Math.max(8, tooltip.absY - 90),
-          left: Math.max(8, Math.min(tooltip.absX - 90, 300)),
+          left: Math.max(8, Math.min(tooltip.absX - 100, 280)),
         },
       ]}
       pointerEvents="box-none"
     >
-      <Pressable
-        style={styles.fleetTooltipClose}
-        onPress={fadeOutAndDismiss}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel="Dismiss fleet info"
-      >
-        <Text style={styles.fleetTooltipCloseText}>✕</Text>
-      </Pressable>
       <View
         style={[
           styles.fleetTooltipAccent,
@@ -790,9 +781,20 @@ function FleetTooltipOverlay({
         ]}
       />
       <View style={styles.fleetTooltipBody}>
-        <Text style={styles.fleetTooltipOwner}>
-          {getOwnerName(tooltip.fleet.ownerId, players)}
-        </Text>
+        <View style={styles.fleetTooltipHeader}>
+          <Text style={styles.fleetTooltipOwner} numberOfLines={1}>
+            {getOwnerName(tooltip.fleet.ownerId, players)}
+          </Text>
+          <Pressable
+            style={styles.fleetTooltipClose}
+            onPress={fadeOutAndDismiss}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss fleet info"
+          >
+            <Text style={styles.fleetTooltipCloseText}>✕</Text>
+          </Pressable>
+        </View>
         <Text style={styles.fleetTooltipShips}>
           {tooltip.fleet.shipCount} ships
         </Text>
@@ -4640,34 +4642,38 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.12)',
     overflow: 'hidden',
     zIndex: 20,
-    minWidth: 140,
-    maxWidth: 200,
+    minWidth: 200,
+    maxWidth: 280,
   },
   fleetTooltipAccent: {
     width: 4,
   },
+  fleetTooltipBody: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  fleetTooltipHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   fleetTooltipClose: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    zIndex: 2,
     width: 24,
     height: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   fleetTooltipCloseText: {
     color: 'rgba(255, 255, 255, 0.55)',
     fontSize: 14,
     fontWeight: '600',
   },
-  fleetTooltipBody: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    paddingTop: 22,
-    gap: 2,
-  },
   fleetTooltipOwner: {
+    flex: 1,
     color: 'rgba(255,255,255,0.6)',
     fontSize: 11,
     fontWeight: '500',

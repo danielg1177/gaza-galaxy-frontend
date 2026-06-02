@@ -123,7 +123,7 @@ For each fleet in `gameState.fleets`:
 
 ### In-transit fleet tap tooltip (`GameScreen`)
 
-When the player taps the map and the hit resolves to an in-transit fleet (via `findFleetAtMapCoords`, not a planet), a floating tooltip appears near the tap showing owner name, ship count, and rounds remaining (`Arrives next round` when `turnsRemaining === 1`). The tooltip auto-fades out after **4 seconds** (300ms opacity animation) and includes a top-right **✕** to dismiss immediately with the same fade. Tapping another fleet resets the timer; tapping empty map or a planet clears the tooltip instantly.
+When the player taps the map and the hit resolves to an in-transit fleet (via `findFleetAtMapCoords`, not a planet), a floating tooltip appears near the tap showing owner name, ship count, and rounds remaining (`Arrives next round` when `turnsRemaining === 1`). The owner name and **✕** dismiss control share one header row (name left, close right). The tooltip auto-fades out after **4 seconds** (300ms opacity animation); **✕** dismisses immediately with the same fade. Tapping another fleet resets the timer; tapping empty map or a planet clears the tooltip instantly.
 
 ## Determinism
 
