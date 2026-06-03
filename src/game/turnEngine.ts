@@ -169,21 +169,22 @@ function processSendFleet(
   if (origin.owner !== playerId) {
     throw new Error(`Origin planet ${action.fromPlanetId} is not owned by player ${playerId}`);
   }
-  if (action.shipCount < 1) {
-    throw new Error('shipCount must be at least 1');
-  }
-  if (action.shipCount > origin.shipCount) {
-    throw new Error(
-      `Cannot send ${action.shipCount} ships from ${action.fromPlanetId}; planet only has ${origin.shipCount} ships`,
-    );
-  }
-
+  
   const destination = findPlanet(map, action.toPlanetId);
   if (destination === undefined) {
     throw new Error(`Destination planet not found: ${action.toPlanetId}`);
   }
   if (action.fromPlanetId === action.toPlanetId) {
     throw new Error('Origin and destination planets must be different');
+  }
+  
+  if (action.shipCount < 1) {
+    throw new Error('shipCount must be at least 1');
+  }
+  if (action.shipCount > origin.shipCount) {
+    throw new Error(
+      `Cannot send ${action.shipCount} ships from ${origin.name} to ${destination.name}; ${origin.name} only has ${origin.shipCount} ships`,
+    );
   }
 
   const player = players.find((p) => p.id === playerId);

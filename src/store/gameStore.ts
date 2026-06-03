@@ -913,11 +913,18 @@ export const useGameStore = create<GameStore>()(
       humanResult = resolveTurn(gameState, input);
     } catch (err) {
       console.error('[endTurn] resolveTurn failed:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Could not resolve your turn. Try exiting and reopening the game.';
+      
+      // Extract planet ID from "Cannot send X ships from PlanetName (planetId)" error
+      const planetIdMatch = errorMessage.match(/\(([^)]+)\)/);
+      if (planetIdMatch) {
+        const planetId = planetIdMatch[1];
+        set({ selectedPlanetId: planetId });
+      }
+      
       showAlert(
         'Turn Failed',
-        err instanceof Error
-          ? err.message
-          : 'Could not resolve your turn. Try exiting and reopening the game.',
+        errorMessage,
       );
       return;
     }

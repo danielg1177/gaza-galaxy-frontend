@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-02 (In-transit fleet tooltip auto-dismiss + close button)
+2026-06-02 (In-transit fleet tooltip auto-dismiss + close button; Insufficient ships error now shows planet name + auto-navigates)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -219,6 +219,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-02: Insufficient ships error handling — `processSendFleet` error now shows origin and destination planet names; `gameStore.endTurn` catches "Cannot send" errors and auto-selects the origin planet so player can see exactly which planet has the issue and what the target was.
 - 2026-06-02: In-transit fleet tooltip — owner name removed; **✕** on same row as ship count; ETA line below.
 - 2026-06-02: In-transit fleet tooltip — background opacity lowered (`rgba(20, 18, 40, 0.78)`).
 - 2026-06-02: In-transit fleet tooltip layout — **✕** inline on the owner-name row (right); card widened (`minWidth` 200 / `maxWidth` 280).
