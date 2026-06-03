@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Restore "Watch AI Turns" on new-game setup
+**Completed:** 2026-06-03
+**Files modified:** `src/screens/HomeScreen.tsx`, `docs/development/current-state.md`, `docs/development/known-issues.md`, `docs/tasks/completed.md`
+**Notes:** Re-added the observer-mode toggle, store selectors, `Switch` import, and toggle styles to the campaign setup form. Visible when at least one AI slot is configured; wires to existing `aiObserverMode` / in-game observer UI. `npx tsc --noEmit` passes clean.
+
+---
+
 ## In-transit fleet tooltip — auto-dismiss and close button
 **Completed:** 2026-06-02
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/systems/movement.md`, `docs/tasks/completed.md`

@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-02 (In-transit fleet tooltip auto-dismiss + close button; Insufficient ships error now shows planet name + auto-navigates)
+2026-06-03 (Restored **Watch AI Turns** toggle on new-game setup)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -219,13 +219,14 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-03: Restored **Watch AI Turns** toggle on `HomeScreen` new-game setup (visible when at least one AI slot is configured); wires to existing `aiObserverMode` / in-game observer UI in `gameStore` and `GameScreen`.
 - 2026-06-02: Insufficient ships error handling — `processSendFleet` error now shows origin and destination planet names; `gameStore.endTurn` catches "Cannot send" errors and auto-selects the origin planet so player can see exactly which planet has the issue and what the target was.
 - 2026-06-02: In-transit fleet tooltip — owner name removed; **✕** on same row as ship count; ETA line below.
 - 2026-06-02: In-transit fleet tooltip — background opacity lowered (`rgba(20, 18, 40, 0.78)`).
 - 2026-06-02: In-transit fleet tooltip layout — **✕** inline on the owner-name row (right); card widened (`minWidth` 200 / `maxWidth` 280).
 - 2026-06-02: In-transit fleet tooltip — `FleetTooltipOverlay` in `GameScreen` auto-dismisses after 4s with 300ms opacity fade; **✕** close button dismisses early; timer resets when tapping another fleet; `npx tsc --noEmit` passes clean.
 - 2026-06-01: Async lobby — **Play with Friends** cards tappable only when `playMode === 'async_multiplayer'` and `isMyTurn` (`your_turn` / `in_progress`); pass-and-play (local `GameCard` or API `pass_and_play`) unaffected; `waiting` async games show muted **Waiting...** badge and cannot be opened; `npx tsc --noEmit` passes clean.
-- 2026-06-01: Removed **Watch AI Turns** toggle from new-game setup on `HomeScreen`; `aiObserverMode` store flag remains (defaults `false`) with in-game observer plumbing unused until removed in a future cleanup.
+- 2026-06-01: ~~Removed **Watch AI Turns** toggle from new-game setup on `HomeScreen`~~ *(restored 2026-06-03)*; `aiObserverMode` store flag and in-game observer plumbing in `gameStore` / `GameScreen` active again via setup toggle.
 - 2026-06-01: Fix Expo **App entry not found** — `registerRootComponent` runs synchronously in `index.ts` again; legacy AsyncStorage migration runs on first Zustand persist `getItem` via `ensureStorageMigrated`.
 - 2026-06-01: `API_BASE_URL` in `src/services/apiClient.ts` set to production Railway backend (`https://gaza-galaxy-backend-production.up.railway.app/api`).
 - 2026-06-01: App renamed **Strategic Commander** → **Gaza Galaxy** — display title on Login/Register/HomeScreen; Expo `name`/`slug` and npm package `gaza-galaxy`; AsyncStorage persist key `gaza-galaxy-local-games` with one-time migration from legacy key; shared constants in `src/constants/app.ts`.

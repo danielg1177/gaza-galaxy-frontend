@@ -30,11 +30,11 @@
 
 ---
 
-### AI observer mode plumbing is unreachable (2026-06-01)
+### ~~AI observer mode plumbing is unreachable (2026-06-01)~~ *(resolved 2026-06-03)*
 
-**Context:** The **Watch AI Turns** setup toggle was removed from `HomeScreen`. The underlying store flag (`aiObserverMode`) and in-game observer UI in `GameScreen` / `gameStore` (`showingAiObserver`, `advanceStagedAiTurn`, etc.) remain but cannot be enabled.
+**Context:** The **Watch AI Turns** setup toggle was removed from `HomeScreen` on 2026-06-01, leaving store/UI plumbing unreachable.
 
-**Follow-up:** Remove dead observer-mode code paths in a future cleanup task, or restore the toggle if the feature is wanted again.
+**Fix:** Toggle restored on new-game setup; visible when at least one AI slot is configured.
 
 ---
 
