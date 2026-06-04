@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-03 (Box-select multi-fleet dispatch — toggle button draws selection rectangle, queues all selected troops to tapped destination)
+2026-06-04 (Friend request notifications on HomeScreen — polls every 60 seconds; menu button and Friends option show alert badge with count)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -150,6 +150,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 - Task 150: Bug fix — async end turn returns home — `isAsyncGame()` authoritative on `asyncGameId != null`; `loadAsyncGame` overrides decoded `playMode` to `'asyncMultiplayer'`; pass-and-play lock screen gated with `!isAsyncGame` in GameScreen; async `endTurn` submits via API then `shouldReturnHome` navigates home (no next-player UI)
 - Task 172: AI setup simplification — removed AI difficulty chips from `HomeScreen`; new AI slots and toggled AI slots are always `difficulty: 'hard'`; async create-game payload now always sends `difficulty: 'hard'` for AI slots; `gameStore.buildPlayers` now forces AI `Player.difficulty = 'hard'` regardless of slot input
 - Box-select multi-fleet dispatch — circular **selection-drag** toggle (bottom-left, human turn only) enables box-draw mode: dragging draws a teal rectangle over the map (pan blocked while drawing); on release, all owned planets whose centers fall inside the box and that have troops or queued outbound orders are highlighted with a teal ring; a "Tap destination planet" hint appears; tapping any planet queues all selected troops there using normal range rules (`effectiveRange`); troops from out-of-range planets are skipped and a "Too far for some troops" red warning appears; existing queued orders from selected planets are cancelled and re-queued to the new destination; tapping empty space deselects; after a send the mode stays on for further selections; toggle or End Turn exits the mode; `queueOrder` from `gameStore` used for batch dispatch
+- Friend request notifications on HomeScreen — existing `pendingRequestCount` polling (refreshOnFocus every 60 seconds via `getFriendRequests()`) now displays as accent badges; menu button (⋮) shows badge with count (capped at `9+`) when count > 0; **👥 Friends** dropdown option shows same count badge to the right of the text
 
 ## In Progress
 - Task 164 complete — Solos and Pass & Play cards now show a delete button; `handleDeleteLocalGame` confirmation alert calls `deleteGame` from the store; `GameCard` `onDelete` prop already present from async cards.

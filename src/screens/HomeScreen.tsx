@@ -631,6 +631,13 @@ export default function HomeScreen() {
             }}
           >
             <Text style={styles.homeMenuItemText}>👥 Friends</Text>
+            {pendingRequestCount > 0 && (
+              <View style={styles.homeMenuBadge}>
+                <Text style={styles.homeMenuBadgeText}>
+                  {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
+                </Text>
+              </View>
+            )}
           </Pressable>
           <View style={styles.homeMenuDivider} />
           <Pressable
@@ -876,6 +883,13 @@ export default function HomeScreen() {
               hitSlop={8}
             >
               <Text style={styles.homeMenuButtonText}>⋮</Text>
+              {pendingRequestCount > 0 && (
+                <View style={styles.homeMenuButtonBadge}>
+                  <Text style={styles.homeMenuButtonBadgeText}>
+                    {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
+                  </Text>
+                </View>
+              )}
             </Pressable>
           </View>
 
@@ -1249,6 +1263,13 @@ export default function HomeScreen() {
               hitSlop={8}
             >
               <Text style={styles.homeMenuButtonText}>⋮</Text>
+              {pendingRequestCount > 0 && (
+                <View style={styles.homeMenuButtonBadge}>
+                  <Text style={styles.homeMenuButtonBadgeText}>
+                    {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
+                  </Text>
+                </View>
+              )}
             </Pressable>
           </View>
 
@@ -1703,12 +1724,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 8,
     marginBottom: 8,
+    overflow: 'visible',
   },
   createNavMenuButton: {
+    position: 'relative',
     minWidth: 44,
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
   },
   backButtonPressed: {
     opacity: 0.7,
@@ -2173,6 +2197,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
   },
   homeMenuButtonPressed: {
     opacity: 0.7,
@@ -2204,9 +2229,12 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   homeMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    justifyContent: 'center',
+    gap: 8,
   },
   homeMenuItemPressed: {
     backgroundColor: COLORS.accentDim,
@@ -2215,6 +2243,37 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 14,
     letterSpacing: 0.3,
+  },
+  homeMenuBadge: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    minWidth: 22,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeMenuBadgeText: {
+    color: COLORS.background,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  homeMenuButtonBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    minWidth: 20,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeMenuButtonBadgeText: {
+    color: COLORS.background,
+    fontSize: 10,
+    fontWeight: '700',
   },
   homeMenuDivider: {
     height: 1,
