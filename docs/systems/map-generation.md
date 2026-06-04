@@ -60,9 +60,10 @@ The shape controls the planet placement algorithm used.
 | Shape | Description |
 |-------|-------------|
 | `scattered` | Organic parent-linked growth from a central seed (current algorithm) |
-| `arms` | 2–4 arms radiating from centre; planets distributed round-robin per arm at random spine distance with Gaussian lateral spread σ ≈ 3 |
 | `dense_core` | Radial density — planets biased toward the centre using inverse-square-root distribution; sparse edges |
 | `ring` | Annular band — planets in a ring (inner void ~40% of radius, ring thickness ~45%); empty centre and outer fringe |
+| `cluster` | 3–5 independent blobs of planets scattered across the map; Gaussian spread per cluster; creates natural chokepoints between groups |
+| `spiral` | Two curved logarithmic arms winding outward from the centre; spine radius uniform [8%, 96%] of max; Gaussian lateral scatter σ ≈ 10% of max radius; curve factor 0.045 rad/unit |
 
 ### Minimum Distance Rule
 ```
@@ -161,6 +162,7 @@ Opponent **gold** and **researchPoints** remain visible in the player list for n
 - What is the target planet count range per player count?
 
 ## Changelog
+- 2026-06-04: `arms` shape removed; `cluster` (3–5 Gaussian blobs) and `spiral` (2 logarithmic curved arms) added; `GalaxyShape` type updated to `'scattered' | 'dense_core' | 'ring' | 'cluster' | 'spiral'`.
 - 2026-05-31: Task 171 fix — `MIN_PLANET_DISTANCE` now enforced in **final grid coordinates** after uniform normalize + `enforceMinimumSpacing`; connectivity bridge forced-placement removed; fixes sub-2.5 pairs (e.g. 1.4 clicks) caused by normalize compression and integer rounding.
 - 2026-05-31: Task 171 — `MIN_PLANET_DISTANCE` 4→2.5; `growthPosition` parent offset `4 + rng() * 7` → `2.5 + rng() * 7` ([2.5, 9.5] clicks, mean ~6.0); ~1.5 clicks closer on average; algorithms unchanged.
 - 2026-05-29: Bug fix — `ensureConnectivity` post-placement pass guarantees a single connected graph at base fleet range (11 clicks); inserts bridge planets along shortest inter-component gaps when normalization leaves disconnected clusters.

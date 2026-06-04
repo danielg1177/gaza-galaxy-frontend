@@ -202,7 +202,80 @@ function placePlanetsScattered(
   return positions;
 }
 
-function placePlanetsArms(
+/**
+ * Cluster shape: 3–5 independent blobs of planets scattered across the map.
+ * Creates natural chokepoints between groups.
+ */
+function placePlanetsCluster(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const clusterCount = 3 + Math.floor(rng() * 3); // 3–5 clusters
+  const spread = Math.min(virtualWidth, virtualHeight) * 0.18;
+
+  // Place cluster centres with some minimum separation from each other
+  const centres: Position[] = [];
+  const minCentreSep = Math.min(virtualWidth, virtualHeight) * 0.3;
+  for (let c = 0; c < clusterCount; c++) {
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const cx = virtualWidth * 0.12 + rng() * virtualWidth * 0.76;
+      const cy = virtualHeight * 0.12 + rng() * virtualHeight * 0.76;
+      const cand = { x: Math.round(cx), y: Math.round(cy) };
+      if (isFarEnough(cand, centres, minCentreSep)) {
+        centres.push(cand);
+        break;
+      }
+    }
+  }
+  // Fallback: if not enough centres placed, relax separation
+  while (centres.length < clusterCount) {
+    centres.push({
+      x: Math.round(virtualWidth * 0.12 + rng() * virtualWidth * 0.76),
+      y: Math.round(virtualHeight * 0.12 + rng() * virtualHeight * 0.76),
+    });
+  }
+
+  const positions: Position[] = [];
+
+  for (let i = 0; i < planetCount; i++) {
+    const centre = centres[i % centres.length];
+    let placed = false;
+    for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+      // Box-Muller for Gaussian lateral spread around the cluster centre
+      const u1 = rng() || 1e-10;
+      const u2 = rng();
+      const mag = spread * Math.sqrt(-2 * Math.log(u1));
+      const x = Math.round(centre.x + mag * Math.cos(2 * Math.PI * u2));
+      const y = Math.round(centre.y + mag * Math.sin(2 * Math.PI * u2));
+
+      if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
+      if (!isFarEnough({ x, y }, positions, virtualMinDistance)) continue;
+
+      positions.push({ x, y });
+      placed = true;
+      break;
+    }
+    if (!placed) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (cluster shape)`,
+      );
+    }
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
+/**
+ * Spiral shape: 2 curved logarithmic arms winding outward from the centre.
+ * Each arm's angle increases with distance, producing a natural galaxy spiral.
+ */
+function placePlanetsSpiral(
   rng: () => number,
   planetCount: number,
   width: number,
@@ -213,24 +286,35 @@ function placePlanetsArms(
   const virtualHeight = height * 2;
   const virtualCx = virtualWidth / 2;
   const virtualCy = virtualHeight / 2;
-  const maxSpine = Math.min(virtualWidth, virtualHeight) * 0.45;
+  const maxRadius = Math.min(virtualWidth, virtualHeight) * 0.44;
+  // How many radians of twist per unit of radius (tighter = more wound)
+  const curveFactor = 0.045;
+  const armCount = 2;
+  // Gaussian lateral σ in virtual units
+  const lateralSigma = maxRadius * 0.1;
 
-  const armCount = 2 + Math.floor(rng() * 3);
   const positions: Position[] = [];
 
   for (let i = 0; i < planetCount; i++) {
     const armIndex = i % armCount;
-    const armAngle = ((2 * Math.PI) / armCount) * armIndex;
+    const armBaseAngle = ((2 * Math.PI) / armCount) * armIndex;
 
     let placed = false;
     for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
-      const spineDist = rng() * maxSpine;
-      const lateral = (rng() + rng() + rng() - 1.5) * 5;
+      // Bias toward middle of the arm (avoid empty core and fringe)
+      const spineRadius = maxRadius * (0.08 + rng() * 0.88);
+      // Spiral twist: angle grows linearly with radius
+      const angle = armBaseAngle + spineRadius * curveFactor;
+      // Gaussian lateral scatter perpendicular to arm direction
+      const u1 = rng() || 1e-10;
+      const u2 = rng();
+      const lateral = lateralSigma * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+
       const x = Math.round(
-        virtualCx + Math.cos(armAngle) * spineDist - Math.sin(armAngle) * lateral,
+        virtualCx + Math.cos(angle) * spineRadius - Math.sin(angle) * lateral,
       );
       const y = Math.round(
-        virtualCy + Math.sin(armAngle) * spineDist + Math.cos(armAngle) * lateral,
+        virtualCy + Math.sin(angle) * spineRadius + Math.cos(angle) * lateral,
       );
 
       if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
@@ -242,7 +326,7 @@ function placePlanetsArms(
     }
     if (!placed) {
       throw new Error(
-        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (arms shape)`,
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (spiral shape)`,
       );
     }
   }
@@ -440,7 +524,7 @@ export function generateMap(config: MapConfig): GameMap {
   const { seed, width, height, planetCount } = config;
 
   const shapeRng = mulberry32(seed);
-  const shapes: GalaxyShape[] = ['scattered', 'arms', 'dense_core', 'ring'];
+  const shapes: GalaxyShape[] = ['scattered', 'dense_core', 'ring', 'cluster', 'spiral'];
   const shape: GalaxyShape = config.galaxyShape ?? shapes[Math.floor(shapeRng() * shapes.length)];
 
   let positions: Position[] | null = null;
@@ -456,12 +540,14 @@ export function generateMap(config: MapConfig): GameMap {
     const virtualMinDistance = MIN_PLANET_DISTANCE * 2;
 
     try {
-      if (shape === 'arms') {
-        positions = placePlanetsArms(rng, planetCount, width, height, virtualMinDistance);
-      } else if (shape === 'dense_core') {
+      if (shape === 'dense_core') {
         positions = placePlanetsDenseCore(rng, planetCount, width, height, virtualMinDistance);
       } else if (shape === 'ring') {
         positions = placePlanetsRing(rng, planetCount, width, height, virtualMinDistance);
+      } else if (shape === 'cluster') {
+        positions = placePlanetsCluster(rng, planetCount, width, height, virtualMinDistance);
+      } else if (shape === 'spiral') {
+        positions = placePlanetsSpiral(rng, planetCount, width, height, virtualMinDistance);
       } else {
         positions = placePlanetsScattered(rng, planetCount, width, height, virtualMinDistance);
       }
