@@ -2735,7 +2735,7 @@ export default function GameScreen() {
     });
 
   const fleetDrag = Gesture.Pan()
-    .minDistance(10)
+    .minDistance(5)
     .onUpdate((event) => {
       runOnJS(handleFleetPanUpdate)(
         event.x - event.translationX,
