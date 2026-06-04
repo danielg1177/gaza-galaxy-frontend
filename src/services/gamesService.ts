@@ -329,6 +329,17 @@ export async function createGame(payload: CreateGamePayload): Promise<CreateGame
   };
 }
 
+export async function updateGameName(
+  id: number,
+  name: string,
+): Promise<{ game: { id: number; name: string } }> {
+  const data = await apiClient.patch<{ game: { id: number; name: string } }>(
+    `/games/${id}`,
+    { name },
+  );
+  return data;
+}
+
 export async function deleteGame(id: number): Promise<void> {
   await apiClient.delete(`/games/${id}`);
 }

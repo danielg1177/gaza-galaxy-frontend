@@ -356,6 +356,31 @@ Must be a player in this game.
 
 ---
 
+#### `PATCH /api/games/{id}`
+Auth required. Caller must be the creator.
+
+**Request:**
+```json
+{ "name": "string" }
+```
+
+**Validation:** Name must be non-empty and max 100 characters.
+
+**Logic:** Update game name. Allowed regardless of game status.
+
+**Response (200):**
+```json
+{ "game": { "id": 1, "name": "Updated Game Name" } }
+```
+
+**Errors:**
+- `403` — not the creator
+- `422` — validation failure (name empty or too long)
+
+**Client:** `gamesService.updateGameName(id, newName)`; UI updates game name in list state and detail view.
+
+---
+
 #### `DELETE /api/games/{id}`
 Auth required. Caller must be in `game_players` for the game (else 403 `{ "message": "Forbidden" }`). Caller must be the creator (`created_by_user_id` / `creator_id` = me; else 403 `{ "message": "Only the creator can delete this game" }`). No status check — deletion allowed in any game status.
 

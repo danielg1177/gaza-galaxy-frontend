@@ -20,6 +20,7 @@ import type { RootStackParamList } from '../../App';
 import { APP_NAME_UPPER } from '../constants/app';
 import type { MapSize } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
+import { EditGameNameModal } from '../components/EditGameNameModal';
 import { ApiError } from '../services/apiClient';
 import {
   acceptInvite,
@@ -30,6 +31,7 @@ import {
   isCurrentUserGameCreator,
   listGames,
   listInvites,
+  updateGameName,
   type ApiGame,
   type ApiInvite,
 } from '../services/gamesService';
@@ -161,6 +163,7 @@ function AsyncGameCard({
   isDeleting,
   onPress,
   onDelete,
+  onEdit,
 }: {
   game: ApiGame;
   isLoading: boolean;
@@ -170,6 +173,7 @@ function AsyncGameCard({
   isDeleting: boolean;
   onPress: () => void;
   onDelete: () => void;
+  onEdit: () => void;
 }) {
   const playerNames = game.players.map((player) => player.inGameName).join(', ');
   const isTappable =
@@ -250,6 +254,23 @@ function AsyncGameCard({
     }
   })();
 
+  const editControl = canDelete ? (
+    <Pressable
+      style={({ pressed }) => [
+        styles.asyncGameEditButton,
+        pressed && styles.asyncGameEditButtonPressed,
+      ]}
+      onPress={(event) => {
+        event.stopPropagation();
+        onEdit();
+      }}
+      disabled={isDeleting || anyCardLoading || isLoading}
+      hitSlop={8}
+    >
+      <Text style={styles.asyncGameEditButtonText}>Edit</Text>
+    </Pressable>
+  ) : null;
+
   const deleteControl = canDelete ? (
     <Pressable
       style={({ pressed }) => [
@@ -277,6 +298,7 @@ function AsyncGameCard({
         <Text style={[styles.gameCardName, styles.asyncGameCardTitle]}>{game.name}</Text>
         <View style={styles.asyncGameCardHeaderActions}>
           {badge}
+          {editControl}
           {deleteControl}
         </View>
       </View>
@@ -601,6 +623,9 @@ export default function HomeScreen() {
 
   const [isLaunching, setIsLaunching] = useState(false);
   const [homeMenuVisible, setHomeMenuVisible] = useState(false);
+  const [editingGameId, setEditingGameId] = useState<number | null>(null);
+  const [editingGameName, setEditingGameName] = useState('');
+  const [isEditingGame, setIsEditingGame] = useState(false);
 
   const handleLogout = () => {
     showConfirm('Log out?', 'You will need to sign in again to continue.', () => {
@@ -809,6 +834,35 @@ export default function HomeScreen() {
         setInviteLoadingId(null);
       }
     })();
+  };
+
+  const handleEditAsyncGame = (game: ApiGame) => {
+    setEditingGameId(game.id);
+    setEditingGameName(game.name);
+  };
+
+  const handleSaveGameName = async (newName: string) => {
+    if (!editingGameId) return;
+
+    try {
+      setIsEditingGame(true);
+      await updateGameName(editingGameId, newName);
+      setAsyncGames((prev) =>
+        prev.map((game) =>
+          game.id === editingGameId ? { ...game, name: newName } : game,
+        ),
+      );
+      setEditingGameId(null);
+      setEditingGameName('');
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : 'Could not update game name. Check your connection.';
+      throw new Error(message);
+    } finally {
+      setIsEditingGame(false);
+    }
   };
 
   const handleDeleteAsyncGame = (game: ApiGame) => {
@@ -1335,7 +1389,7 @@ export default function HomeScreen() {
                       key={game.id}
                       game={game}
                       isLoading={loadingGameId === game.id}
-                      anyCardLoading={loadingGameId !== null || deletingGameId !== null}
+                      anyCardLoading={loadingGameId !== null || deletingGameId !== null || editingGameId !== null}
                       currentUsername={currentUser?.username}
                       canDelete={isCurrentUserGameCreator(
                         game,
@@ -1344,6 +1398,7 @@ export default function HomeScreen() {
                       )}
                       isDeleting={deletingGameId === game.id}
                       onPress={() => handleOpenAsyncGame(game.id)}
+                      onEdit={() => handleEditAsyncGame(game)}
                       onDelete={() => handleDeleteAsyncGame(game)}
                     />
                   ))}
@@ -1404,6 +1459,16 @@ export default function HomeScreen() {
           </Pressable>
         </View>
       </View>
+      <EditGameNameModal
+        visible={editingGameId !== null}
+        gameName={editingGameName}
+        onClose={() => {
+          setEditingGameId(null);
+          setEditingGameName('');
+        }}
+        onSave={handleSaveGameName}
+        isLoading={isEditingGame}
+      />
     </SafeAreaView>
   );
 }
@@ -1577,6 +1642,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     flexShrink: 0,
+  },
+  asyncGameEditButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: 'white',
+    minWidth: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  asyncGameEditButtonPressed: {
+    opacity: 0.85,
+    borderColor: COLORS.accent,
+  },
+  asyncGameEditButtonText: {
+    color: COLORS.accent,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   asyncGameDeleteButton: {
     paddingHorizontal: 8,
