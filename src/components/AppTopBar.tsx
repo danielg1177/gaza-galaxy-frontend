@@ -1,6 +1,10 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, Modal } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useState } from 'react';
 import { showConfirm } from '../utils/webAlert';
 import { useAuthStore } from '../store/authStore';
+import type { RootStackParamList } from '../../App';
 
 const COLORS = {
   background: '#f5f0eb',
@@ -59,14 +63,77 @@ function RefreshButton({
   );
 }
 
-function LogoutButton({ onPress }: { onPress: () => void }) {
+function MenuButton({
+  onPress,
+}: {
+  onPress: () => void;
+}) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.logoutButton, pressed && styles.navButtonPressed]}
+      style={({ pressed }) => [styles.menuButton, pressed && styles.navButtonPressed]}
       onPress={onPress}
+      hitSlop={8}
     >
-      <Text style={styles.logoutButtonText}>Log out</Text>
+      <Text style={styles.menuButtonText}>⋮</Text>
     </Pressable>
+  );
+}
+
+function HelpButton({
+  onPress,
+}: {
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.helpButton, pressed && styles.navButtonPressed]}
+      onPress={onPress}
+      hitSlop={8}
+    >
+      <Text style={styles.helpButtonText}>?</Text>
+    </Pressable>
+  );
+}
+
+function MenuDropdown({
+  visible,
+  onClose,
+  onLogoutPress,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onLogoutPress: () => void;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        style={styles.menuBackdrop}
+        onPress={onClose}
+      >
+        <Pressable
+          style={styles.menuDropdown}
+          onPress={() => {}}
+        >
+          <Pressable
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed && styles.menuItemPressed,
+            ]}
+            onPress={() => {
+              onLogoutPress();
+              onClose();
+            }}
+          >
+            <Text style={styles.menuItemText}>Log out</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -83,7 +150,9 @@ export function AppTopBar({
   onRefreshPress?: () => void;
   isRefreshing?: boolean;
 }) {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const logout = useAuthStore((s) => s.logout);
+  const [menuVisible, setMenuVisible] = useState(false);
 
   const handleLogout = () => {
     showConfirm('Log out?', 'You will need to sign in again to continue.', () => {
@@ -91,20 +160,32 @@ export function AppTopBar({
     });
   };
 
+  const handleRulesPress = () => {
+    navigation.navigate('Rules' as any);
+  };
+
   return (
-    <View style={styles.topBar}>
-      {showFriendsButton ? (
-        <FriendsNavButton pendingCount={pendingRequestCount} onPress={onFriendsPress} />
-      ) : (
-        <View style={styles.topBarSide} />
-      )}
-      <View style={styles.topBarActions}>
-        {onRefreshPress != null && (
-          <RefreshButton isRefreshing={isRefreshing} onPress={onRefreshPress} />
+    <>
+      <View style={styles.topBar}>
+        {showFriendsButton ? (
+          <FriendsNavButton pendingCount={pendingRequestCount} onPress={onFriendsPress} />
+        ) : (
+          <View style={styles.topBarSide} />
         )}
-        <LogoutButton onPress={handleLogout} />
+        <View style={styles.topBarActions}>
+          {onRefreshPress != null && (
+            <RefreshButton isRefreshing={isRefreshing} onPress={onRefreshPress} />
+          )}
+          <HelpButton onPress={handleRulesPress} />
+          <MenuButton onPress={() => setMenuVisible(true)} />
+        </View>
       </View>
-    </View>
+      <MenuDropdown
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        onLogoutPress={handleLogout}
+      />
+    </>
   );
 }
 
@@ -193,5 +274,67 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     letterSpacing: 0.5,
+  },
+  helpButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: COLORS.accentDim,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+  },
+  helpButtonText: {
+    color: COLORS.accent,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  menuButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuButtonText: {
+    color: COLORS.textMuted,
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 8,
+    paddingRight: 8,
+  },
+  menuDropdown: {
+    backgroundColor: COLORS.panel,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    minWidth: 140,
+    overflow: 'hidden',
+  },
+  menuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  menuItemPressed: {
+    backgroundColor: COLORS.accentDim,
+  },
+  menuItemText: {
+    color: COLORS.text,
+    fontSize: 14,
+    letterSpacing: 0.3,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
   },
 });

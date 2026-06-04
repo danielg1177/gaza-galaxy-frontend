@@ -91,13 +91,20 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const user = await apiClient.get<AuthUser>('/auth/me');
       set({ currentUser: user, token, isLoadingAuth: false });
     } catch (error) {
-      if (error instanceof ApiError) {
+      if (error instanceof ApiError && error.status === 401) {
         await AsyncStorage.removeItem('auth_token');
         await AsyncStorage.removeItem('current_user');
         set({ currentUser: null, token: null, isLoadingAuth: false });
         return;
       }
-      throw error;
+      // Non-401 errors (network down, server errors) should not clear a valid session.
+      // Fall back to the cached user so the app stays logged in.
+      const cachedUser = await AsyncStorage.getItem('current_user');
+      if (cachedUser) {
+        set({ currentUser: JSON.parse(cachedUser) as AuthUser, token, isLoadingAuth: false });
+      } else {
+        set({ isLoadingAuth: false });
+      }
     }
   },
 }));

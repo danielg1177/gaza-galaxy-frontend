@@ -17,7 +17,6 @@ import { subscribeHomeRefresh } from '../services/homeRefreshEvents';
 import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
-import { AppTopBar } from '../components/AppTopBar';
 import { APP_NAME_UPPER } from '../constants/app';
 import type { MapSize } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
@@ -601,6 +600,68 @@ export default function HomeScreen() {
   };
 
   const [isLaunching, setIsLaunching] = useState(false);
+  const [homeMenuVisible, setHomeMenuVisible] = useState(false);
+
+  const handleLogout = () => {
+    showConfirm('Log out?', 'You will need to sign in again to continue.', () => {
+      void useAuthStore.getState().logout();
+    });
+  };
+
+  const renderHomeMenuDropdown = () => (
+    <Modal
+      visible={homeMenuVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setHomeMenuVisible(false)}
+    >
+      <Pressable
+        style={styles.homeMenuModalBackdrop}
+        onPress={() => setHomeMenuVisible(false)}
+      >
+        <Pressable style={styles.homeMenuDropdown} onPress={() => {}}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.homeMenuItem,
+              pressed && styles.homeMenuItemPressed,
+            ]}
+            onPress={() => {
+              setHomeMenuVisible(false);
+              navigation.navigate('Friends');
+            }}
+          >
+            <Text style={styles.homeMenuItemText}>👥 Friends</Text>
+          </Pressable>
+          <View style={styles.homeMenuDivider} />
+          <Pressable
+            style={({ pressed }) => [
+              styles.homeMenuItem,
+              pressed && styles.homeMenuItemPressed,
+            ]}
+            onPress={() => {
+              setHomeMenuVisible(false);
+              navigation.navigate('Rules');
+            }}
+          >
+            <Text style={styles.homeMenuItemText}>📖 Rules</Text>
+          </Pressable>
+          <View style={styles.homeMenuDivider} />
+          <Pressable
+            style={({ pressed }) => [
+              styles.homeMenuItem,
+              pressed && styles.homeMenuItemPressed,
+            ]}
+            onPress={() => {
+              setHomeMenuVisible(false);
+              handleLogout();
+            }}
+          >
+            <Text style={styles.homeMenuItemText}>Log out</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
 
   const handleLaunch = () => {
     const { width, height, planetCount } = computeMapDimensions(mapSize, playerSlots.length);
@@ -793,21 +854,30 @@ export default function HomeScreen() {
   if (isCreating) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <AppTopBar
-          pendingRequestCount={pendingRequestCount}
-          onFriendsPress={() => navigation.navigate('Friends')}
-        />
+        {renderHomeMenuDropdown()}
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Pressable
-            style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-            onPress={() => setIsCreating(false)}
-          >
-            <Text style={styles.backButtonText}>← Back</Text>
-          </Pressable>
+          <View style={styles.createNavRow}>
+            <Pressable
+              style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+              onPress={() => setIsCreating(false)}
+            >
+              <Text style={styles.backButtonText}>← Back</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.createNavMenuButton,
+                pressed && styles.homeMenuButtonPressed,
+              ]}
+              onPress={() => setHomeMenuVisible(true)}
+              hitSlop={8}
+            >
+              <Text style={styles.homeMenuButtonText}>⋮</Text>
+            </Pressable>
+          </View>
 
           <View style={styles.header}>
             <Text style={styles.eyebrow}>NEW CAMPAIGN</Text>
@@ -1045,7 +1115,7 @@ export default function HomeScreen() {
                 <View style={styles.observerToggleLabels}>
                   <Text style={styles.observerToggleTitle}>Watch AI Turns</Text>
                   <Text style={styles.observerToggleSubtitle}>
-                    Pause after each AI turn to review its moves
+                    Development only: pauses after each AI turn so you can inspect behavior while training and tuning the AI. This is not a normal game mode.
                   </Text>
                 </View>
                 <Switch
@@ -1145,22 +1215,41 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <AppTopBar
-        pendingRequestCount={pendingRequestCount}
-        onFriendsPress={() => navigation.navigate('Friends')}
-        onRefreshPress={handleManualRefresh}
-        isRefreshing={isRefreshing}
-      />
+      {renderHomeMenuDropdown()}
       <View style={styles.lobbyContainer}>
         <ScrollView
           contentContainerStyle={styles.lobbyScrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.header}>
-            <Text style={styles.eyebrow}>{APP_NAME_UPPER}</Text>
-            <Text style={styles.title}>Command{'\n'}Center</Text>
-            <View style={styles.titleRule} />
-            <Text style={styles.subtitle}>Select a campaign or launch a new one.</Text>
+          <View style={styles.headerWithMenu}>
+            <View style={styles.header}>
+              <Text style={styles.eyebrow}>{APP_NAME_UPPER}</Text>
+              <Text style={styles.title}>Command{'\n'}Center</Text>
+              <View style={styles.titleRule} />
+              <Text style={styles.subtitle}>Select a campaign or launch a new one.</Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.refreshButtonBelowHeader,
+                  pressed && styles.refreshButtonBelowHeaderPressed,
+                  isRefreshing && styles.refreshButtonBelowHeaderDisabled,
+                ]}
+                onPress={handleManualRefresh}
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? (
+                  <ActivityIndicator color={COLORS.accent} size="small" />
+                ) : (
+                  <Text style={styles.refreshButtonBelowHeaderText}>Refresh</Text>
+                )}
+              </Pressable>
+            </View>
+            <Pressable
+              style={({ pressed }) => [styles.homeMenuButton, pressed && styles.homeMenuButtonPressed]}
+              onPress={() => setHomeMenuVisible(true)}
+              hitSlop={8}
+            >
+              <Text style={styles.homeMenuButtonText}>⋮</Text>
+            </Pressable>
           </View>
 
           {invites.length > 0 && (
@@ -1321,9 +1410,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 32,
   },
-  header: {
+  headerWithMenu: {
+    position: 'relative',
     marginTop: 16,
     marginBottom: 32,
+  },
+  header: {
+    flex: 1,
   },
   eyebrow: {
     color: COLORS.accent,
@@ -1599,11 +1692,23 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   backButton: {
-    marginTop: 8,
-    marginBottom: 8,
     alignSelf: 'flex-start',
     paddingVertical: 8,
     paddingRight: 12,
+  },
+  createNavRow: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  createNavMenuButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   backButtonPressed: {
     opacity: 0.7,
@@ -2059,5 +2164,85 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 3,
     textTransform: 'uppercase',
+  },
+  homeMenuButton: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeMenuButtonPressed: {
+    opacity: 0.7,
+  },
+  homeMenuButtonText: {
+    color: COLORS.textMuted,
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  homeMenuModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 56,
+    paddingRight: 24,
+  },
+  homeMenuDropdown: {
+    backgroundColor: COLORS.panel,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    minWidth: 140,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  homeMenuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  homeMenuItemPressed: {
+    backgroundColor: COLORS.accentDim,
+  },
+  homeMenuItemText: {
+    color: COLORS.text,
+    fontSize: 14,
+    letterSpacing: 0.3,
+  },
+  homeMenuDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  refreshButtonBelowHeader: {
+    marginTop: 12,
+    alignSelf: 'flex-end',
+    minWidth: 80,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: COLORS.accentDim,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshButtonBelowHeaderPressed: {
+    opacity: 0.85,
+  },
+  refreshButtonBelowHeaderDisabled: {
+    opacity: 0.7,
+  },
+  refreshButtonBelowHeaderText: {
+    color: COLORS.accent,
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
 });

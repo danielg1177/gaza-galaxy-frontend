@@ -2623,6 +2623,39 @@ export default function GameScreen() {
     }
   }, [navigation]);
 
+  const handleViewRules = useCallback(async () => {
+    setShowHeaderMenu(false);
+    setIsSavingExit(true);
+
+    const { getActiveRecord, queuedOrders: currentQueuedOrders } = useGameStore.getState();
+    const record = getActiveRecord();
+
+    if (record === null) {
+      setIsSavingExit(false);
+      return;
+    }
+
+    const asyncGameId = record.asyncGameId;
+    if (!asyncGameId) {
+      setIsSavingExit(false);
+      navigation.navigate('Rules');
+      return;
+    }
+
+    try {
+      await saveTurnProgress(asyncGameId, {
+        partialStateJson: JSON.stringify(record.state),
+        queuedOrders: currentQueuedOrders,
+      });
+      setIsSavingExit(false);
+      navigation.navigate('Rules');
+    } catch (err) {
+      console.error('[Rules Save] Failed:', err);
+      showAlert('Failed to save', 'Could not save your progress. Please try again.');
+      setIsSavingExit(false);
+    }
+  }, [navigation]);
+
   const handleBuildChipPress = (type: 'factory' | 'researchLab') => {
     if (selectedPlanet === undefined || noBuildSlotsRemaining) {
       return;
@@ -2806,6 +2839,16 @@ export default function GameScreen() {
                   }}
                 >
                   <Text style={styles.headerMenuRowText}>Report</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.headerMenuRow}
+                  disabled={isSavingExit}
+                  onPress={handleViewRules}
+                >
+                  <Text style={styles.headerMenuRowText}>📖 Rules</Text>
+                  {isSavingExit && (
+                    <ActivityIndicator size="small" color={COLORS.accent} />
+                  )}
                 </Pressable>
                 {isAsyncGame ? (
                   <Pressable

@@ -3,6 +3,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,8 +15,8 @@ import {
 import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
-import { AppTopBar } from '../components/AppTopBar';
 import { ApiError } from '../services/apiClient';
+import { useAuthStore } from '../store/authStore';
 import {
   acceptFriendRequest,
   declineFriendRequest,
@@ -73,6 +74,86 @@ export default function FriendsScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
+  const [menuVisible, setMenuVisible] = useState(false);
+
+  const handleLogout = () => {
+    showConfirm('Log out?', 'You will need to sign in again to continue.', () => {
+      void useAuthStore.getState().logout();
+    });
+  };
+
+  const renderNavMenuDropdown = () => (
+    <Modal
+      visible={menuVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setMenuVisible(false)}
+    >
+      <Pressable
+        style={styles.menuModalBackdrop}
+        onPress={() => setMenuVisible(false)}
+      >
+        <Pressable style={styles.menuDropdown} onPress={() => {}}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed && styles.menuItemPressed,
+            ]}
+            onPress={() => {
+              setMenuVisible(false);
+              navigation.navigate('Friends');
+            }}
+          >
+            <Text style={styles.menuItemText}>👥 Friends</Text>
+          </Pressable>
+          <View style={styles.menuDivider} />
+          <Pressable
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed && styles.menuItemPressed,
+            ]}
+            onPress={() => {
+              setMenuVisible(false);
+              navigation.navigate('Rules');
+            }}
+          >
+            <Text style={styles.menuItemText}>📖 Rules</Text>
+          </Pressable>
+          <View style={styles.menuDivider} />
+          <Pressable
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed && styles.menuItemPressed,
+            ]}
+            onPress={() => {
+              setMenuVisible(false);
+              handleLogout();
+            }}
+          >
+            <Text style={styles.menuItemText}>Log out</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+
+  const renderNavRow = () => (
+    <View style={styles.navRow}>
+      <Pressable
+        style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+        onPress={() => navigation.goBack()}
+      >
+        <Text style={styles.backButtonText}>← Back</Text>
+      </Pressable>
+      <Pressable
+        style={({ pressed }) => [styles.navMenuButton, pressed && styles.navMenuButtonPressed]}
+        onPress={() => setMenuVisible(true)}
+        hitSlop={8}
+      >
+        <Text style={styles.navMenuButtonText}>⋮</Text>
+      </Pressable>
+    </View>
+  );
 
   const setActionPending = (key: string, pending: boolean) => {
     setPendingActions((prev) => {
@@ -245,13 +326,12 @@ export default function FriendsScreen() {
   if (isInitialLoading) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <AppTopBar
-          pendingRequestCount={0}
-          onFriendsPress={() => navigation.navigate('Friends')}
-          showFriendsButton={false}
-        />
-        <View style={styles.centered}>
-          <ActivityIndicator color={COLORS.accent} size="large" />
+        {renderNavMenuDropdown()}
+        <View style={styles.loadingContainer}>
+          {renderNavRow()}
+          <View style={styles.centered}>
+            <ActivityIndicator color={COLORS.accent} size="large" />
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -259,11 +339,7 @@ export default function FriendsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <AppTopBar
-        pendingRequestCount={requests.length}
-        onFriendsPress={() => navigation.navigate('Friends')}
-        showFriendsButton={false}
-      />
+      {renderNavMenuDropdown()}
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -276,12 +352,7 @@ export default function FriendsScreen() {
           />
         }
       >
-        <Pressable
-          style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backButtonText}>← Back</Text>
-        </Pressable>
+        {renderNavRow()}
 
         <View style={styles.header}>
           <Text style={styles.eyebrow}>SOCIAL</Text>
@@ -474,6 +545,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BG_COLOR,
   },
+  loadingContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+  },
   centered: {
     flex: 1,
     justifyContent: 'center',
@@ -484,9 +559,66 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 32,
   },
-  backButton: {
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: 8,
     marginBottom: 8,
+  },
+  navMenuButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navMenuButtonPressed: {
+    opacity: 0.7,
+  },
+  navMenuButtonText: {
+    color: COLORS.textMuted,
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  menuModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 56,
+    paddingRight: 24,
+  },
+  menuDropdown: {
+    backgroundColor: COLORS.panel,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    minWidth: 140,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  menuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+  menuItemPressed: {
+    backgroundColor: COLORS.accentDim,
+  },
+  menuItemText: {
+    color: COLORS.text,
+    fontSize: 14,
+    letterSpacing: 0.3,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  backButton: {
     alignSelf: 'flex-start',
     paddingVertical: 8,
     paddingRight: 12,
