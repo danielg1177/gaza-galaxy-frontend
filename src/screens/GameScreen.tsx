@@ -1393,8 +1393,7 @@ export default function GameScreen() {
   const mapAreaWindowRef = useRef({ x: 0, y: 0 });
   const initialSnapGameIdRef = useRef<string | null>(null);
   const prevShowingLockScreenRef = useRef(showingLockScreen);
-  const prevShowingLockScreenBattleRef = useRef(showingLockScreen);
-  const prevHumanCombatCountRef = useRef(0);
+  const lastOpenedTurnKeyRef = useRef('');
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
 
@@ -1570,8 +1569,26 @@ export default function GameScreen() {
   useEffect(() => {
     if (humanCombatEvents.length === 0) {
       setShowBattleReportModal(false);
+      lastOpenedTurnKeyRef.current = '';
     }
   }, [humanCombatEvents]);
+
+  useEffect(() => {
+    const turnKey = `${gameState?.roundNumber ?? 0}-${localHumanPlayerId ?? ''}`;
+    if (
+      humanCombatEvents.length > 0 &&
+      !showingLockScreen &&
+      turnKey !== lastOpenedTurnKeyRef.current
+    ) {
+      setShowBattleReportModal(true);
+      lastOpenedTurnKeyRef.current = turnKey;
+    }
+  }, [
+    humanCombatEvents.length,
+    showingLockScreen,
+    gameState?.roundNumber,
+    localHumanPlayerId,
+  ]);
 
   useEffect(() => {
     if (
@@ -1581,30 +1598,6 @@ export default function GameScreen() {
       setPlanetBattleReportName(null);
     }
   }, [battlePlanetKeys, planetBattleReportName]);
-
-  useEffect(() => {
-    const wasShowing = prevShowingLockScreenBattleRef.current;
-    prevShowingLockScreenBattleRef.current = showingLockScreen;
-    if (!wasShowing || showingLockScreen) {
-      return;
-    }
-    if (humanCombatEvents.length > 0) {
-      setShowBattleReportModal(true);
-    }
-  }, [showingLockScreen, humanCombatEvents]);
-
-  // For async games there is no lock screen to dismiss, so open the battle
-  // report as soon as combat events arrive (e.g. on game load or after the
-  // opponent's turn resolves). The showingLockScreen guard ensures this does
-  // not fire for pass-and-play, where endTurn batches the archive update
-  // together with showingLockScreen: true before this effect can run.
-  useEffect(() => {
-    const prev = prevHumanCombatCountRef.current;
-    prevHumanCombatCountRef.current = humanCombatEvents.length;
-    if (prev === 0 && humanCombatEvents.length > 0 && !showingLockScreen) {
-      setShowBattleReportModal(true);
-    }
-  }, [humanCombatEvents, showingLockScreen]);
 
   const selectedPlanet = useMemo(
     () => gameState?.map.planets.find((p) => p.id === selectedPlanetId),
@@ -4063,7 +4056,7 @@ export default function GameScreen() {
 
       {isSubmittingTurn && (
         <View style={styles.submittingOverlay} pointerEvents="auto">
-          <ActivityIndicator size="large" color="#ffffff" />
+          <ActivityIndicator size="large" color={COLORS.accent} />
           <Text style={styles.submittingOverlayText}>Submitting turn…</Text>
         </View>
       )}
@@ -5069,13 +5062,13 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 100,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: BG_COLOR,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
   },
   submittingOverlayText: {
-    color: '#ffffff',
+    color: COLORS.text,
     fontSize: 16,
     fontWeight: '600',
   },

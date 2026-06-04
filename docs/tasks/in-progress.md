@@ -298,7 +298,31 @@ One task to fix the multiplayer bug where all-troop-dispatched factory planets s
 
 ---
 
+## Phase 45 — Bug Fix: Async End Turn Briefly Exposes Opponent's Full Game State
+
+**Status:** Complete (2026-06-04).
+
+One task to block `GameScreen` from rendering any resolved state (including the next player's map, planets, troops, and battle report) during the async submit window after the outgoing player taps End Turn:
+
+- ~~**Task 212**~~ — Frontend: Block GameScreen from rendering resolved turn state during async submit window *(complete 2026-06-04)*
+
+---
+
+## Phase 46 — Bug Fix: Multiple Battle Report Modals Open on Turn Start
+
+**Status:** Complete (2026-06-04).
+
+One task to consolidate the battle report auto-open into a single-fire effect and prevent duplicate modal instances from appearing when more than one opponent was fought:
+
+- ~~**Task 213**~~ — Frontend: Consolidate battle report auto-open into a single-fire effect; prevent duplicate modal opens *(complete 2026-06-04)*
+
+---
+
 ## Changelog
+- 2026-06-04: Phase 46 complete (Task 213) — replaced two competing auto-open effects with one `lastOpenedTurnKeyRef`-guarded effect; exactly one modal per turn.
+- 2026-06-04: Phase 46 added (Task 213) — multiple battle report modals open simultaneously on turn start; correlates with number of opponents fought.
+- 2026-06-04: Phase 45 complete (Task 212) — async submit overlay now fully opaque; next player's state no longer visible through it.
+- 2026-06-04: Phase 45 added (Task 212) — async end turn exposes opponent's full game state for a split second; full-screen overlay blocks resolved state during submit window.
 - 2026-06-01: Phase 44 complete (Task 211) — production now pre-runs before step-2 early-arrivals combat on round-wrap turns; `productionAlreadyRan` guard prevents double-run in step 8.
 - 2026-06-01: Phase 44 added (Task 211) — multiplayer bug: factory planet loses to 1 troop after owner sends all troops; production must run before any combat in all resolveTurn paths.
 - 2026-06-01: Phase 43 complete (Task 210) — battle report no longer flashes after ending an async multiplayer turn.

@@ -5554,3 +5554,113 @@ This ensures:
 **Estimated complexity:** Trivial — two `delete` lines guarded by `if (isAsync)`.
 
 ---
+
+## Phase 45 — Bug Fix: Async End Turn Briefly Exposes Opponent's Full Game State
+
+**Status:** Not started.
+
+**Symptom:** In async multiplayer, when the local player is the last human to take their turn in a round, tapping **End Turn** briefly reveals the next player's complete game state — their planets, troop counts, and a battle report — for a split second before the app navigates home. The outgoing player must never see another player's setup or in-progress state under any circumstances.
+
+**Root cause:**
+
+`endTurn()` in `gameStore.ts` resolves the full turn sequence locally (the human's `resolveTurn`, then `runAiTurnsUntilHuman` until the next human is current) and commits the resulting `finalState` to the Zustand store via `set()` **before** `submitTurn` fires and `shouldReturnHome` triggers navigation home. This means `GameScreen` re-renders at least once with `finalState.currentPlayerId` pointing at the *next* human player. During that render window:
+
+- Fog-of-war visibility may be computed from the wrong perspective if any visibility logic keys off `currentPlayerId` rather than the stable `localHumanPlayerId`.
+- `playerBattleArchiveByPlayerId` for the next player's entry may be populated, potentially triggering the async auto-open battle report effect for their events.
+- The map state, planet troops, and building slots all reflect the fully-resolved new turn — visible to the outgoing player before they navigate away.
+
+The exposure lasts only until `submitTurn` resolves and `shouldReturnHome: true` causes navigation, but it is clearly visible to the user and constitutes a privacy violation.
+
+**Fix overview:**
+
+In async mode, `GameScreen` must never render any resolved game state after the outgoing player taps End Turn. The approach is to render a full-screen opaque blocking overlay the instant `endTurn()` begins — preventing any map or state from being visible — and keep it visible until navigation home completes. A dedicated `isEndingTurn` store flag controls the overlay.
+
+---
+
+### Task 212 — Frontend: Block GameScreen from rendering resolved turn state during async submit window
+
+**Files:** `frontend/src/store/gameStore.ts`, `frontend/src/screens/GameScreen.tsx`
+
+**Requirements:**
+
+1. **Add `isEndingTurn: boolean` to the game store** (initial value `false`). Set it to `true` at the very top of `endTurn()` in async mode — before `resolveTurn` is called and before any state is mutated. Clear it to `false` on both paths:
+   - Success path: clear before (or as part of) setting `shouldReturnHome: true`.
+   - Error/rollback path: clear before showing the error alert so the player is returned to a usable game screen.
+
+2. **Add a full-screen opaque overlay in `GameScreen`** that renders whenever `isEndingTurn === true`. The overlay must:
+   - Fill the entire screen with the app background color (use `StyleSheet.absoluteFillObject` or equivalent).
+   - Sit above all map layers, planet panels, fleet arrows, battle report, and every other UI element (`zIndex` must exceed all existing layers).
+   - Optionally show a centered `ActivityIndicator` and/or a muted "Ending turn…" label.
+   - Accept no touch events (`pointerEvents="none"` is acceptable since nothing should be interactive beneath it anyway).
+
+3. **Add a guard in the `humanCombatEvents` auto-open effect**: `if (isEndingTurn) return;` as the first line of the effect body. This prevents the battle report from auto-opening during the submit window even if archive population races with the overlay render.
+
+4. The overlay must be rendered whenever `isEndingTurn === true` — it must not be excluded by any other condition such as `showingLockScreen`, `isSubmittingTurn`, or `shouldReturnHome`.
+
+5. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- 2-player async game, no AI: send a fleet, tap End Turn. The overlay must appear immediately and remain until `HomeScreen` is shown. No map content, planet details, battle report, or the next player's state must be visible at any point after the tap.
+- 2-player async game with AI players: same test — overlay covers the entire AI turn resolution window.
+- Backend returns a non-2xx on submit: overlay clears, error alert appears, player is back on their own unmodified game screen and can retry.
+- Pass-and-play and solo games: `isEndingTurn` remains `false` throughout; lock screen and battle report behaviour unchanged.
+
+---
+
+## Phase 46 — Bug Fix: Multiple Battle Report Modals Open on Turn Start
+
+**Status:** Not started.
+
+**Symptom:** When a player starts their turn (pass-and-play or async multiplayer), multiple separate battle report modals appear simultaneously — one for each opponent fought in the previous round. The player must close each one individually. The number of modals correlates directly with the number of distinct opponents fought.
+
+**Root cause (to be confirmed during investigation):**
+
+The auto-open logic in `GameScreen` contains at least two separate `useEffect` hooks that can both call `setShowBattleReportModal(true)`:
+
+1. **Lock-screen transition effect** — fires when `showingLockScreen` transitions `true → false` and `humanCombatEvents.length > 0`.
+2. **Async auto-open effect** (added 2026-06-01) — fires when `humanCombatEvents.length` transitions `0 → > 0` while `showingLockScreen === false`.
+
+If both conditions are satisfied simultaneously (e.g. on async game load, or when the archive is built and the lock screen is already dismissed), both effects may fire in the same React render cycle — calling `setShowBattleReportModal(true)` multiple times.
+
+A secondary hypothesis: `playerBattleArchiveByPlayerId[localHumanPlayerId]` is populated in **multiple incremental `set()` calls** — once per opponent fought — rather than in one atomic write. Each incremental write increments `humanCombatEvents.length`, potentially triggering the auto-open effect once per opponent.
+
+A third hypothesis: the battle report component (`setShowBattleReportModal`) does not de-duplicate opens — calling it with `true` when already open pushes a new modal instance onto a stack rather than being a no-op.
+
+**Fix overview:**
+
+1. Consolidate all auto-open triggers into a **single unified effect** guarded by a `useRef` that tracks the last turn for which the modal was opened — ensuring it fires at most once per turn.
+2. Verify that `playerBattleArchiveByPlayerId[localHumanPlayerId]` is always written in a single atomic `set()` call across all code paths (`endTurn`, `loadGame`, `loadAsyncGame`).
+3. Add a de-duplication guard to the battle report open call so a second `setShowBattleReportModal(true)` when the modal is already visible is a strict no-op.
+
+---
+
+### Task 213 — Frontend: Consolidate battle report auto-open into a single-fire effect; prevent duplicate modal opens
+
+**Files:** `frontend/src/screens/GameScreen.tsx`, `frontend/src/store/gameStore.ts`
+
+**Requirements:**
+
+1. **Audit all `setShowBattleReportModal(true)` call sites** in `GameScreen.tsx` (and any related battle report open calls). List every `useEffect` or event handler that can trigger an open, and document the condition under which each fires.
+
+2. **Replace all auto-open effects with a single unified effect.** The new effect must:
+   - Depend on `humanCombatEvents.length` and a stable turn-identity key such as `` `${roundNumber}-${currentPlayerId}` `` (or whichever fields uniquely identify "this player's current turn").
+   - Use a `useRef<string>` (`lastOpenedTurnKey`) to track the last turn key for which the modal was opened.
+   - Open the battle report **only when** `humanCombatEvents.length > 0` AND the current turn key differs from `lastOpenedTurnKey.current` AND `isEndingTurn === false`.
+   - After opening, set `lastOpenedTurnKey.current` to the current turn key.
+   - This guarantees the modal opens exactly once per turn, regardless of how many render cycles or incremental state writes occur.
+
+3. **Verify atomic archive population:** Trace all code paths that write to `playerBattleArchiveByPlayerId[localHumanPlayerId]` — in `endTurn()`, `loadGame()`, and `loadAsyncGame()`. Confirm each path performs a single `set()` write. If any path writes incrementally across multiple `set()` calls, consolidate into one.
+
+4. **Add a no-op guard at the call site**: wherever `setShowBattleReportModal(true)` is called, check `if (showBattleReportModal) return;` first (or an equivalent guard inside the setter logic) so a redundant open call cannot push a new modal instance.
+
+5. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- 3-player pass-and-play game where the local player fought 2 opponents in the same round: at turn start, exactly **one** battle report modal opens. Dismissing it shows the game map with no additional modals queued.
+- 2-player async game with combat in the previous round: at turn start (after tapping "Start Turn" on the lock screen), exactly **one** battle report opens.
+- Turns with no combat: the battle report modal does not open at all.
+- Exit and re-enter a solo/pass-and-play game with a pending turn report (Phase 38 path): the modal opens exactly once.
+
+---

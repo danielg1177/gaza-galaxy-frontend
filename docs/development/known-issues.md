@@ -2,6 +2,26 @@
 
 ## Open Issues
 
+### ~~Async end turn exposes opponent's full game state for a split second~~ (2026-06-04, resolved 2026-06-04)
+
+**Symptom:** In async multiplayer, when the local player is the last human to take their turn in a round, tapping **End Turn** briefly shows the next player's complete game state — their planets, troop counts, buildings, and a battle report — before the app navigates home.
+
+**Root cause:** The existing submit overlay (`isSubmittingTurn`) was semi-transparent (`rgba(0,0,0,0.65)`), allowing the resolved map content to be read through the 35% gap.
+
+**Fix (Phase 45, Task 212):** Changed `submittingOverlay.backgroundColor` from `'rgba(0, 0, 0, 0.65)'` to `BG_COLOR` (fully opaque cream). Updated spinner and label colors to `COLORS.accent` / `COLORS.text` for readability against the light background.
+
+---
+
+### ~~Multiple battle report modals open simultaneously on turn start~~ (2026-06-04, resolved 2026-06-04)
+
+**Symptom:** When starting a turn in a multiplayer game, multiple battle report modals opened simultaneously — one per opponent fought in the previous round. Each had to be closed individually.
+
+**Root cause:** Two separate `useEffect` hooks both called `setShowBattleReportModal(true)`: the lock-screen-transition effect and the async auto-open effect (added 2026-06-01). Both could fire in the same render cycle.
+
+**Fix (Phase 46, Task 213):** Replaced both effects with a single unified effect guarded by `lastOpenedTurnKeyRef` (a `useRef<string>`). The effect computes a turn key (`roundNumber-localHumanPlayerId`) and opens the modal only when events are present, the lock screen is dismissed, and the key differs from the last opened key — firing exactly once per turn. The close-when-empty effect also resets the ref so each new turn re-arms correctly.
+
+---
+
 ### ~~Battle report did not auto-open at the start of an async turn~~ — fixed 2026-06-01
 
 ~~**Symptom:** In async multiplayer, when a player opened their turn after the opponent submitted, the battle report modal never appeared automatically even when there were combat events. The fight icons showed on the map and the report was accessible via ⋮ menu, but it did not auto-open.~~
@@ -268,6 +288,10 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-06-04: Resolved multiple battle report modals on turn start — unified single-fire effect with `lastOpenedTurnKeyRef` (Phase 46, Task 213).
+- 2026-06-04: Added open issue — multiple battle report modals on turn start (Phase 46, Task 213).
+- 2026-06-04: Resolved async end turn state exposure — submit overlay now fully opaque (Phase 45, Task 212).
+- 2026-06-04: Added open issue — async end turn exposes opponent's game state (Phase 45, Task 212).
 - 2026-06-03: Resolved fleet dispatch from 0-troop planet — modal no longer defaults to 1 ship or allows Confirm to queue when `modalMaxShips === 0`.
 - 2026-06-01: Resolved battle report flash after async End Turn (Phase 43, Task 210).
 - 2026-06-01: Fixed intermittent silent End Turn failure — wrapped `runAiTurnsUntilHuman` in try/catch in `gameStore.ts` `endTurn()`.
