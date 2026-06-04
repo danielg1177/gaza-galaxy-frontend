@@ -13,7 +13,7 @@ Fleet transit timing and fleet object construction. Used by the turn engine when
 | `BASE_FLEET_RANGE_CLICKS` | 11 | Base maximum click distance a fleet may be dispatched (tech level 0) |
 | `BASE_FLEET_SPEED_CLICKS_PER_TURN` | 5 | Base fleet travel speed in clicks per turn (tech level 0) |
 | `RANGE_CLICKS_PER_TECH_LEVEL` | 1 | Additional range clicks per tech level |
-| `SPEED_CLICKS_PER_TECH_LEVEL` | 0.5 | Additional speed clicks per turn per tech level |
+| `SPEED_CLICKS_PER_TECH_LEVEL` | 1 | Additional speed clicks per turn per tech level |
 
 ## Public API
 
@@ -47,7 +47,7 @@ Pure function; no RNG.
 Returns fleet travel speed (clicks per turn) for a player at the given tech level:
 
 - `BASE_FLEET_SPEED_CLICKS_PER_TURN + techLevel × SPEED_CLICKS_PER_TECH_LEVEL`
-- Example: tech 0 → 5; tech 5 → 7.5; tech 15 → 12.5
+- Example: tech 0 → 5; tech 5 → 10; tech 15 → 20
 
 Pure function; no RNG.
 
