@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { PlatformSlider } from '../components/PlatformSlider';
-import Svg, { G, Line, Polygon, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, G, Line, Polygon, Text as SvgText } from 'react-native-svg';
 import Animated, {
   runOnJS,
   runOnUI,
@@ -889,6 +889,40 @@ function findFleetAtMapCoords(
   return best;
 }
 
+function BoxSelectToggleIcon({
+  variant,
+  color,
+}: {
+  variant: 'select' | 'target';
+  color: string;
+}) {
+  const stroke = { stroke: color, strokeWidth: 2, strokeLinecap: 'round' as const };
+  if (variant === 'target') {
+    return (
+      <Svg width={22} height={22} viewBox="0 0 24 24">
+        <Line x1="12" y1="3" x2="12" y2="7" {...stroke} />
+        <Line x1="12" y1="17" x2="12" y2="21" {...stroke} />
+        <Line x1="3" y1="12" x2="7" y2="12" {...stroke} />
+        <Line x1="17" y1="12" x2="21" y2="12" {...stroke} />
+        <Circle cx="12" cy="12" r="4.5" fill="none" {...stroke} />
+      </Svg>
+    );
+  }
+  const corner = 6;
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24">
+      <Line x1="5" y1="5" x2="5" y2={5 + corner} {...stroke} />
+      <Line x1="5" y1="5" x2={5 + corner} y2="5" {...stroke} />
+      <Line x1="19" y1="5" x2="19" y2={5 + corner} {...stroke} />
+      <Line x1="19" y1="5" x2={19 - corner} y2="5" {...stroke} />
+      <Line x1="5" y1="19" x2="5" y2={19 - corner} {...stroke} />
+      <Line x1="5" y1="19" x2={5 + corner} y2="19" {...stroke} />
+      <Line x1="19" y1="19" x2="19" y2={19 - corner} {...stroke} />
+      <Line x1="19" y1="19" x2={19 - corner} y2="19" {...stroke} />
+    </Svg>
+  );
+}
+
 function DragLine({
   startX,
   startY,
@@ -977,6 +1011,7 @@ function PlanetNode({
   isOwned,
   isSelected,
   isDragOrigin,
+  isBoxSelected,
   adjustedShipCount,
   hadBattleThisTurn,
 }: {
@@ -985,6 +1020,7 @@ function PlanetNode({
   isOwned: boolean;
   isSelected: boolean;
   isDragOrigin: boolean;
+  isBoxSelected: boolean;
   adjustedShipCount: number;
   hadBattleThisTurn: boolean;
 }) {
@@ -1100,6 +1136,21 @@ function PlanetNode({
         >
           🔥
         </Text>
+      )}
+      {isBoxSelected && (
+        <View
+          style={{
+            position: 'absolute',
+            left: circleLeft - 4,
+            top: circleTop - 4,
+            width: size + 8,
+            height: size + 8,
+            borderRadius: (size + 8) / 2,
+            borderWidth: 2,
+            borderColor: '#00c9d4',
+            backgroundColor: 'transparent',
+          }}
+        />
       )}
     </>
   );
@@ -1270,6 +1321,7 @@ export default function GameScreen() {
   const confirmPendingFleet = useGameStore((s) => s.confirmPendingFleet);
   const cancelQueuedOrder = useGameStore((s) => s.cancelQueuedOrder);
   const updateQueuedOrder = useGameStore((s) => s.updateQueuedOrder);
+  const queueOrder = useGameStore((s) => s.queueOrder);
   const endTurn = useGameStore((s) => s.endTurn);
   const queueBuildOrder = useGameStore((s) => s.queueBuildOrder);
   const cancelBuildOrder = useGameStore((s) => s.cancelBuildOrder);
@@ -1345,6 +1397,14 @@ export default function GameScreen() {
   const prevHumanCombatCountRef = useRef(0);
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
+
+  // Box-select state
+  const [boxSelectMode, setBoxSelectMode] = useState(false);
+  // 'idle' = mode on but not drawing; 'drawing' = drag in progress; 'awaiting_destination' = box released, waiting for destination tap
+  const [boxSelectPhase, setBoxSelectPhase] = useState<'idle' | 'drawing' | 'awaiting_destination'>('idle');
+  const [boxSelectRect, setBoxSelectRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [boxSelectedPlanetIds, setBoxSelectedPlanetIds] = useState<string[]>([]);
+  const [boxSelectTooFarWarning, setBoxSelectTooFarWarning] = useState(false);
 
   useEffect(() => {
     if (gameState === null) {
@@ -1930,6 +1990,15 @@ export default function GameScreen() {
   const mapHeightSV = useSharedValue(1);
   const isFleetDragging = useSharedValue(false);
 
+  // Box-select shared values (accessible from gesture worklets)
+  const isBoxSelectModeSV = useSharedValue(false);
+  // true only while the finger is actively drawing the selection rectangle
+  const isBoxSelecting = useSharedValue(false);
+  // true once the box is released and we're waiting for a destination tap
+  const isBoxSelectAwaitingDestSV = useSharedValue(false);
+  const boxSelectStartX = useSharedValue(0);
+  const boxSelectStartY = useSharedValue(0);
+
   const measureMapArea = useCallback(() => {
     mapAreaRef.current?.measureInWindow((x, y) => {
       mapAreaWindowRef.current = { x, y };
@@ -1948,6 +2017,14 @@ export default function GameScreen() {
     const timer = setTimeout(() => setOutOfRangeMessage(false), 1500);
     return () => clearTimeout(timer);
   }, [outOfRangeMessage]);
+
+  useEffect(() => {
+    if (!boxSelectTooFarWarning) {
+      return;
+    }
+    const timer = setTimeout(() => setBoxSelectTooFarWarning(false), 2000);
+    return () => clearTimeout(timer);
+  }, [boxSelectTooFarWarning]);
 
   useEffect(() => {
     if (buildError === null) {
@@ -2114,10 +2191,9 @@ export default function GameScreen() {
       const dty = event.translationY - panPrevTranslationY.value;
       panPrevTranslationX.value = event.translationX;
       panPrevTranslationY.value = event.translationY;
-      // Bail out without writing translateX while a fleet drag or pinch is
-      // active (pinch owns translate during zoom; allowing pan to write
-      // simultaneously is the primary cause of the zoom-jump bug).
-      if (isFleetDragging.value || isPinching.value) {
+      // Bail out without writing translateX while a fleet drag, pinch, or
+      // box-select draw is active.
+      if (isFleetDragging.value || isPinching.value || isBoxSelecting.value) {
         return;
       }
       const clamped = clampTranslation(
@@ -2169,13 +2245,169 @@ export default function GameScreen() {
     })();
   }, []);
 
+  const exitBoxSelect = useCallback(() => {
+    setBoxSelectMode(false);
+    setBoxSelectPhase('idle');
+    setBoxSelectRect(null);
+    setBoxSelectedPlanetIds([]);
+    runOnUI(() => {
+      'worklet';
+      isBoxSelectModeSV.value = false;
+      isBoxSelecting.value = false;
+      isBoxSelectAwaitingDestSV.value = false;
+    })();
+  }, [isBoxSelectModeSV, isBoxSelecting, isBoxSelectAwaitingDestSV]);
+
+  const handleBoxSelectEnd = useCallback(
+    (x1: number, y1: number, x2: number, y2: number, s: number, tx: number, ty: number) => {
+      if (gameState === null || localHumanPlayerId === undefined) {
+        setBoxSelectPhase('idle');
+        setBoxSelectRect(null);
+        return;
+      }
+
+      const mapCorner1 = screenToMapCoords(x1, y1, s, tx, ty);
+      const mapCorner2 = screenToMapCoords(x2, y2, s, tx, ty);
+      const mapLeft = Math.min(mapCorner1.x, mapCorner2.x);
+      const mapRight = Math.max(mapCorner1.x, mapCorner2.x);
+      const mapTop = Math.min(mapCorner1.y, mapCorner2.y);
+      const mapBottom = Math.max(mapCorner1.y, mapCorner2.y);
+
+      const selectedIds: string[] = [];
+      for (const planet of gameState.map.planets) {
+        if (planet.owner !== localHumanPlayerId) {
+          continue;
+        }
+        const center = planetCenterPx(planet);
+        if (
+          center.x >= mapLeft &&
+          center.x <= mapRight &&
+          center.y >= mapTop &&
+          center.y <= mapBottom
+        ) {
+          const hasQueuedOrder = queuedOrders.some(
+            (o) => !isBuildOrder(o) && o.fromPlanetId === planet.id,
+          );
+          if (planet.shipCount > 0 || hasQueuedOrder) {
+            selectedIds.push(planet.id);
+          }
+        }
+      }
+
+      setBoxSelectRect(null);
+
+      if (selectedIds.length === 0) {
+        setBoxSelectPhase('idle');
+      } else {
+        setBoxSelectedPlanetIds(selectedIds);
+        setBoxSelectPhase('awaiting_destination');
+        runOnUI(() => {
+          'worklet';
+          isBoxSelectAwaitingDestSV.value = true;
+          isBoxSelecting.value = false;
+        })();
+      }
+    },
+    [gameState, localHumanPlayerId, queuedOrders, isBoxSelectAwaitingDestSV, isBoxSelecting],
+  );
+
+  const handleBoxSelectSend = useCallback(
+    (destinationPlanetId: string) => {
+      if (gameState === null || humanPlayer === undefined || boxSelectedPlanetIds.length === 0) {
+        setBoxSelectPhase('idle');
+        setBoxSelectedPlanetIds([]);
+        runOnUI(() => {
+          'worklet';
+          isBoxSelectAwaitingDestSV.value = false;
+        })();
+        return;
+      }
+
+      const destPlanet = gameState.map.planets.find((p) => p.id === destinationPlanetId);
+      if (destPlanet === undefined) {
+        setBoxSelectPhase('idle');
+        setBoxSelectedPlanetIds([]);
+        runOnUI(() => {
+          'worklet';
+          isBoxSelectAwaitingDestSV.value = false;
+        })();
+        return;
+      }
+
+      const range = effectiveRange(humanPlayer.techLevel);
+      let someOutOfRange = false;
+
+      // Collect all order indices to cancel from in-range selected planets
+      const allIndicesToCancel: number[] = [];
+      const planetsInRange: string[] = [];
+
+      for (const planetId of boxSelectedPlanetIds) {
+        if (planetId === destinationPlanetId) {
+          continue;
+        }
+        const planet = gameState.map.planets.find((p) => p.id === planetId);
+        if (planet === undefined) {
+          continue;
+        }
+        if (!isInRange(planet.position, destPlanet.position, range)) {
+          someOutOfRange = true;
+          continue;
+        }
+        planetsInRange.push(planetId);
+        // Collect existing queued order indices from this planet to cancel/redirect
+        queuedOrders.forEach((o, i) => {
+          if (!isBuildOrder(o) && o.fromPlanetId === planetId) {
+            allIndicesToCancel.push(i);
+          }
+        });
+      }
+
+      // Cancel in descending index order so lower indices remain valid
+      allIndicesToCancel.sort((a, b) => b - a);
+      for (const idx of allIndicesToCancel) {
+        cancelQueuedOrder(idx);
+      }
+
+      // Queue all available troops from each in-range planet to the destination
+      for (const planetId of planetsInRange) {
+        const planet = gameState.map.planets.find((p) => p.id === planetId);
+        if (planet === undefined || planet.shipCount <= 0) {
+          continue;
+        }
+        queueOrder({ fromPlanetId: planetId, toPlanetId: destinationPlanetId, shipCount: planet.shipCount });
+      }
+
+      if (someOutOfRange) {
+        setBoxSelectTooFarWarning(true);
+      }
+
+      // Reset to idle (keep mode ON so user can make another selection)
+      setBoxSelectPhase('idle');
+      setBoxSelectedPlanetIds([]);
+      runOnUI(() => {
+        'worklet';
+        isBoxSelectAwaitingDestSV.value = false;
+      })();
+    },
+    [
+      gameState,
+      humanPlayer,
+      boxSelectedPlanetIds,
+      queuedOrders,
+      cancelQueuedOrder,
+      queueOrder,
+      isBoxSelectAwaitingDestSV,
+    ],
+  );
+
   const handleDragStart = useCallback(
     (localX: number, localY: number, s: number, tx: number, ty: number) => {
       if (
         isReadOnly ||
         showingAiObserver ||
         gameState === null ||
-        localHumanPlayerId === undefined
+        localHumanPlayerId === undefined ||
+        boxSelectMode
       ) {
         return;
       }
@@ -2199,7 +2431,7 @@ export default function GameScreen() {
         isFleetDragging.value = true;
       })();
     },
-    [isReadOnly, showingAiObserver, gameState, localHumanPlayerId, measureMapArea],
+    [isReadOnly, showingAiObserver, gameState, localHumanPlayerId, measureMapArea, boxSelectMode],
   );
 
   const handleFleetPanUpdate = useCallback(
@@ -2230,7 +2462,7 @@ export default function GameScreen() {
 
   const handleMeasureDragStart = useCallback(
     (localX: number, localY: number, s: number, tx: number, ty: number) => {
-      if (showingAiObserver || gameState === null || localHumanPlayerId === undefined) {
+      if (showingAiObserver || gameState === null || localHumanPlayerId === undefined || boxSelectMode) {
         return;
       }
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
@@ -2253,7 +2485,7 @@ export default function GameScreen() {
         isFleetDragging.value = true;
       })();
     },
-    [showingAiObserver, gameState, localHumanPlayerId, measureMapArea],
+    [showingAiObserver, gameState, localHumanPlayerId, measureMapArea, boxSelectMode],
   );
 
   const handleMeasureDragUpdate = useCallback(
@@ -2377,10 +2609,14 @@ export default function GameScreen() {
           shipCount: existingOrder.shipCount,
         });
       } else {
+        const shipsAlreadyQueuedFromOrigin = queuedOrders
+          .filter((o) => !isBuildOrder(o) && o.fromPlanetId === fromPlanetId)
+          .reduce((sum, o) => sum + o.shipCount, 0);
+        const maxShips = Math.max(0, originPlanet.shipCount - shipsAlreadyQueuedFromOrigin);
         setPendingFleet({
           fromPlanetId,
           toPlanetId: destPlanet.id,
-          shipCount: 1,
+          shipCount: Math.min(1, maxShips),
         });
       }
     },
@@ -2398,6 +2634,30 @@ export default function GameScreen() {
 
   const handleMapTap = useCallback(
     (localX: number, localY: number, s: number, tx: number, ty: number, absX: number, absY: number) => {
+      // Don't process taps while the box is being drawn
+      if (boxSelectPhase === 'drawing') {
+        return;
+      }
+
+      // When awaiting a destination after box-select, route the tap to box select logic
+      if (boxSelectPhase === 'awaiting_destination') {
+        const store = useGameStore.getState();
+        const record = store.getActiveRecord();
+        if (record === null) {
+          exitBoxSelect();
+          return;
+        }
+        const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+        const planet = findPlanetAtMapCoords(mapPoint.x, mapPoint.y, record.state.map.planets, s);
+        if (planet === undefined) {
+          // Tap on empty space — deselect and exit box select
+          exitBoxSelect();
+          return;
+        }
+        handleBoxSelectSend(planet.id);
+        return;
+      }
+
       const store = useGameStore.getState();
       const record = store.getActiveRecord();
       if (record === null) {
@@ -2464,7 +2724,7 @@ export default function GameScreen() {
       store.selectPlanet(planet.id);
       setPlanetBattleReportName(null);
     },
-    [humanCombatByPlanetKey, setPlanetBattleReportName, setFleetTooltip],
+    [humanCombatByPlanetKey, setPlanetBattleReportName, setFleetTooltip, boxSelectPhase, exitBoxSelect, handleBoxSelectSend],
   );
 
   const planetTap = Gesture.Tap()
@@ -2529,23 +2789,72 @@ export default function GameScreen() {
       runOnJS(handleMeasureDragFinalize)();
     });
 
+  // Box-select drag: draws the selection rectangle when box select mode is active.
+  // Uses minDistance(5) so it activates before the pan (minDistance 8), ensuring
+  // isBoxSelecting is set before pan.onUpdate can run.
+  const boxSelectDrag = Gesture.Pan()
+    .minDistance(5)
+    .onStart((event) => {
+      // Only activate when mode is on and not already awaiting a destination tap
+      if (!isBoxSelectModeSV.value || isBoxSelectAwaitingDestSV.value) {
+        return;
+      }
+      isBoxSelecting.value = true;
+      boxSelectStartX.value = event.x;
+      boxSelectStartY.value = event.y;
+      runOnJS(setBoxSelectRect)({ x1: event.x, y1: event.y, x2: event.x, y2: event.y });
+      runOnJS(setBoxSelectPhase)('drawing');
+    })
+    .onUpdate((event) => {
+      if (!isBoxSelecting.value) {
+        return;
+      }
+      runOnJS(setBoxSelectRect)({
+        x1: boxSelectStartX.value,
+        y1: boxSelectStartY.value,
+        x2: event.x,
+        y2: event.y,
+      });
+    })
+    .onEnd((event) => {
+      if (!isBoxSelecting.value) {
+        return;
+      }
+      runOnJS(handleBoxSelectEnd)(
+        boxSelectStartX.value,
+        boxSelectStartY.value,
+        event.x,
+        event.y,
+        scale.value,
+        translateX.value,
+        translateY.value,
+      );
+    })
+    .onFinalize(() => {
+      // Only clear isBoxSelecting; awaiting-dest flag is managed by handleBoxSelectEnd
+      if (!isBoxSelectAwaitingDestSV.value) {
+        isBoxSelecting.value = false;
+      }
+    });
+
   const composed = Gesture.Simultaneous(pinch, pan);
   // Last gesture has highest priority — planetTap must win stationary taps over fleetDrag.
   const planetFleet = Gesture.Exclusive(fleetDrag, planetTap);
-  const mapGesture = Gesture.Simultaneous(composed, planetFleet, measureDrag);
+  const mapGesture = Gesture.Simultaneous(composed, planetFleet, measureDrag, boxSelectDrag);
 
   const handleConfirmFleet = () => {
     if (pendingFleet === null) {
       return;
     }
 
-    const shipCount = isEditingFleetShipCount
+    const rawShipCount = isEditingFleetShipCount
       ? parseFleetShipCountFromDraft(
           fleetShipCountDraft,
           modalMaxShips,
           pendingFleet.shipCount,
         )
       : pendingFleet.shipCount;
+    const shipCount = Math.min(modalMaxShips, Math.max(0, rawShipCount));
 
     setIsEditingFleetShipCount(false);
     setFleetShipCountDraft('');
@@ -2898,6 +3207,30 @@ export default function GameScreen() {
             <Text style={styles.outOfRangeText}>Out of range</Text>
           </View>
         )}
+        {boxSelectTooFarWarning && (
+          <View style={styles.outOfRangeOverlay} pointerEvents="none">
+            <Text style={styles.outOfRangeText}>Too far for some troops</Text>
+          </View>
+        )}
+        {boxSelectRect !== null && boxSelectPhase === 'drawing' && (
+          <View
+            style={[
+              styles.boxSelectRect,
+              {
+                left: Math.min(boxSelectRect.x1, boxSelectRect.x2),
+                top: Math.min(boxSelectRect.y1, boxSelectRect.y2),
+                width: Math.abs(boxSelectRect.x2 - boxSelectRect.x1),
+                height: Math.abs(boxSelectRect.y2 - boxSelectRect.y1),
+              },
+            ]}
+            pointerEvents="none"
+          />
+        )}
+        {boxSelectPhase === 'awaiting_destination' && (
+          <View style={styles.boxSelectHintOverlay} pointerEvents="none">
+            <Text style={styles.boxSelectHintText}>Tap destination planet</Text>
+          </View>
+        )}
         <GestureDetector gesture={mapGesture}>
           <View style={styles.mapGestureHost}>
             <Animated.View
@@ -2923,6 +3256,7 @@ export default function GameScreen() {
                   isOwned={planet.owner === effectiveViewingPlayerId}
                   isSelected={planet.id === selectedPlanetId}
                   isDragOrigin={planet.id === dragOriginPlanetId}
+                  isBoxSelected={boxSelectedPlanetIds.includes(planet.id)}
                   adjustedShipCount={Math.max(
                     0,
                     planet.shipCount - (queuedShipsPerPlanet[planet.id] ?? 0),
@@ -3017,7 +3351,7 @@ export default function GameScreen() {
                     }}
                     disabled={pendingFleet === null}
                   >
-                    <Text style={styles.stepperValue}>{pendingFleet?.shipCount ?? 1}</Text>
+                    <Text style={styles.stepperValue}>{pendingFleet?.shipCount ?? 0}</Text>
                   </Pressable>
                 )}
                 <Pressable
@@ -3623,21 +3957,58 @@ export default function GameScreen() {
         status === 'active' &&
         !isKnockoutTurn &&
         !isReadOnly && (
-        <Pressable
-          style={[
-            styles.endTurnButton,
-            { bottom: insets.bottom + 16 },
-            isSubmittingTurn && styles.endTurnButtonDisabled,
-          ]}
-          disabled={isSubmittingTurn}
-          onPress={() => {
-            cancelDrag();
-            endTurn();
-            dismissPlanetDetail();
-          }}
-        >
-          <Text style={styles.endTurnButtonText}>End Turn</Text>
-        </Pressable>
+        <>
+          <Pressable
+            style={[
+              styles.endTurnButton,
+              { bottom: insets.bottom + 16 },
+              isSubmittingTurn && styles.endTurnButtonDisabled,
+            ]}
+            disabled={isSubmittingTurn}
+            onPress={() => {
+              cancelDrag();
+              exitBoxSelect();
+              endTurn();
+              dismissPlanetDetail();
+            }}
+          >
+            <Text style={styles.endTurnButtonText}>End Turn</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.boxSelectToggle,
+              { bottom: insets.bottom + 16 },
+              boxSelectMode && styles.boxSelectToggleActive,
+            ]}
+            accessibilityLabel={
+              boxSelectPhase === 'awaiting_destination'
+                ? 'Box select: tap destination planet'
+                : boxSelectMode
+                  ? 'Turn off box select'
+                  : 'Turn on box select'
+            }
+            accessibilityRole="button"
+            onPress={() => {
+              if (boxSelectMode) {
+                exitBoxSelect();
+              } else {
+                setBoxSelectMode(true);
+                setBoxSelectPhase('idle');
+                runOnUI(() => {
+                  'worklet';
+                  isBoxSelectModeSV.value = true;
+                  isBoxSelecting.value = false;
+                  isBoxSelectAwaitingDestSV.value = false;
+                })();
+              }
+            }}
+          >
+            <BoxSelectToggleIcon
+              variant={boxSelectPhase === 'awaiting_destination' ? 'target' : 'select'}
+              color={boxSelectMode ? '#e0f7f9' : COLORS.text}
+            />
+          </Pressable>
+        </>
       )}
 
       {showingAiObserver && (
@@ -4145,6 +4516,50 @@ const styles = StyleSheet.create({
   },
   endTurnButtonDisabled: {
     opacity: 0.5,
+  },
+  boxSelectToggle: {
+    position: 'absolute',
+    left: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  boxSelectToggleActive: {
+    backgroundColor: '#007a84',
+    borderColor: '#00c9d4',
+  },
+  boxSelectRect: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: '#00c9d4',
+    backgroundColor: 'rgba(0, 201, 212, 0.08)',
+    zIndex: 20,
+  },
+  boxSelectHintOverlay: {
+    position: 'absolute',
+    bottom: 80,
+    alignSelf: 'center',
+    left: 16,
+    right: 16,
+    alignItems: 'center',
+    zIndex: 20,
+    pointerEvents: 'none',
+  } as const,
+  boxSelectHintText: {
+    color: '#00c9d4',
+    fontSize: 14,
+    fontWeight: '600',
+    backgroundColor: 'rgba(20, 18, 40, 0.65)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   headerMenuTrigger: {
     position: 'absolute',

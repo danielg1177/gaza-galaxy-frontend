@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Fleet dispatch from 0-troop planet
+**Completed:** 2026-06-03
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/development/known-issues.md`, `docs/systems/movement.md`, `docs/tasks/completed.md`
+**Notes:** New drag dispatch sets initial ship count to `min(1, garrison − queued)` instead of hardcoded 1; Confirm clamps to `modalMaxShips`. Dragging from a planet with 0 available troops opens the modal at 0; + / **All** stay disabled and Confirm shows **Cancel Order**.
+
+---
+
 ## Restore "Watch AI Turns" on new-game setup
 **Completed:** 2026-06-03
 **Files modified:** `src/screens/HomeScreen.tsx`, `docs/development/current-state.md`, `docs/development/known-issues.md`, `docs/tasks/completed.md`

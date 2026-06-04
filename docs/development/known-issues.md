@@ -268,6 +268,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-06-03: Resolved fleet dispatch from 0-troop planet — modal no longer defaults to 1 ship or allows Confirm to queue when `modalMaxShips === 0`.
 - 2026-06-01: Resolved battle report flash after async End Turn (Phase 43, Task 210).
 - 2026-06-01: Fixed intermittent silent End Turn failure — wrapped `runAiTurnsUntilHuman` in try/catch in `gameStore.ts` `endTurn()`.
 - 2026-06-01: Fixed WorkletsError on web — disabled `worklets` and `reanimated` babel plugins in `babel.config.js` (web-only PWA; Reanimated's web polyfill handles everything without babel transformation).

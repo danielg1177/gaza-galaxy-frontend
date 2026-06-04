@@ -103,7 +103,7 @@ Simulates one turn of fleet movement for all fleets:
 
 ### Client UI
 
-Fleet dispatch is initiated in `GameScreen` via touch-and-drag from an owned planet to a destination planet. On release over a valid in-range target, a ship-count modal confirms the order; the stepper supports − / + / **All**, and the ship count is **tappable** to open a numeric `TextInput` (digits only, clamped to `0…max` on blur or keyboard submit, where `max` is garrison minus other queued outbound from that planet this turn). `gameStore.confirmPendingFleet` calls `queueOrder` (appends to `queuedOrders` without resolving the turn). The player presses **End Turn** to call `endTurn()`, which batches all queued orders as `SEND_FLEET` actions plus `END_TURN` in one `resolveTurn` call.
+Fleet dispatch is initiated in `GameScreen` via touch-and-drag from an owned planet to a destination planet. On release over a valid in-range target, a ship-count modal confirms the order; the default count is `min(1, max)` where `max` is garrison minus other queued outbound from that planet this turn (so a 0-garrison origin opens at 0). The stepper supports − / + / **All**, and the ship count is **tappable** to open a numeric `TextInput` (digits only, clamped to `0…max` on blur or keyboard submit). Confirm also clamps to `0…max` before queueing. `gameStore.confirmPendingFleet` calls `queueOrder` (appends to `queuedOrders` without resolving the turn). The player presses **End Turn** to call `endTurn()`, which batches all queued orders as `SEND_FLEET` actions plus `END_TURN` in one `resolveTurn` call.
 
 ### Fleet visualization (`GameScreen`)
 
@@ -135,6 +135,8 @@ No randomness. Same positions and fleet list always produce the same transit tim
 
 ## Changelog
 
+- 2026-06-03: Box-select multi-fleet dispatch — circular selection icon toggle enables box-draw gesture mode; dragging draws a selection rectangle over the map (pan blocked during draw); on release, all owned planets with troops or queued orders inside the box are selected (teal ring highlight); tapping any planet queues all selected troops there via `queueOrder`; out-of-range planets show "Too far for some troops" warning; tapping empty space or toggling the button exits the mode; End Turn also clears mode.
+- 2026-06-03: Bug fix — drag dispatch from 0-troop planet opens modal at 0 ships; Confirm clamps to `modalMaxShips` (cannot queue outbound fleet when garrison is 0).
 - 2026-06-02: In-transit fleet tap tooltip — auto-dismiss after 4s with fade; manual **✕** dismiss in `GameScreen`.
 - 2026-06-01: Fleet dispatch modal — tap ship count to type a value; clamped to `0…max` on blur/submit; − / + / **All** unchanged.
 - 2026-05-28: In-transit and queued-departure fleet markers use arrow-head polygons (tip toward destination) instead of circles; ship-count labels use owner color (same as marker).

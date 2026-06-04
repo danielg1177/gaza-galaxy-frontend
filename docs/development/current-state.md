@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-03 (Restored **Watch AI Turns** toggle on new-game setup)
+2026-06-03 (Box-select multi-fleet dispatch — toggle button draws selection rectangle, queues all selected troops to tapped destination)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -112,6 +112,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 - Bug fix — enemy planet colour fog of war — `getPlanetColor` returns `NEUTRAL_COLOR` for all non-owned planets (neutral and enemy); enemy home planets no longer reveal via distinct player tint at game start; `getPlayerColor` unchanged for in-transit fleet markers in `FleetLayer`
 - Bug fix — instant home planet snap — `animateMapToSnap` assigns scale/translate and `saved*` shared values directly (removed 350 ms `withTiming`); player never sees scroll from previous map position on turn start or lock-screen dismiss
 - Bug fix — fleet dispatch modal cancel at 0 ships — ship-count stepper minimum 0; `modalMaxShips` allows 0 when all troops are queued elsewhere; Confirm at 0 shows **Cancel Order** and closes modal (new dispatch) or calls `cancelQueuedOrder` (edit existing); clears `dragOriginPlanetId`
+- Bug fix — fleet dispatch from 0-troop planet — new drag dispatch initializes ship count to `min(1, available)` instead of hardcoded 1; Confirm clamps to `modalMaxShips` so a 0-garrison origin cannot queue outbound ships
 - Bug fix — queued modal group build orders by planet + type — Queued Orders modal consolidates same-planet same-type under-construction builds into one row (e.g. `🏭 Iron Peak — 2× Factory`); group ✕ cancels all buildings in descending index order; badge count still totals individual buildings; fleet rows unchanged
 - Task 108: Zoom-scaled planet hit radius — `findPlanetAtMapCoords` takes current `scale` and uses `PLANET_HIT_RADIUS / scale` in map space so screen-space tap/drag hit zone stays ~`PLANET_HIT_RADIUS` px at all zoom levels; applied to planet tap, fleet drag-start, fleet drag-drop, and measure drag-start
 - Task 109: Battle results modal at turn start — `GameScreen` auto-opens **Battle Report** modal when `turnReport` contains combat events after End Turn; pass-and-play defers open until lock screen dismissed; combat `TurnEvent` adds `attackerShipsBefore`, `defenderShipsBefore`, `remainingShips`; existing ⋮ Report modal unchanged
@@ -148,6 +149,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 - Task 149: Bug fix — campaigns visible after exit — pass-and-play **Exit to Home** navigates without `resetGame()` so local `games[]` entries persist; async **Exit Game** mid-turn save navigates home without `resetGame()`; HomeScreen always renders all `asyncGameId == null` records in **Pass & Play** section (no status filter)
 - Task 150: Bug fix — async end turn returns home — `isAsyncGame()` authoritative on `asyncGameId != null`; `loadAsyncGame` overrides decoded `playMode` to `'asyncMultiplayer'`; pass-and-play lock screen gated with `!isAsyncGame` in GameScreen; async `endTurn` submits via API then `shouldReturnHome` navigates home (no next-player UI)
 - Task 172: AI setup simplification — removed AI difficulty chips from `HomeScreen`; new AI slots and toggled AI slots are always `difficulty: 'hard'`; async create-game payload now always sends `difficulty: 'hard'` for AI slots; `gameStore.buildPlayers` now forces AI `Player.difficulty = 'hard'` regardless of slot input
+- Box-select multi-fleet dispatch — circular **selection-drag** toggle (bottom-left, human turn only) enables box-draw mode: dragging draws a teal rectangle over the map (pan blocked while drawing); on release, all owned planets whose centers fall inside the box and that have troops or queued outbound orders are highlighted with a teal ring; a "Tap destination planet" hint appears; tapping any planet queues all selected troops there using normal range rules (`effectiveRange`); troops from out-of-range planets are skipped and a "Too far for some troops" red warning appears; existing queued orders from selected planets are cancelled and re-queued to the new destination; tapping empty space deselects; after a send the mode stays on for further selections; toggle or End Turn exits the mode; `queueOrder` from `gameStore` used for batch dispatch
 
 ## In Progress
 - Task 164 complete — Solos and Pass & Play cards now show a delete button; `handleDeleteLocalGame` confirmation alert calls `deleteGame` from the store; `GameCard` `onDelete` prop already present from async cards.
@@ -219,6 +221,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-03: Bug fix — fleet dispatch from 0-troop planet — `handleDragEnd` sets initial modal count to `min(1, garrison − queued)`; `handleConfirmFleet` clamps to `modalMaxShips` before queueing.
 - 2026-06-03: Restored **Watch AI Turns** toggle on `HomeScreen` new-game setup (visible when at least one AI slot is configured); wires to existing `aiObserverMode` / in-game observer UI in `gameStore` and `GameScreen`.
 - 2026-06-02: Insufficient ships error handling — `processSendFleet` error now shows origin and destination planet names; `gameStore.endTurn` catches "Cannot send" errors and auto-selects the origin planet so player can see exactly which planet has the issue and what the target was.
 - 2026-06-02: In-transit fleet tooltip — owner name removed; **✕** on same row as ship count; ETA line below.
