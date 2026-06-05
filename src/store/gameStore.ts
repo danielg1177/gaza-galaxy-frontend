@@ -118,6 +118,10 @@ export interface GameStore {
   showingAiObserver: boolean;
   pendingAiTurnInput: TurnInput | null;
   pendingAiPlayerId: string | null;
+  /** True when the local player loaded a finished async game to view the final battle report. */
+  isViewingFinishedGame: boolean;
+  /** Finished async game IDs the local player has already viewed the final battle for. */
+  finalBattleViewedByGameId: Record<string, boolean>;
   startNewGame: (config: GameConfig) => void;
   loadGame: (id: string) => void;
   loadAsyncGame: (detail: ApiGameDetail) => void;
@@ -139,6 +143,7 @@ export interface GameStore {
   dismissLockScreen: () => void;
   resetGame: () => void;
   clearReturnHome: () => void;
+  markFinalBattleViewed: (gameId: string) => void;
   clearPendingTurnReport: () => void;
   setAiObserverMode: (value: boolean) => void;
   clearAiObserver: () => void;
@@ -455,6 +460,8 @@ export const useGameStore = create<GameStore>()(
   showingAiObserver: false,
   pendingAiTurnInput: null,
   pendingAiPlayerId: null,
+  isViewingFinishedGame: false,
+  finalBattleViewedByGameId: {},
 
   startNewGame: (config) => {
     const seed = Date.now();
@@ -517,6 +524,69 @@ export const useGameStore = create<GameStore>()(
   },
 
   loadAsyncGame: (detail) => {
+    if (detail.status === 'finished') {
+      if (!detail.latestEvents?.length) {
+        return;
+      }
+
+      const state = drainStaleFleets({
+        ...(JSON.parse(detail.stateJson) as GameState),
+        playMode: 'asyncMultiplayer',
+        turnNumber: detail.turnNumber,
+        roundNumber: detail.roundNumber,
+      });
+
+      const recordId = String(detail.id);
+      const record: GameRecord = {
+        id: recordId,
+        name: detail.name,
+        asyncGameId: detail.id,
+        serverTurnNumber: detail.turnNumber,
+        serverRoundNumber: detail.roundNumber,
+        asyncIsMyTurn: detail.isMyTurn,
+        state,
+        config: {
+          playMode: 'asyncMultiplayer',
+          playerName: '',
+          playerSlots: [],
+          mapSize: 'medium',
+          mapWidth: state.map.width,
+          mapHeight: state.map.height,
+          planetCount: state.map.planets.length,
+        },
+        pendingTurnReport: detail.latestEvents,
+        pendingTurnReportAcknowledged: false,
+      };
+      const { games } = get();
+      const existingIndex = games.findIndex((g) => g.id === recordId);
+      const nextGames =
+        existingIndex >= 0
+          ? games.map((g, i) => (i === existingIndex ? record : g))
+          : [...games, record];
+
+      const asyncReports = buildPlayerReports(
+        detail.latestEvents,
+        state.players,
+        state.map.planets,
+      );
+
+      set({
+        games: nextGames,
+        activeGameId: recordId,
+        selectedPlanetId: null,
+        pendingFleet: null,
+        queuedOrders: [],
+        showingLockScreen: true,
+        turnReport: detail.latestEvents,
+        playerBattleArchiveByPlayerId: asyncReports.archive,
+        playerTurnReportByPlayerId: asyncReports.turnReport,
+        eliminatedPlayerPendingKnockout: false,
+        pendingFarewellPlayerIds: [],
+        isViewingFinishedGame: true,
+      });
+      return;
+    }
+
     const inProgress = detail.inProgressActions;
     const hasMidTurnSave =
       inProgress != null &&
@@ -1296,6 +1366,17 @@ export const useGameStore = create<GameStore>()(
 
   clearReturnHome: () => set({ shouldReturnHome: false }),
 
+  markFinalBattleViewed: (gameId) => {
+    set({
+      finalBattleViewedByGameId: {
+        ...get().finalBattleViewedByGameId,
+        [gameId]: true,
+      },
+      isViewingFinishedGame: false,
+      shouldReturnHome: true,
+    });
+  },
+
   clearPendingTurnReport: () => {
     set({ turnReport: [] });
   },
@@ -1330,6 +1411,7 @@ export const useGameStore = create<GameStore>()(
       version: 1,
       partialize: (state) => ({
         games: state.games.filter((g) => !g.asyncGameId),
+        finalBattleViewedByGameId: state.finalBattleViewedByGameId,
       }),
       onRehydrateStorage: () => () => {
         useGameStore.setState({ _hasHydrated: true });

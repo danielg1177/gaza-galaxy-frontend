@@ -161,6 +161,7 @@ function AsyncGameCard({
   currentUsername,
   canDelete,
   isDeleting,
+  finalBattleViewedByGameId,
   onPress,
   onDelete,
   onEdit,
@@ -171,6 +172,7 @@ function AsyncGameCard({
   currentUsername: string | undefined;
   canDelete: boolean;
   isDeleting: boolean;
+  finalBattleViewedByGameId: Record<string, boolean>;
   onPress: () => void;
   onDelete: () => void;
   onEdit: () => void;
@@ -179,6 +181,10 @@ function AsyncGameCard({
   const isTappable =
     game.status === 'in_progress' &&
     (!isAsyncMultiplayerApiGame(game) || game.isMyTurn);
+  const isEnterable =
+    isTappable ||
+    (game.status === 'finished' &&
+      finalBattleViewedByGameId[String(game.id)] !== true);
   const isProminent =
     game.alertState === 'your_turn' || game.alertState === 'in_progress';
   const prominentAccentColor =
@@ -317,7 +323,7 @@ function AsyncGameCard({
     </>
   );
 
-  if (!isTappable) {
+  if (!isEnterable) {
     return <View style={cardStyle}>{content}</View>;
   }
 
@@ -414,6 +420,7 @@ export default function HomeScreen() {
   const setAiObserverMode = useGameStore((s) => s.setAiObserverMode);
   const loadGame = useGameStore((s) => s.loadGame);
   const loadAsyncGame = useGameStore((s) => s.loadAsyncGame);
+  const finalBattleViewedByGameId = useGameStore((s) => s.finalBattleViewedByGameId);
   const deleteLocalGame = useGameStore((s) => s.deleteGame);
 
   const localGames = useMemo(
@@ -794,10 +801,15 @@ export default function HomeScreen() {
       return;
     }
     const summary = asyncGames.find((g) => g.id === gameId);
+    const canViewFinalBattle =
+      summary !== undefined &&
+      summary.status === 'finished' &&
+      finalBattleViewedByGameId[String(summary.id)] !== true;
     if (
       summary !== undefined &&
       isAsyncMultiplayerApiGame(summary) &&
-      !summary.isMyTurn
+      !summary.isMyTurn &&
+      !canViewFinalBattle
     ) {
       return;
     }
@@ -805,7 +817,14 @@ export default function HomeScreen() {
     void (async () => {
       try {
         const detail = await getGame(gameId);
-        if (isAsyncMultiplayerApiGame(detail) && !detail.isMyTurn) {
+        const detailCanViewFinalBattle =
+          detail.status === 'finished' &&
+          finalBattleViewedByGameId[String(detail.id)] !== true;
+        if (
+          isAsyncMultiplayerApiGame(detail) &&
+          !detail.isMyTurn &&
+          !detailCanViewFinalBattle
+        ) {
           setLoadingGameId(null);
           return;
         }
@@ -1397,6 +1416,7 @@ export default function HomeScreen() {
                         currentUser?.username,
                       )}
                       isDeleting={deletingGameId === game.id}
+                      finalBattleViewedByGameId={finalBattleViewedByGameId}
                       onPress={() => handleOpenAsyncGame(game.id)}
                       onEdit={() => handleEditAsyncGame(game)}
                       onDelete={() => handleDeleteAsyncGame(game)}

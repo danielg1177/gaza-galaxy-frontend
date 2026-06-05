@@ -318,7 +318,21 @@ One task to consolidate the battle report auto-open into a single-fire effect an
 
 ---
 
+## Phase 47 — Bug Fix: Eliminated/Losing Player Cannot View Final Battle Before Game-Over State
+
+**Status:** Complete (2026-06-04).
+
+Three tasks letting the eliminated/losing player open the finished game, pass through a "View Final Battle" lock screen, and see the final battle report before the game-over state is revealed:
+
+- ~~**Task 214**~~ — Frontend: Allow loading a finished async game to view the final battle report *(complete 2026-06-04)*
+- ~~**Task 215**~~ — Frontend: Show "View Final Battle" label on lock screen for game-ending turns *(complete 2026-06-04)*
+- ~~**Backend Task 10.1**~~ — Backend: Change elimination/game-over push notification to neutral "view results" framing *(complete 2026-06-04 — see `backend/docs/project/roadmap.md` Phase 10)*
+
+---
+
 ## Changelog
+- 2026-06-04: Phase 47 complete (Tasks 214–215 + Backend Task 10.1) — eliminated/losing player can now open a finished async game, see "View Final Battle" lock screen, view the final battle report, then be taken home with a game-over alert.
+- 2026-06-04: Phase 47 added (Tasks 214–215) — eliminated/losing player cannot open finished async game to see the final fight; allow loading finished games, "View Final Battle" lock screen, game-over flow after battle report dismissed.
 - 2026-06-04: Phase 46 complete (Task 213) — replaced two competing auto-open effects with one `lastOpenedTurnKeyRef`-guarded effect; exactly one modal per turn.
 - 2026-06-04: Phase 46 added (Task 213) — multiple battle report modals open simultaneously on turn start; correlates with number of opponents fought.
 - 2026-06-04: Phase 45 complete (Task 212) — async submit overlay now fully opaque; next player's state no longer visible through it.

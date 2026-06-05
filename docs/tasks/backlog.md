@@ -5664,3 +5664,70 @@ A third hypothesis: the battle report component (`setShowBattleReportModal`) doe
 - Exit and re-enter a solo/pass-and-play game with a pending turn report (Phase 38 path): the modal opens exactly once.
 
 ---
+
+## Phase 47 — Bug Fix: Eliminated/Losing Player Cannot View Final Battle Before Game-Over State
+
+**Status:** Not started.
+
+**Problem:** In async multiplayer, when Player A eliminates Player B (or wins the game outright), Player B:
+1. Immediately receives a push notification spoiling the outcome ("You've been eliminated from [Game]" or "Game over").
+2. Sees their game card on the home screen in a terminal state (finished / eliminated) with no way to enter the game.
+3. Cannot open the game at all — the fight that ended the game is invisible to them forever.
+
+**Desired behaviour:** Player B should be able to open the game, pass through the normal lock screen ("View Final Battle"), see the full battle report for the round in which they were eliminated or the game ended, and only *then* be taken home with the game-over state shown.
+
+Three tasks address this: a frontend change to allow loading finished games and surfacing the final battle report (Task 214), a frontend lock-screen label change for game-ending turns (Task 215), and a backend notification wording fix so the losing player is not spoiled before they've seen the fight (Backend Task 10.1).
+
+---
+
+### Task 214 — Frontend: Allow loading a finished async game to view the final battle report
+
+**Files:** `frontend/src/screens/HomeScreen.tsx`, `frontend/src/store/gameStore.ts`, `frontend/src/screens/GameScreen.tsx`
+
+**Root cause:**
+
+When `game.status === 'finished'`, the home screen game card is either disabled or navigates away without entering the game. `loadAsyncGame` is never called, so `latestEvents` is never used to build the player's battle archive. The losing/eliminated player has no path to see the final battle report.
+
+**Requirements:**
+
+1. **HomeScreen — make finished cards with unseen events enterable.** A finished async game card that has `latestEvents` data (i.e. `latest_events` was non-empty on the last `GET /api/games/{id}` call, or `alert_state` is `'finished'`) must be tappable and navigate into the game exactly like a normal "your turn" card. Track whether the final battle has been viewed using a per-game boolean in the Zustand store (`finalBattleViewedByGameId: Record<string, boolean>`). If `finalBattleViewedByGameId[game.id]` is `true`, the card stays non-enterable (game truly over, no new events to show).
+
+2. **`loadAsyncGame` — handle `status === 'finished'`.** After loading the game detail, if `game.status === 'finished'` and `detail.latestEvents` is non-empty, proceed with the full event-restore path (build `playerBattleArchiveByPlayerId` via `buildPlayerReports`, set `pendingTurnReport`, show lock screen). Set a new store flag `isViewingFinishedGame: boolean` to `true`. This flag is used in steps 3–4.
+
+3. **GameScreen — after battle report dismissed in finished-game mode.** When `isViewingFinishedGame === true` and the battle report modal is closed (the `onClose` callback of the battle report component), instead of normal turn flow:
+   - Mark `finalBattleViewedByGameId[asyncGameId]` as `true` in the store.
+   - Clear `isViewingFinishedGame`.
+   - Show a brief "Game Over" alert (e.g. "The game has ended. Thanks for playing!").
+   - Navigate home via `shouldReturnHome: true`.
+
+4. **Lock screen in finished-game mode.** When `isViewingFinishedGame === true`, the lock screen must be shown (same as normal turn-start flow) so the player must actively tap through before seeing the battle. See Task 215 for the label change.
+
+5. **No turn submission.** When `isViewingFinishedGame === true`, the End Turn button must be hidden and all interaction with the map must be disabled. The player is in view-only mode.
+
+6. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- 2-player async game: Player A submits a turn that eliminates Player B. On Player B's device, the game card must still be tappable (not locked/grayed-out). Tapping it shows the lock screen. Tapping through shows the battle report with the eliminating combat. Dismissing the report shows "Game Over" and returns home. Tapping the card again after that does nothing (already viewed).
+- If the finished game has no `latest_events` (e.g. the game ended via the opponent timing out or surrendering with no combat), the card is non-enterable immediately — no empty lock screen or blank battle report.
+- Pass-and-play and solo games: no change. `isViewingFinishedGame` remains `false`.
+
+---
+
+### Task 215 — Frontend: Show "View Final Battle" label on lock screen for game-ending turns
+
+**File:** `frontend/src/screens/GameScreen.tsx`
+
+**Requirements:**
+
+1. The lock screen component accepts (or reads from the store) an optional `lockScreenLabel` prop/flag.
+2. When `isViewingFinishedGame === true`, render the primary action button as **"View Final Battle"** and the subtitle as **"See what happened in the last round"** instead of the default "Start Turn" / "It's your turn" copy.
+3. No behaviour change — tapping the button still dismisses the lock screen and reveals the battle report.
+4. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- Opening a finished game (per Task 214) shows "View Final Battle" on the lock screen.
+- Opening a normal in-progress async game still shows "Start Turn".
+
+---

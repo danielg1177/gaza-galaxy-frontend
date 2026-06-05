@@ -4,6 +4,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated as RNAnimated,
   Modal,
   Pressable,
@@ -1345,6 +1346,8 @@ export default function GameScreen() {
   const isSubmittingTurn = useGameStore((s) => s.isSubmittingTurn);
   const shouldReturnHome = useGameStore((s) => s.shouldReturnHome);
   const clearReturnHome = useGameStore((s) => s.clearReturnHome);
+  const isViewingFinishedGame = useGameStore((s) => s.isViewingFinishedGame);
+  const markFinalBattleViewed = useGameStore((s) => s.markFinalBattleViewed);
   const clearPendingTurnReport = useGameStore((s) => s.clearPendingTurnReport);
   const turnReport = useGameStore((s) => s.turnReport);
   const playerBattleArchiveByPlayerId = useGameStore(
@@ -1393,6 +1396,7 @@ export default function GameScreen() {
   const mapAreaWindowRef = useRef({ x: 0, y: 0 });
   const initialSnapGameIdRef = useRef<string | null>(null);
   const prevShowingLockScreenRef = useRef(showingLockScreen);
+  const pendingGameOverAlertRef = useRef(false);
   const lastOpenedTurnKeyRef = useRef('');
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
@@ -1428,7 +1432,15 @@ export default function GameScreen() {
     if (!shouldReturnHome) {
       return;
     }
+    const showGameOverAlert = pendingGameOverAlertRef.current;
+    pendingGameOverAlertRef.current = false;
     clearReturnHome();
+    if (showGameOverAlert) {
+      Alert.alert('Game Over', 'The game has ended.', [
+        { text: 'OK', onPress: () => navigation.navigate('Home') },
+      ]);
+      return;
+    }
     navigation.navigate('Home');
   }, [shouldReturnHome, clearReturnHome, navigation]);
 
@@ -2253,6 +2265,9 @@ export default function GameScreen() {
 
   const handleBoxSelectEnd = useCallback(
     (x1: number, y1: number, x2: number, y2: number, s: number, tx: number, ty: number) => {
+      if (isViewingFinishedGame) {
+        return;
+      }
       if (gameState === null || localHumanPlayerId === undefined) {
         setBoxSelectPhase('idle');
         setBoxSelectRect(null);
@@ -2301,11 +2316,14 @@ export default function GameScreen() {
         })();
       }
     },
-    [gameState, localHumanPlayerId, queuedOrders, isBoxSelectAwaitingDestSV, isBoxSelecting],
+    [gameState, isViewingFinishedGame, localHumanPlayerId, queuedOrders, isBoxSelectAwaitingDestSV, isBoxSelecting],
   );
 
   const handleBoxSelectSend = useCallback(
     (destinationPlanetId: string) => {
+      if (isViewingFinishedGame) {
+        return;
+      }
       if (gameState === null || humanPlayer === undefined || boxSelectedPlanetIds.length === 0) {
         setBoxSelectPhase('idle');
         setBoxSelectedPlanetIds([]);
@@ -2385,6 +2403,7 @@ export default function GameScreen() {
     [
       gameState,
       humanPlayer,
+      isViewingFinishedGame,
       boxSelectedPlanetIds,
       queuedOrders,
       cancelQueuedOrder,
@@ -2397,6 +2416,7 @@ export default function GameScreen() {
     (localX: number, localY: number, s: number, tx: number, ty: number) => {
       if (
         isReadOnly ||
+        isViewingFinishedGame ||
         showingAiObserver ||
         gameState === null ||
         localHumanPlayerId === undefined ||
@@ -2424,7 +2444,7 @@ export default function GameScreen() {
         isFleetDragging.value = true;
       })();
     },
-    [isReadOnly, showingAiObserver, gameState, localHumanPlayerId, measureMapArea, boxSelectMode],
+    [isReadOnly, isViewingFinishedGame, showingAiObserver, gameState, localHumanPlayerId, measureMapArea, boxSelectMode],
   );
 
   const handleFleetPanUpdate = useCallback(
@@ -2455,7 +2475,13 @@ export default function GameScreen() {
 
   const handleMeasureDragStart = useCallback(
     (localX: number, localY: number, s: number, tx: number, ty: number) => {
-      if (showingAiObserver || gameState === null || localHumanPlayerId === undefined || boxSelectMode) {
+      if (
+        isViewingFinishedGame ||
+        showingAiObserver ||
+        gameState === null ||
+        localHumanPlayerId === undefined ||
+        boxSelectMode
+      ) {
         return;
       }
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
@@ -2478,7 +2504,7 @@ export default function GameScreen() {
         isFleetDragging.value = true;
       })();
     },
-    [showingAiObserver, gameState, localHumanPlayerId, measureMapArea, boxSelectMode],
+    [isViewingFinishedGame, showingAiObserver, gameState, localHumanPlayerId, measureMapArea, boxSelectMode],
   );
 
   const handleMeasureDragUpdate = useCallback(
@@ -2627,6 +2653,9 @@ export default function GameScreen() {
 
   const handleMapTap = useCallback(
     (localX: number, localY: number, s: number, tx: number, ty: number, absX: number, absY: number) => {
+      if (isViewingFinishedGame) {
+        return;
+      }
       // Don't process taps while the box is being drawn
       if (boxSelectPhase === 'drawing') {
         return;
@@ -2717,7 +2746,7 @@ export default function GameScreen() {
       store.selectPlanet(planet.id);
       setPlanetBattleReportName(null);
     },
-    [humanCombatByPlanetKey, setPlanetBattleReportName, setFleetTooltip, boxSelectPhase, exitBoxSelect, handleBoxSelectSend],
+    [humanCombatByPlanetKey, isViewingFinishedGame, setPlanetBattleReportName, setFleetTooltip, boxSelectPhase, exitBoxSelect, handleBoxSelectSend],
   );
 
   const planetTap = Gesture.Tap()
@@ -2875,12 +2904,28 @@ export default function GameScreen() {
   };
 
   const handleCloseBattleReport = useCallback(() => {
+    if (isViewingFinishedGame) {
+      const asyncGameId = useGameStore.getState().getActiveRecord()?.asyncGameId;
+      if (asyncGameId != null) {
+        pendingGameOverAlertRef.current = true;
+        markFinalBattleViewed(String(asyncGameId));
+        setShowBattleReportModal(false);
+        clearPendingTurnReport();
+        return;
+      }
+    }
     if (eliminatedPlayerPendingKnockout) {
       acknowledgeKnockout();
     }
     setShowBattleReportModal(false);
     clearPendingTurnReport();
-  }, [eliminatedPlayerPendingKnockout, acknowledgeKnockout, clearPendingTurnReport]);
+  }, [
+    isViewingFinishedGame,
+    markFinalBattleViewed,
+    eliminatedPlayerPendingKnockout,
+    acknowledgeKnockout,
+    clearPendingTurnReport,
+  ]);
 
   const handleNewGame = () => {
     resetGame();
@@ -3076,7 +3121,8 @@ export default function GameScreen() {
       {(isHumanTurn || showingAiObserver) &&
         status === 'active' &&
         !isKnockoutTurn &&
-        !isReadOnly && (
+        !isReadOnly &&
+        !isViewingFinishedGame && (
         <>
           <Pressable
             style={[styles.headerMenuTrigger, { top: insets.top + 8 }]}
@@ -3945,7 +3991,8 @@ export default function GameScreen() {
         </View>
       </Modal>
 
-      {isHumanTurn &&
+      {!isViewingFinishedGame &&
+        isHumanTurn &&
         !showingAiObserver &&
         status === 'active' &&
         !isKnockoutTurn &&
@@ -4040,16 +4087,22 @@ export default function GameScreen() {
         </View>
       )}
 
-      {showingLockScreen && !isAsyncGame && (
+      {showingLockScreen && (!isAsyncGame || isViewingFinishedGame) && (
         <View style={[styles.lockScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
           <Text style={styles.lockTitle}>Pass the device</Text>
           <Text style={styles.lockTurnNumber}>Turn {roundNumber}</Text>
-          <Text style={styles.lockPlayerName}>{currentTurnPlayerName}'s turn</Text>
+          <Text style={styles.lockPlayerName}>
+            {isViewingFinishedGame
+              ? 'See what happened in the last round'
+              : `${currentTurnPlayerName}'s turn`}
+          </Text>
           <Pressable style={styles.lockExitButton} onPress={handleExitToHome}>
             <Text style={styles.lockExitButtonText}>Exit</Text>
           </Pressable>
           <Pressable style={styles.lockStartButton} onPress={dismissLockScreen}>
-            <Text style={styles.lockStartButtonText}>Start Turn</Text>
+            <Text style={styles.lockStartButtonText}>
+              {isViewingFinishedGame ? 'View Final Battle' : 'Start Turn'}
+            </Text>
           </Pressable>
         </View>
       )}
