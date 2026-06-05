@@ -940,7 +940,7 @@ export const useGameStore = create<GameStore>()(
       return;
     }
     if (humanPlayer.isEliminated) {
-      showAlert('Cannot End Turn', 'You have been eliminated from the game.');
+      set({ shouldReturnHome: true });
       return;
     }
     const asyncGameId = record.asyncGameId;
