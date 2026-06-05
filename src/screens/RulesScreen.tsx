@@ -77,6 +77,17 @@ export default function RulesScreen() {
           </Text>
         </View>
 
+        {/* Fog of War */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🌫️ Fog of War</Text>
+          <Text style={styles.bodyText}>
+            You only see full details for planets you own. Neutral and enemy planets appear as dim blobs on the map—you can see their position, name, and class, but not troop counts, buildings, or production settings.
+          </Text>
+          <Text style={styles.bodyText}>
+            Enemy fleets in transit are hidden. You only see your own ships moving across the galaxy. Scout by sending fleets to unexplored worlds and learn what you can from battle reports.
+          </Text>
+        </View>
+
         {/* Building Types */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>🏭 Building Types</Text>

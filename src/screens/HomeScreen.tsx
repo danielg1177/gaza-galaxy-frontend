@@ -445,7 +445,7 @@ export default function HomeScreen() {
   const [playerSlots, setPlayerSlots] = useState<PlayerSlot[]>(() =>
     createDefaultPlayerSlots(currentUser?.username ?? 'Commander'),
   );
-  const [playMode, setPlayMode] = useState<'passAndPlay' | 'asyncMultiplayer'>('passAndPlay');
+  const [playMode, setPlayMode] = useState<'passAndPlay' | 'asyncMultiplayer'>('asyncMultiplayer');
   const [mapSize, setMapSize] = useState<MapSize>('medium');
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [invites, setInvites] = useState<ApiInvite[]>([]);

@@ -22,6 +22,11 @@ Each planet has:
 - Buildings: Manufacturing Facility, Research Facility
 - A manufacturing allocation (slider: ships vs resources)
 
+## Fog of War
+- Full details (troop count, buildings, production slider) are visible only on planets you own
+- Neutral and enemy planets show only position, name, and class on the map
+- Enemy fleets in transit are hidden; you see only your own fleets
+
 ## Planet Classes
 | Class | Production Quality |
 |-------|--------------------|
@@ -58,5 +63,5 @@ Research speed is NOT affected by planet class.
 - Last player with an un-captured home planet wins
 
 ## Changelog
-- 2026-06-05: Removed standalone Home Planets section (covered under Objective, Elimination, and Victory).
+- 2026-06-05: Added Fog of War section; removed standalone Home Planets section (covered under Objective, Elimination, and Victory).
 - 2026-05-27: Initial rules documented from project-spec.md.
