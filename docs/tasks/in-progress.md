@@ -434,6 +434,20 @@ The `acknowledgeKnockout` async path is restored to the pre-Phase-56 manual loop
 
 ---
 
+## Phase 57 — Feature: In-Game Messaging System
+
+**Status:** Complete (2026-06-05). See `docs/tasks/backlog.md` Phase 57 for full task specifications.
+
+Backend prerequisites (Phase 11 in `backend/docs/project/roadmap.md`) must be complete before frontend tasks begin.
+
+- ~~**Task 230**~~ — Frontend: Add messaging API calls to `gamesService.ts` (`getMessages`, `sendMessage`) *(complete 2026-06-05)*
+- ~~**Task 231**~~ — Frontend: Add `GameMessage` type and messaging state/actions to `gameStore.ts` *(complete 2026-06-05)*
+- ~~**Task 232**~~ — Frontend: Create `ConversationModal.tsx` component *(complete 2026-06-05)*
+- ~~**Task 233**~~ — Frontend: Add chat icon with unread badge to home screen game cards *(complete 2026-06-05)*
+- ~~**Task 234**~~ — Frontend: Add "Chat" option to in-game ⋮ dropdown with unread badge; badge on ⋮ button *(complete 2026-06-05)*
+
+---
+
 ## Changelog
 - 2026-06-05: Phase 56 reverted (Tasks 226–227, 229) — routing `endTurn()` through `acknowledgeKnockout` broke normal turns; engine-based AI-advance inside `acknowledgeKnockout` corrupted round state. Tasks 226/227/229 reverted. Task 228 kept (End Turn disabled during submit). `acknowledgeKnockout` async path restored to pre-Phase-56 manual loop + console logging.
 - 2026-06-05: Phase 55 complete (Tasks 224–225) — `acknowledgeKnockout` now clears `eliminatedPlayerPendingKnockout` synchronously before the async submit, preventing double-invocation; restored on error for retry; `handleCloseBattleReport` no longer calls `acknowledgeKnockout` so End Turn is the single trigger.

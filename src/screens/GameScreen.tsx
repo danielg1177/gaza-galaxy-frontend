@@ -1,4 +1,4 @@
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -25,6 +25,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
+import { ConversationModal } from '../components/ConversationModal';
 import StrategicMapModal from '../components/StrategicMapModal';
 import {
   FACTORY_GOLD_OUTPUT,
@@ -40,7 +41,9 @@ import {
   isInRange,
 } from '../game/movementEngine';
 import type { BuildingType, Fleet, OwnerId, Planet, Player, TurnEvent } from '../game/types';
-import { saveTurnProgress } from '../services/gamesService';
+import { getFriendRequests } from '../services/friendsService';
+import { getGame, saveTurnProgress } from '../services/gamesService';
+import { useAuthStore } from '../store/authStore';
 import {
   battleReportTurnKey,
   getLocalHumanPlayerId,
@@ -1401,7 +1404,15 @@ export default function GameScreen() {
   const cancelBuildOrder = useGameStore((s) => s.cancelBuildOrder);
   const demolishBuilding = useGameStore((s) => s.demolishBuilding);
   const setProductionSlider = useGameStore((s) => s.setProductionSlider);
+  const { currentUser } = useAuthStore();
   const activeGameId = useGameStore((s) => s.activeGameId);
+  const activeRecord = useGameStore((s) => {
+    if (s.activeGameId === null) {
+      return null;
+    }
+    return s.games.find((g) => g.id === s.activeGameId) ?? null;
+  });
+  const asyncGameId = activeRecord?.asyncGameId ?? null;
   const showingLockScreen = useGameStore((s) => s.showingLockScreen);
   const dismissLockScreen = useGameStore((s) => s.dismissLockScreen);
   const eliminatedPlayerPendingKnockout = useGameStore(
@@ -1457,6 +1468,9 @@ export default function GameScreen() {
   const [planetBattleReportName, setPlanetBattleReportName] = useState<string | null>(null);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showStrategicMapModal, setShowStrategicMapModal] = useState(false);
+  const [showConversationModal, setShowConversationModal] = useState(false);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [isSavingExit, setIsSavingExit] = useState(false);
   const [fleetTooltip, setFleetTooltip] = useState<{
     fleet: Fleet;
@@ -1907,6 +1921,56 @@ export default function GameScreen() {
     }
     return Array.from(groupMap.values());
   }, [buildDisplayEntries]);
+
+  const headerMenuBadgeCount = useMemo(() => {
+    const unread = asyncGameId != null ? unreadMessageCount : 0;
+    return pendingRequestCount + unread;
+  }, [asyncGameId, pendingRequestCount, unreadMessageCount]);
+
+  const headerMenuBadgeLabel = useMemo(() => {
+    if (headerMenuBadgeCount > 9) {
+      return '9+';
+    }
+    return String(headerMenuBadgeCount);
+  }, [headerMenuBadgeCount]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        try {
+          const requests = await getFriendRequests();
+          setPendingRequestCount(requests.length);
+        } catch {
+          setPendingRequestCount(0);
+        }
+      })();
+    }, []),
+  );
+
+  useEffect(() => {
+    if (asyncGameId == null) {
+      setUnreadMessageCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const detail = await getGame(asyncGameId);
+        if (!cancelled) {
+          setUnreadMessageCount(detail.unreadMessageCount);
+        }
+      } catch {
+        if (!cancelled) {
+          setUnreadMessageCount(0);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [asyncGameId, showConversationModal]);
 
   const queuedOrderCount = useMemo(() => {
     const fleetCount = queuedOrders.filter((order) => !isBuildOrder(order)).length;
@@ -3205,6 +3269,13 @@ export default function GameScreen() {
             hitSlop={8}
           >
             <Text style={styles.headerMenuTriggerText}>⋮</Text>
+            {headerMenuBadgeCount > 0 && (
+              <View style={styles.headerMenuTriggerBadge}>
+                <Text style={styles.headerMenuTriggerBadgeText}>
+                  {headerMenuBadgeLabel}
+                </Text>
+              </View>
+            )}
           </Pressable>
           {showHeaderMenu && (
             <>
@@ -3213,6 +3284,24 @@ export default function GameScreen() {
                 onPress={() => setShowHeaderMenu(false)}
               />
               <View style={[styles.headerMenuPanel, { top: insets.top + 8 + 36 }]}>
+                {asyncGameId != null && (
+                  <Pressable
+                    style={styles.headerMenuRow}
+                    onPress={() => {
+                      setShowHeaderMenu(false);
+                      setShowConversationModal(true);
+                    }}
+                  >
+                    <Text style={styles.headerMenuRowText}>💬 Chat</Text>
+                    {unreadMessageCount > 0 && (
+                      <View style={styles.headerMenuUnreadBadge}>
+                        <Text style={styles.headerMenuBadgeText}>
+                          {unreadMessageCount > 99 ? '99+' : unreadMessageCount}
+                        </Text>
+                      </View>
+                    )}
+                  </Pressable>
+                )}
                 <Pressable
                   style={styles.headerMenuRow}
                   onPress={() => {
@@ -3802,6 +3891,16 @@ export default function GameScreen() {
         map={map}
         humanPlayerId={effectiveViewingPlayerId}
       />
+
+      {asyncGameId != null ? (
+        <ConversationModal
+          visible={showConversationModal}
+          onClose={() => setShowConversationModal(false)}
+          gameId={asyncGameId}
+          gameName={activeRecord?.name ?? ''}
+          myUserId={currentUser?.id ?? 0}
+        />
+      ) : null}
 
       <Modal
         visible={showQueuedModal}
@@ -4729,6 +4828,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 50,
   },
+  headerMenuTriggerBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    minWidth: 20,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerMenuTriggerBadgeText: {
+    color: COLORS.background,
+    fontSize: 10,
+    fontWeight: '700',
+  },
   headerMenuTriggerText: {
     color: COLORS.text,
     fontSize: 18,
@@ -4781,6 +4897,14 @@ const styles = StyleSheet.create({
     color: COLORS.background,
     fontSize: 11,
     fontWeight: '700',
+  },
+  headerMenuUnreadBadge: {
+    backgroundColor: '#e53935',
+    borderRadius: 10,
+    minWidth: 22,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignItems: 'center',
   },
   planetSection: {
     marginBottom: 12,

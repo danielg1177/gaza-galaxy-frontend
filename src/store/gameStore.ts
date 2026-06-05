@@ -37,9 +37,14 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LOCAL_GAMES_STORAGE_KEY } from '../constants/app';
 import { ensureStorageMigrated } from '../utils/migrateStorage';
-import type { ApiGameDetail } from '../services/gamesService';
+import type { ApiGameDetail, GameMessage } from '../services/gamesService';
 import { ApiError } from '../services/apiClient';
-import { getGame, submitTurn } from '../services/gamesService';
+import {
+  getGame,
+  getMessages as fetchMessagesApi,
+  sendMessage as sendMessageApi,
+  submitTurn,
+} from '../services/gamesService';
 import { requestHomeRefresh } from '../services/homeRefreshEvents';
 
 export interface PlayerSlot {
@@ -126,6 +131,9 @@ export interface GameStore {
   finalBattleViewedByGameId: Record<string, boolean>;
   /** Per-game turn key for which the local human already dismissed the battle report this session. */
   acknowledgedBattleReportTurnKeyByGameId: Record<string, string>;
+  activeGameMessages: GameMessage[];
+  isFetchingMessages: boolean;
+  isSendingMessage: boolean;
   startNewGame: (config: GameConfig) => void;
   loadGame: (id: string) => void;
   loadAsyncGame: (detail: ApiGameDetail) => void;
@@ -152,6 +160,9 @@ export interface GameStore {
   acknowledgeBattleReport: () => void;
   setAiObserverMode: (value: boolean) => void;
   clearAiObserver: () => void;
+  fetchMessages: (gameId: number) => Promise<void>;
+  sendMessage: (gameId: number, content: string) => Promise<void>;
+  clearMessages: () => void;
   isAsyncGame: () => boolean;
   getVisibleGameState: () => GameState | null;
 }
@@ -487,6 +498,9 @@ export const useGameStore = create<GameStore>()(
   isViewingFinishedGame: false,
   finalBattleViewedByGameId: {},
   acknowledgedBattleReportTurnKeyByGameId: {},
+  activeGameMessages: [],
+  isFetchingMessages: false,
+  isSendingMessage: false,
 
   startNewGame: (config) => {
     const seed = Date.now();
@@ -1523,6 +1537,34 @@ export const useGameStore = create<GameStore>()(
       queuedOrders: [],
     }),
 
+  fetchMessages: async (gameId) => {
+    set({ isFetchingMessages: true });
+    try {
+      const response = await fetchMessagesApi(gameId);
+      set({ activeGameMessages: response.messages, isFetchingMessages: false });
+    } catch {
+      set({ isFetchingMessages: false });
+    }
+  },
+
+  sendMessage: async (gameId, content) => {
+    set({ isSendingMessage: true });
+    try {
+      const response = await sendMessageApi(gameId, content);
+      set((state) => ({
+        activeGameMessages: [...state.activeGameMessages, response.message],
+        isSendingMessage: false,
+      }));
+    } catch (err) {
+      set({ isSendingMessage: false });
+      throw err;
+    }
+  },
+
+  clearMessages: () => {
+    set({ activeGameMessages: [] });
+  },
+
   isAsyncGame: () => {
     const record = get().getActiveRecord();
     return record?.asyncGameId != null;
@@ -1541,6 +1583,7 @@ export const useGameStore = create<GameStore>()(
         removeItem: (name) => AsyncStorage.removeItem(name),
       })),
       version: 1,
+      // Session-only fields (e.g. activeGameMessages) are omitted — not persisted.
       partialize: (state) => ({
         games: state.games.filter((g) => !g.asyncGameId),
         finalBattleViewedByGameId: state.finalBattleViewedByGameId,

@@ -8,6 +8,22 @@ export interface ApiGamePlayer {
   userId?: number;
 }
 
+export interface GameMessage {
+  id: number;
+  senderUserId: number;
+  senderName: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface GetMessagesResponse {
+  messages: GameMessage[];
+}
+
+export interface SendMessageResponse {
+  message: GameMessage;
+}
+
 export interface ApiGame {
   id: number;
   name: string;
@@ -29,6 +45,7 @@ export interface ApiGame {
   roundNumber: number;
   turnNumber: number;
   createdAt: string;
+  unreadMessageCount: number;
 }
 
 export interface InProgressTurnPayload {
@@ -111,6 +128,7 @@ interface ApiGameRaw {
   round_number: number;
   turn_number: number;
   created_at: string;
+  unread_message_count: number;
 }
 
 interface InProgressActionsRaw {
@@ -134,6 +152,7 @@ interface GameDetailResponse {
     current_player_name?: string;
     has_in_progress_actions?: boolean;
     created_at?: string;
+    unread_message_count?: number;
   };
   state_json: string;
   is_my_turn: boolean;
@@ -250,6 +269,7 @@ function mapGame(api: ApiGameRaw): ApiGame {
     roundNumber: api.round_number,
     turnNumber: api.turn_number,
     createdAt: api.created_at,
+    unreadMessageCount: api.unread_message_count ?? 0,
   };
 }
 
@@ -276,6 +296,7 @@ function mapGameDetail(data: GameDetailResponse): ApiGameDetail {
     round_number: game.round_number,
     turn_number: game.turn_number,
     created_at: game.created_at ?? '',
+    unread_message_count: game.unread_message_count ?? 0,
   });
 
   return {
@@ -385,4 +406,17 @@ export async function acceptInvite(
 
 export async function declineInvite(inviteId: number): Promise<void> {
   await apiClient.post(`/invites/${inviteId}/decline`);
+}
+
+export async function getMessages(gameId: number): Promise<GetMessagesResponse> {
+  return apiClient.get<GetMessagesResponse>(`/games/${gameId}/messages`);
+}
+
+export async function sendMessage(
+  gameId: number,
+  content: string,
+): Promise<SendMessageResponse> {
+  return apiClient.post<SendMessageResponse>(`/games/${gameId}/messages`, {
+    content,
+  });
 }

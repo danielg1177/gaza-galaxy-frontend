@@ -20,6 +20,7 @@ import type { RootStackParamList } from '../../App';
 import { APP_NAME_UPPER } from '../constants/app';
 import type { MapSize } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
+import { ConversationModal } from '../components/ConversationModal';
 import { EditGameNameModal } from '../components/EditGameNameModal';
 import { ApiError } from '../services/apiClient';
 import {
@@ -165,6 +166,7 @@ function AsyncGameCard({
   onPress,
   onDelete,
   onEdit,
+  onChat,
 }: {
   game: ApiGame;
   isLoading: boolean;
@@ -176,6 +178,7 @@ function AsyncGameCard({
   onPress: () => void;
   onDelete: () => void;
   onEdit: () => void;
+  onChat: () => void;
 }) {
   const playerNames = game.players.map((player) => player.inGameName).join(', ');
   const isTappable =
@@ -202,8 +205,12 @@ function AsyncGameCard({
 
   const cardStyle = [
     styles.gameCard,
-    isProminent && {
-      borderLeftWidth: 4,
+    game.alertState === 'your_turn' && {
+      borderLeftWidth: 6,
+      borderLeftColor: COLORS.accent,
+    },
+    game.alertState === 'in_progress' && {
+      borderLeftWidth: 6,
       borderLeftColor: prominentAccentColor,
     },
     !isProminent &&
@@ -216,25 +223,12 @@ function AsyncGameCard({
   const badge = (() => {
     switch (game.alertState) {
       case 'your_turn':
-        return (
-          <View style={styles.asyncAlertBadgeYourTurn}>
-            <Text style={styles.asyncAlertBadgeYourTurnText}>YOUR TURN</Text>
-          </View>
-        );
+        return null;
       case 'in_progress':
-        return (
-          <View style={styles.asyncAlertBadgeInProgress}>
-            <Text style={styles.asyncAlertBadgeInProgressText}>IN PROGRESS</Text>
-          </View>
-        );
+        return null;
       case 'waiting':
-        return (
-          <Text style={styles.asyncAlertBadgeWaitingText}>Waiting...</Text>
-        );
       case 'waiting_for_players':
-        return (
-          <Text style={styles.asyncAlertBadgeWaitingText}>Waiting...</Text>
-        );
+        return null;
       case 'finished':
         if (finishedOutcome === 'victory') {
           return (
@@ -298,29 +292,60 @@ function AsyncGameCard({
     </Pressable>
   ) : null;
 
-  const content = (
-    <>
-      <View style={styles.asyncGameCardHeader}>
-        <Text style={[styles.gameCardName, styles.asyncGameCardTitle]}>{game.name}</Text>
-        <View style={styles.asyncGameCardHeaderActions}>
-          {badge}
-          {editControl}
-          {deleteControl}
+  const chatControl = isAsyncMultiplayerApiGame(game) ? (
+    <Pressable
+      style={({ pressed }) => [
+        styles.asyncGameChatButton,
+        pressed && styles.asyncGameChatButtonPressed,
+      ]}
+      onPress={(event) => {
+        event.stopPropagation();
+        onChat();
+      }}
+      disabled={anyCardLoading}
+      hitSlop={8}
+    >
+      <Text style={styles.asyncGameChatButtonText}>💬</Text>
+      {game.unreadMessageCount > 0 && (
+        <View style={styles.chatUnreadBadge}>
+          <Text style={styles.chatUnreadBadgeText}>
+            {game.unreadMessageCount > 99 ? '99+' : game.unreadMessageCount}
+          </Text>
         </View>
-      </View>
-      <Text style={styles.gameCardPlayers}>{playerNames}</Text>
-      <Text
-        style={[
-          styles.asyncGameSubtitle,
-          game.status === 'waiting_for_players' && styles.asyncGameSubtitleMuted,
-        ]}
-      >
-        {subtitle}
-      </Text>
-      {isLoading && (
-        <ActivityIndicator style={styles.asyncGameCardLoader} color={COLORS.accent} />
       )}
-    </>
+    </Pressable>
+  ) : null;
+
+  const content = (
+    <View style={styles.asyncGameCardBody}>
+      <View style={styles.asyncGameCardMain}>
+        <Text style={styles.gameCardName}>{game.name}</Text>
+        <Text style={styles.gameCardPlayers}>{playerNames}</Text>
+        <Text
+          style={[
+            styles.asyncGameSubtitle,
+            game.status === 'waiting_for_players' && styles.asyncGameSubtitleMuted,
+          ]}
+        >
+          {subtitle}
+        </Text>
+        {isLoading && (
+          <ActivityIndicator style={styles.asyncGameCardLoader} color={COLORS.accent} />
+        )}
+      </View>
+      {(badge != null || chatControl != null || editControl != null || deleteControl != null) && (
+        <View style={styles.asyncGameCardActions}>
+          <View style={styles.asyncGameCardActionsTop}>
+            {badge}
+            {chatControl}
+            {editControl}
+          </View>
+          {deleteControl != null && (
+            <View style={styles.asyncGameCardActionsBottom}>{deleteControl}</View>
+          )}
+        </View>
+      )}
+    </View>
   );
 
   if (!isEnterable) {
@@ -386,24 +411,26 @@ function GameCard({
       style={({ pressed }) => [styles.gameCard, pressed && styles.gameCardPressed]}
       onPress={onPress}
     >
-      {onDelete != null ? (
-        <View style={styles.asyncGameCardHeader}>
-          <Text style={[styles.gameCardName, styles.asyncGameCardTitle]}>{record.name}</Text>
-          <View style={styles.asyncGameCardHeaderActions}>{deleteControl}</View>
+      <View style={styles.asyncGameCardBody}>
+        <View style={styles.asyncGameCardMain}>
+          <Text style={styles.gameCardName}>{record.name}</Text>
+          <Text style={styles.gameCardPlayers}>{playerNames}</Text>
+          <View style={styles.gameCardFooter}>
+            {state.status === 'active' && currentPlayer !== undefined && (
+              <Text style={styles.gameCardTurn}>
+                {currentPlayer.name}
+                {isHumanTurn && <Text style={styles.yourTurnBadge}> · YOUR TURN</Text>}
+              </Text>
+            )}
+            {outcomeLabel !== null && (
+              <Text style={styles.gameCardOutcome}>{outcomeLabel}</Text>
+            )}
+          </View>
         </View>
-      ) : (
-        <Text style={styles.gameCardName}>{record.name}</Text>
-      )}
-      <Text style={styles.gameCardPlayers}>{playerNames}</Text>
-      <View style={styles.gameCardFooter}>
-        {state.status === 'active' && currentPlayer !== undefined && (
-          <Text style={styles.gameCardTurn}>
-            {currentPlayer.name}
-            {isHumanTurn && <Text style={styles.yourTurnBadge}> · YOUR TURN</Text>}
-          </Text>
-        )}
-        {outcomeLabel !== null && (
-          <Text style={styles.gameCardOutcome}>{outcomeLabel}</Text>
+        {deleteControl != null && (
+          <View style={styles.asyncGameCardActions}>
+            <View style={styles.asyncGameCardActionsBottom}>{deleteControl}</View>
+          </View>
         )}
       </View>
     </Pressable>
@@ -631,6 +658,12 @@ export default function HomeScreen() {
   const [isLaunching, setIsLaunching] = useState(false);
   const [homeMenuVisible, setHomeMenuVisible] = useState(false);
   const [editingGameId, setEditingGameId] = useState<number | null>(null);
+  const [selectedChatGameId, setSelectedChatGameId] = useState<number | null>(null);
+
+  const selectedChatGame = useMemo(
+    () => asyncGames.find((game) => game.id === selectedChatGameId) ?? null,
+    [asyncGames, selectedChatGameId],
+  );
   const [editingGameName, setEditingGameName] = useState('');
   const [isEditingGame, setIsEditingGame] = useState(false);
 
@@ -1420,6 +1453,7 @@ export default function HomeScreen() {
                       onPress={() => handleOpenAsyncGame(game.id)}
                       onEdit={() => handleEditAsyncGame(game)}
                       onDelete={() => handleDeleteAsyncGame(game)}
+                      onChat={() => setSelectedChatGameId(game.id)}
                     />
                   ))}
                 </View>
@@ -1488,6 +1522,13 @@ export default function HomeScreen() {
         }}
         onSave={handleSaveGameName}
         isLoading={isEditingGame}
+      />
+      <ConversationModal
+        visible={selectedChatGameId !== null}
+        onClose={() => setSelectedChatGameId(null)}
+        gameId={selectedChatGameId ?? 0}
+        gameName={selectedChatGame?.name ?? ''}
+        myUserId={currentUser?.id ?? 0}
       />
     </SafeAreaView>
   );
@@ -1646,22 +1687,29 @@ const styles = StyleSheet.create({
   gameCardLoading: {
     opacity: 0.7,
   },
-  asyncGameCardHeader: {
+  asyncGameCardBody: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 6,
+    alignItems: 'stretch',
+    gap: 12,
   },
-  asyncGameCardTitle: {
+  asyncGameCardMain: {
     flex: 1,
-    marginBottom: 0,
+    minWidth: 0,
   },
-  asyncGameCardHeaderActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  asyncGameCardActions: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    alignSelf: 'stretch',
     flexShrink: 0,
+  },
+  asyncGameCardActionsTop: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  asyncGameCardActionsBottom: {
+    marginTop: 'auto',
+    paddingTop: 8,
   },
   asyncGameEditButton: {
     paddingHorizontal: 8,
@@ -1673,7 +1721,6 @@ const styles = StyleSheet.create({
     minWidth: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
   },
   asyncGameEditButtonPressed: {
     opacity: 0.85,
@@ -1706,36 +1753,40 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.3,
   },
-  asyncAlertBadgeYourTurn: {
-    backgroundColor: COLORS.accent,
-    borderRadius: 6,
+  asyncGameChatButton: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-  },
-  asyncAlertBadgeYourTurnText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
-  asyncAlertBadgeInProgress: {
-    backgroundColor: '#e07820',
     borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: 'white',
+    minWidth: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
   },
-  asyncAlertBadgeInProgressText: {
+  asyncGameChatButtonPressed: {
+    opacity: 0.85,
+    borderColor: COLORS.accent,
+  },
+  asyncGameChatButtonText: {
+    fontSize: 14,
+  },
+  chatUnreadBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#e53935',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatUnreadBadgeText: {
     color: '#ffffff',
     fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
-  asyncAlertBadgeWaitingText: {
-    color: '#9a8a50',
-    fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 0.3,
-    flexShrink: 0,
   },
   asyncAlertBadgeVictory: {
     backgroundColor: '#2e8a50',

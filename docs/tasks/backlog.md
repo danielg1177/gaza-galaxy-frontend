@@ -6129,3 +6129,218 @@ This meant during a knockout turn (`isKnockoutTurn = true`), the button remained
 - Normal End Turn behavior unchanged.
 
 ---
+
+## Phase 57 — Feature: In-Game Messaging System
+
+**Status:** Not started.
+
+Players in an async multiplayer game can send and receive messages to one another throughout the course of the game. The conversation is accessible from two entry points:
+
+1. **Home screen game card** — a chat icon button on the card opens the `ConversationModal` for that game. A badge on the icon shows the number of unread messages.
+2. **In-game ⋮ menu** — a "Chat" row in the dropdown opens the `ConversationModal`. An unread-count badge appears on the row label. The ⋮ button itself also shows the badge (same pattern as the friend-request alert on the ⋮ button).
+
+The backend stores messages in a `game_messages` table and tracks each player's read position with a `last_read_message_id` column on `game_players`. The game list and game detail APIs include a computed `unread_message_count` field so the frontend can show badges without fetching the full message thread.
+
+Work the tasks in order: 11.1 → 11.2 → 11.3 → 11.4 (backend, see `backend/docs/project/roadmap.md` Phase 11) before starting frontend tasks 230 → 231 → 232 → 233 → 234.
+
+---
+
+### Task 230 — Frontend: Add messaging API calls to `gamesService.ts`
+
+**File:** `frontend/src/services/gamesService.ts`
+
+**Requirements:**
+
+Add two new exported async functions to `gamesService.ts`:
+
+1. **`getMessages(gameId: number): Promise<GetMessagesResponse>`**
+
+   Calls `GET /api/games/{gameId}/messages`. The backend returns all messages for the game AND marks all messages as read for the calling user (updating `game_players.last_read_message_id`). Response shape:
+   ```ts
+   export interface GameMessage {
+     id: number;
+     senderUserId: number;
+     senderName: string;      // the sender's in-game player name for this game
+     content: string;
+     createdAt: string;       // ISO 8601
+   }
+
+   export interface GetMessagesResponse {
+     messages: GameMessage[];
+   }
+   ```
+
+2. **`sendMessage(gameId: number, content: string): Promise<SendMessageResponse>`**
+
+   Calls `POST /api/games/{gameId}/messages` with body `{ content }`. Response shape:
+   ```ts
+   export interface SendMessageResponse {
+     message: GameMessage;
+   }
+   ```
+
+Both functions must use the same `apiRequest` / `axios` pattern used by the rest of `gamesService.ts`. Both throw on non-2xx responses.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- `getMessages(gameId)` returns an array of `GameMessage` objects from the backend.
+- `sendMessage(gameId, 'hello')` returns the created `GameMessage` object with a real `id` and `createdAt`.
+
+---
+
+### Task 231 — Frontend: Add `GameMessage` type and messaging state to `gameStore.ts`
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Requirements:**
+
+1. **Import** the `GameMessage` type from `gamesService.ts` (re-export it if needed, or define it locally in `gameStore.ts` and import it into `gamesService.ts`).
+
+2. **Add to store state:**
+   ```ts
+   activeGameMessages: GameMessage[];       // messages for the currently open game
+   isFetchingMessages: boolean;             // true while GET /messages is in flight
+   isSendingMessage: boolean;               // true while POST /messages is in flight
+   ```
+   Default all three to `[]` / `false`.
+
+3. **Add `fetchMessages(gameId: number): Promise<void>` action:**
+   - Sets `isFetchingMessages: true`.
+   - Calls `getMessages(gameId)` from `gamesService.ts`.
+   - On success: sets `activeGameMessages` to the returned `messages` array, sets `isFetchingMessages: false`.
+   - On error: sets `isFetchingMessages: false`, does not throw (swallow silently — message fetch is non-critical).
+
+4. **Add `sendMessage(gameId: number, content: string): Promise<void>` action:**
+   - Sets `isSendingMessage: true`.
+   - Calls `sendMessage(gameId, content)` from `gamesService.ts`.
+   - On success: appends the returned `message` to `activeGameMessages`, sets `isSendingMessage: false`.
+   - On error: sets `isSendingMessage: false`, re-throws so the UI can show an error alert.
+
+5. **Add `clearMessages()` action:**
+   - Sets `activeGameMessages: []`.
+   - Called when the `ConversationModal` unmounts to avoid stale messages appearing next time it opens.
+
+6. **Do NOT** include `activeGameMessages` in the Zustand `persist` config (messages must always be fetched fresh from the server).
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Calling `fetchMessages` populates `activeGameMessages` in the store.
+- Calling `sendMessage` appends to `activeGameMessages` optimistically after the backend responds.
+- `clearMessages` resets the array.
+
+---
+
+### Task 232 — Frontend: Create `ConversationModal.tsx` component
+
+**File:** `frontend/src/components/ConversationModal.tsx`
+
+**Requirements:**
+
+Create a full-screen modal (using the existing `Modal` + `KeyboardAvoidingView` pattern from other modals in the project) that displays an in-game conversation thread.
+
+**Props:**
+```ts
+interface ConversationModalProps {
+  visible: boolean;
+  onClose: () => void;
+  gameId: number;
+  gameName: string;
+  myUserId: number;
+}
+```
+
+**Behaviour:**
+
+1. **On open (`visible` transitions to `true`):** call `fetchMessages(gameId)` from the store. Show a loading spinner while `isFetchingMessages` is true.
+
+2. **On close:** call `clearMessages()` from the store.
+
+3. **Message list:** render `activeGameMessages` in a `FlatList` (or `ScrollView` with `inverted` / auto-scroll-to-bottom). Each message shows:
+   - Sender name (use `message.senderName`).
+   - Message content.
+   - Timestamp (format as `"HH:mm"` or `"MMM D, HH:mm"` if older than today).
+   - Messages from `myUserId` are right-aligned with the player's faction color as the bubble background. Messages from others are left-aligned with a neutral background.
+   - Auto-scroll to the bottom when new messages arrive or the modal opens.
+
+4. **Send input:**
+   - A `TextInput` at the bottom, placeholder `"Message..."`, max length 500 characters.
+   - A send button (arrow icon or "Send" label) to the right. Disabled when `isSendingMessage` is true or the input is empty.
+   - On send: call `sendMessage(gameId, text)` from the store; clear the input on success; show a brief error alert on failure.
+
+5. **Header:** show the game name and a close (✕) button.
+
+6. **Keyboard:** wrap in `KeyboardAvoidingView` with `behavior="padding"` on iOS so the send bar slides up above the keyboard.
+
+7. Only show for async multiplayer games. The modal can be opened from pass-and-play games too without crashing, but the API calls will have no effect (the component is always rendered by a parent that already knows the context).
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Opening the modal fetches messages and displays them.
+- Sending a message appends it to the list immediately (optimistic via store append) and clears the input.
+- Closing the modal resets `activeGameMessages`.
+- Keyboard does not obscure the send bar on iOS.
+
+---
+
+### Task 233 — Frontend: Add chat icon with unread badge to home screen game cards
+
+**Files:** `frontend/src/screens/HomeScreen.tsx` (or the game card component, wherever game card actions are rendered)
+
+**Requirements:**
+
+1. **Locate** the game card component that renders async multiplayer game entries on the home screen.
+
+2. **Add a chat icon button** (use a speech-bubble icon from the existing icon library) to the game card. Place it alongside any existing card action icons (e.g. next to the delete button or the "Your Turn" indicator area) — follow the existing card layout conventions.
+
+3. **Unread badge:** if the game's `unreadMessageCount > 0`, render a red circular badge over the chat icon showing the count (cap display at `99+`). Use the same badge component/style used for friend-request alerts elsewhere in the app.
+
+4. **On press:** open the `ConversationModal` for that game:
+   - Store the selected `gameId` in local component state (`selectedChatGameId`).
+   - Render a single `ConversationModal` instance below the list, passing `visible={selectedChatGameId === game.id}`.
+   - On `onClose`, set `selectedChatGameId` to `null`.
+
+5. **`unreadMessageCount`** comes from the game object's `unread_message_count` field returned by `GET /api/games` (see Backend Task 11.3). Add it to the `ApiGame` / `AsyncGame` type in `gamesService.ts` as `unreadMessageCount: number` (default `0` when absent).
+
+6. Only show the chat button on async multiplayer game cards (`game.playMode === 'asyncMultiplayer'`). Do not show it on pass-and-play or solo cards.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Each async multiplayer game card shows a chat icon.
+- A red badge appears when `unreadMessageCount > 0`.
+- Tapping the icon opens `ConversationModal` for that game; closing it returns to the home screen.
+- After opening the conversation (which triggers `getMessages` and marks as read), the badge clears on the next home screen refresh.
+
+---
+
+### Task 234 — Frontend: Add "Chat" option to in-game ⋮ dropdown with unread badge; badge on ⋮ button
+
+**Files:** `frontend/src/screens/GameScreen.tsx`
+
+**Requirements:**
+
+1. **Add a "Chat" row to the ⋮ dropdown menu.** The row should appear near the top of the menu options (e.g. after "Exit Game" / before "Settings", following existing menu ordering conventions). Label: `"Chat"`. Icon: speech-bubble (matching the icon used on the home screen card in Task 233).
+
+2. **Unread badge on the dropdown row:** if `unreadMessageCount > 0` for the active game, show a red badge with the count on the right side of the "Chat" row label — the same badge style used for friend-request count indicators elsewhere.
+
+3. **Unread badge on the ⋮ button:** the ⋮ (three-dot) menu button in the top-right corner of `GameScreen` already shows a friend-request alert badge when there are pending friend requests. Extend this logic: also show the badge when the active game's `unreadMessageCount > 0`. The badge count should be the total (`pendingFriendRequests + unreadMessageCount`) or, if the existing badge only shows a dot/icon rather than a number, show it when either condition is true. Match the existing friend-request badge implementation exactly.
+
+4. **On press "Chat":** close the dropdown, then open the `ConversationModal` for the active game (`asyncGameId`). Manage modal visibility with a `showConversationModal` boolean state variable in `GameScreen`.
+
+5. **`unreadMessageCount` source:** read from the active `AsyncGame` record in the store (the field added in Task 233). When the conversation modal closes, the count clears on the next game refresh (standard polling cycle — no special cache-busting needed here).
+
+6. Only show the "Chat" option when the active game is async multiplayer (`asyncGameId != null`). Hide it entirely for pass-and-play and solo games.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Opening the ⋮ menu in an async game shows a "Chat" option.
+- The "Chat" row has an unread badge when there are unread messages.
+- The ⋮ button itself shows a badge when `unreadMessageCount > 0` (in addition to showing it for pending friend requests).
+- Tapping "Chat" opens `ConversationModal` for the active game.
+- The "Chat" option is absent in solo and pass-and-play games.
+
+---
