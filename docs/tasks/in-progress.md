@@ -417,27 +417,25 @@ Because `eliminatedPlayerPendingKnockout` was only cleared in the async success 
 
 ---
 
-## Phase 56 — Bug Fix: Farewell Turn Still Loops Back (Silent `endTurn` Early-Return + Missing Game-Over Guard)
+## Phase 56 — Bug Fix: Farewell Turn Regressions (Reverted + Stabilised)
 
 **Status:** Complete (2026-06-05).
 
-Three additional defects remain after Phase 55 that prevent the farewell turn from properly advancing:
+Attempted fixes (Tasks 226–229) to route `endTurn()` through `acknowledgeKnockout` for eliminated async players introduced regressions:
+- Task 226 caused normal multiplayer turns to loop back to the same player.
+- Task 227 (engine-based approach) ran AI turns inside `acknowledgeKnockout`, corrupting round state for subsequent players.
+- Task 227 v1 (game-over guard) prematurely ended the game when other players were still alive.
 
-1. **`endTurn()` silently returns home for eliminated async players without submitting.** When `eliminatedPlayerPendingKnockout` is false (Phase 54 detection missed), the End Turn button calls `endTurn()`, which detects `humanPlayer.isEliminated` and sets `shouldReturnHome: true` without ever hitting the backend. `current_user_id` stays unchanged → game loops back to the same player.
+All three were reverted. **Task 228** (End Turn always disabled during `isSubmittingTurn`) is kept — it is a pure UI safety fix with no logic risk.
 
-2. **`acknowledgeKnockout` can submit the eliminated player's own ID as the next player.** If the search loop finds no non-eliminated, non-AI human (e.g. the game only has one human left and they are being eliminated), `nextHumanPlayerId` falls back to the farewell player's own ID. The backend accepts this (creator is not marked AI), sets `current_user_id` back to the creator, and the loop repeats.
+The `acknowledgeKnockout` async path is restored to the pre-Phase-56 manual loop plus console logging for diagnosis. The console logs will reveal the exact `players` array and `nextHumanPlayerId` when the farewell turn fires, allowing a correct targeted fix in the next phase.
 
-3. **End Turn button stays tappable during a knockout submission**, allowing additional presses while `isSubmittingTurn = true` (previously only disabled for non-knockout turns).
-
-- ~~**Task 226**~~ — Frontend: Route eliminated async players in `endTurn()` through `acknowledgeKnockout` instead of silently returning home *(complete 2026-06-05)*
-- ~~**Task 227**~~ — Frontend: Replace manual next-player loop in `acknowledgeKnockout` with `advanceToNextNonEliminatedPlayer` + `runAiTurnsUntilHuman` — reuses engine logic that correctly handles game-over and AI turns *(complete 2026-06-05)*
 - ~~**Task 228**~~ — Frontend: Always disable End Turn button when `isSubmittingTurn = true`, regardless of knockout state *(complete 2026-06-05)*
-- ~~**Task 229**~~ — Frontend: Revert premature game-over guard (Task 227 v1) that submitted `status: finished` when loop found no human; replaced with engine-driven approach *(complete 2026-06-05)*
 
 ---
 
 ## Changelog
-- 2026-06-05: Phase 56 complete (Tasks 226–229) — `endTurn()` routes eliminated async players through `acknowledgeKnockout` (fallback for detection miss); `acknowledgeKnockout` async path replaced manual next-player loop with `advanceToNextNonEliminatedPlayer` + `runAiTurnsUntilHuman` (correctly handles game-over, AI turns, all player counts); End Turn always disabled during submission. Premature game-over guard reverted.
+- 2026-06-05: Phase 56 reverted (Tasks 226–227, 229) — routing `endTurn()` through `acknowledgeKnockout` broke normal turns; engine-based AI-advance inside `acknowledgeKnockout` corrupted round state. Tasks 226/227/229 reverted. Task 228 kept (End Turn disabled during submit). `acknowledgeKnockout` async path restored to pre-Phase-56 manual loop + console logging.
 - 2026-06-05: Phase 55 complete (Tasks 224–225) — `acknowledgeKnockout` now clears `eliminatedPlayerPendingKnockout` synchronously before the async submit, preventing double-invocation; restored on error for retry; `handleCloseBattleReport` no longer calls `acknowledgeKnockout` so End Turn is the single trigger.
 - 2026-06-05: Phase 55 added (Tasks 224–225) — farewell turn loops back to eliminated player; root cause: `handleCloseBattleReport` + End Turn both called `acknowledgeKnockout` while flag was still true; double submit race condition.
 - 2026-06-05: Backend `TurnController::submit()` `actions` rule changed from `required` to `present` (Laravel `required` rejects empty arrays; `present` allows them).

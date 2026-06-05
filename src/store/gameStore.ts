@@ -973,16 +973,6 @@ export const useGameStore = create<GameStore>()(
       return;
     }
     if (humanPlayer.isEliminated) {
-      if (record.asyncGameId != null) {
-        // Eliminated async player: must submit farewell turn to advance backend state.
-        // Route through acknowledgeKnockout which handles the full submit flow.
-        // If the flag wasn't set (detection miss in loadAsyncGame), set it now.
-        if (!get().eliminatedPlayerPendingKnockout) {
-          set({ eliminatedPlayerPendingKnockout: true });
-        }
-        get().acknowledgeKnockout();
-        return;
-      }
       set({ shouldReturnHome: true });
       return;
     }
@@ -1350,26 +1340,28 @@ export const useGameStore = create<GameStore>()(
     if (record.asyncGameId != null) {
       const asyncGameId = record.asyncGameId;
       const farewellPlayers = stateAfterForfeit.players;
+      const farewellCurrentIdx = farewellPlayers.findIndex(
+        (p) => p.id === stateAfterForfeit.currentPlayerId,
+      );
+      let nextHumanPlayerId = stateAfterForfeit.currentPlayerId;
+      for (let offset = 1; offset <= farewellPlayers.length; offset++) {
+        const candidate = farewellPlayers[(farewellCurrentIdx + offset) % farewellPlayers.length];
+        if (!candidate.isEliminated && !candidate.isAI) {
+          nextHumanPlayerId = candidate.id;
+          break;
+        }
+      }
+
       console.log('[acknowledgeKnockout] farewellPlayerId:', farewellPlayerId);
       console.log('[acknowledgeKnockout] players:', JSON.stringify(farewellPlayers.map(p => ({
         id: p.id, isEliminated: p.isEliminated, isAI: p.isAI,
       }))));
+      console.log('[acknowledgeKnockout] nextHumanPlayerId:', nextHumanPlayerId);
       console.log('[acknowledgeKnockout] preTurnNumber:', record.state.turnNumber);
 
-      // Advance past the farewell player using the same engine logic as endTurn.
-      // advanceToNextNonEliminatedPlayer + runAiTurnsUntilHuman correctly handles
-      // game-over (status becomes 'finished' when only 1 player survives) and
-      // finds the next human player after running any AI turns.
-      const advancedFromFarewell = advanceToNextNonEliminatedPlayer(stateAfterForfeit);
-      const { state: afterAiState } = runAiTurnsUntilHuman({
-        ...advancedFromFarewell,
-        events: [],
-      });
-
-      console.log('[acknowledgeKnockout] nextPlayerId:', afterAiState.currentPlayerId, 'status:', afterAiState.status);
-
       const nextState = {
-        ...afterAiState,
+        ...stateAfterForfeit,
+        currentPlayerId: nextHumanPlayerId,
         turnNumber: record.state.turnNumber + 1,
       };
 
