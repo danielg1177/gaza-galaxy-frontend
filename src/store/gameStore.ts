@@ -1384,14 +1384,7 @@ export const useGameStore = create<GameStore>()(
   },
 
   clearPendingTurnReport: () => {
-    const record = get().getActiveRecord();
-    const localPlayerId = record !== null ? getLocalHumanPlayerId(record.state) : undefined;
-    const currentArchive = get().playerBattleArchiveByPlayerId;
-    const newArchive =
-      localPlayerId !== undefined
-        ? { ...currentArchive, [localPlayerId]: [] }
-        : currentArchive;
-    set({ turnReport: [], playerBattleArchiveByPlayerId: newArchive });
+    set({ turnReport: [] });
   },
 
   setAiObserverMode: (value) => set({ aiObserverMode: value }),
