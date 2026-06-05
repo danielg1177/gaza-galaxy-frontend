@@ -122,6 +122,8 @@ export interface GameStore {
   isViewingFinishedGame: boolean;
   /** Finished async game IDs the local player has already viewed the final battle for. */
   finalBattleViewedByGameId: Record<string, boolean>;
+  /** Per-game turn key for which the local human already dismissed the battle report this session. */
+  acknowledgedBattleReportTurnKeyByGameId: Record<string, string>;
   startNewGame: (config: GameConfig) => void;
   loadGame: (id: string) => void;
   loadAsyncGame: (detail: ApiGameDetail) => void;
@@ -145,6 +147,7 @@ export interface GameStore {
   clearReturnHome: () => void;
   markFinalBattleViewed: (gameId: string) => void;
   clearPendingTurnReport: () => void;
+  acknowledgeBattleReport: () => void;
   setAiObserverMode: (value: boolean) => void;
   clearAiObserver: () => void;
   isAsyncGame: () => boolean;
@@ -221,6 +224,25 @@ function buildPlayers(
     }
     return player;
   });
+}
+
+/** Stable key for battle-report auto-open / dismiss deduplication for one human turn. */
+export function battleReportTurnKey(
+  gameId: string | null,
+  state: GameState | null | undefined,
+  localHumanPlayerId: string | undefined,
+  options?: { skipActivePlayerCheck?: boolean },
+): string | null {
+  if (gameId === null || state === undefined || state === null || localHumanPlayerId === undefined) {
+    return null;
+  }
+  if (
+    !options?.skipActivePlayerCheck &&
+    state.currentPlayerId !== localHumanPlayerId
+  ) {
+    return null;
+  }
+  return `${gameId}-${state.turnNumber}-${localHumanPlayerId}`;
 }
 
 /** Fog/UI ownership: current human on their turn, otherwise the first human (e.g. during AI turns). */
@@ -462,6 +484,7 @@ export const useGameStore = create<GameStore>()(
   pendingAiPlayerId: null,
   isViewingFinishedGame: false,
   finalBattleViewedByGameId: {},
+  acknowledgedBattleReportTurnKeyByGameId: {},
 
   startNewGame: (config) => {
     const seed = Date.now();
@@ -1367,6 +1390,7 @@ export const useGameStore = create<GameStore>()(
       isSubmittingTurn: false,
       shouldReturnHome: false,
       isViewingFinishedGame: false,
+      acknowledgedBattleReportTurnKeyByGameId: {},
     });
   },
 
@@ -1385,6 +1409,44 @@ export const useGameStore = create<GameStore>()(
 
   clearPendingTurnReport: () => {
     set({ turnReport: [] });
+  },
+
+  acknowledgeBattleReport: () => {
+    const record = get().getActiveRecord();
+    if (record === null) {
+      set({ turnReport: [] });
+      return;
+    }
+    const localPlayerId = getLocalHumanPlayerId(record.state);
+    const currentArchive = get().playerBattleArchiveByPlayerId;
+    const newArchive =
+      localPlayerId !== undefined
+        ? { ...currentArchive, [localPlayerId]: [] }
+        : currentArchive;
+    const turnKey = battleReportTurnKey(record.id, record.state, localPlayerId, {
+      skipActivePlayerCheck: get().isViewingFinishedGame,
+    });
+    set({
+      turnReport: [],
+      playerBattleArchiveByPlayerId: newArchive,
+      games: get().games.map((g) =>
+        g.id === record.id
+          ? {
+              ...g,
+              pendingTurnReport: undefined,
+              pendingTurnReportAcknowledged: true,
+            }
+          : g,
+      ),
+      ...(turnKey !== null
+        ? {
+            acknowledgedBattleReportTurnKeyByGameId: {
+              ...get().acknowledgedBattleReportTurnKeyByGameId,
+              [record.id]: turnKey,
+            },
+          }
+        : {}),
+    });
   },
 
   setAiObserverMode: (value) => set({ aiObserverMode: value }),

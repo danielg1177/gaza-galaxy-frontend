@@ -8,9 +8,12 @@ import type { RootStackParamList } from '../../App';
 
 const COLORS = {
   background: '#f5f0eb',
+  panel: '#ffffff',
   accent: '#4060c8',
   accentDim: '#e2e8f8',
+  text: '#1a1a2e',
   textMuted: '#6a6880',
+  border: '#d8d4ce',
 };
 
 function FriendsNavButton({

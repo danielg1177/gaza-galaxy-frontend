@@ -42,6 +42,7 @@ import {
 import type { BuildingType, Fleet, OwnerId, Planet, Player, TurnEvent } from '../game/types';
 import { saveTurnProgress } from '../services/gamesService';
 import {
+  battleReportTurnKey,
   getLocalHumanPlayerId,
   type PendingFleet,
   useGameStore,
@@ -1348,7 +1349,10 @@ export default function GameScreen() {
   const clearReturnHome = useGameStore((s) => s.clearReturnHome);
   const isViewingFinishedGame = useGameStore((s) => s.isViewingFinishedGame);
   const markFinalBattleViewed = useGameStore((s) => s.markFinalBattleViewed);
-  const clearPendingTurnReport = useGameStore((s) => s.clearPendingTurnReport);
+  const acknowledgeBattleReport = useGameStore((s) => s.acknowledgeBattleReport);
+  const acknowledgedBattleReportTurnKeyByGameId = useGameStore(
+    (s) => s.acknowledgedBattleReportTurnKeyByGameId,
+  );
   const turnReport = useGameStore((s) => s.turnReport);
   const playerBattleArchiveByPlayerId = useGameStore(
     (s) => s.playerBattleArchiveByPlayerId,
@@ -1586,20 +1590,31 @@ export default function GameScreen() {
   }, [humanCombatEvents]);
 
   useEffect(() => {
-    const turnKey = `${gameState?.roundNumber ?? 0}-${localHumanPlayerId ?? ''}`;
+    const turnKey = battleReportTurnKey(activeGameId, gameState, localHumanPlayerId, {
+      skipActivePlayerCheck: isViewingFinishedGame,
+    });
+    if (turnKey === null) {
+      return;
+    }
     if (
       humanCombatEvents.length > 0 &&
       !showingLockScreen &&
-      turnKey !== lastOpenedTurnKeyRef.current
+      !showBattleReportModal &&
+      turnKey !== lastOpenedTurnKeyRef.current &&
+      acknowledgedBattleReportTurnKeyByGameId[activeGameId ?? ''] !== turnKey
     ) {
       setShowBattleReportModal(true);
       lastOpenedTurnKeyRef.current = turnKey;
     }
   }, [
+    activeGameId,
+    acknowledgedBattleReportTurnKeyByGameId,
+    gameState,
     humanCombatEvents.length,
-    showingLockScreen,
-    gameState?.roundNumber,
+    isViewingFinishedGame,
     localHumanPlayerId,
+    showBattleReportModal,
+    showingLockScreen,
   ]);
 
   useEffect(() => {
@@ -2910,7 +2925,7 @@ export default function GameScreen() {
         pendingGameOverAlertRef.current = true;
         markFinalBattleViewed(String(asyncGameId));
         setShowBattleReportModal(false);
-        clearPendingTurnReport();
+        acknowledgeBattleReport();
         return;
       }
     }
@@ -2918,13 +2933,13 @@ export default function GameScreen() {
       acknowledgeKnockout();
     }
     setShowBattleReportModal(false);
-    clearPendingTurnReport();
+    acknowledgeBattleReport();
   }, [
     isViewingFinishedGame,
     markFinalBattleViewed,
     eliminatedPlayerPendingKnockout,
     acknowledgeKnockout,
-    clearPendingTurnReport,
+    acknowledgeBattleReport,
   ]);
 
   const handleNewGame = () => {
