@@ -4087,9 +4087,9 @@ export default function GameScreen() {
             style={[
               styles.endTurnButton,
               { bottom: insets.bottom + 16 },
-              !isKnockoutTurn && isSubmittingTurn && styles.endTurnButtonDisabled,
+              isSubmittingTurn && styles.endTurnButtonDisabled,
             ]}
-            disabled={!isKnockoutTurn && isSubmittingTurn}
+            disabled={isSubmittingTurn}
             onPress={() => {
               cancelDrag();
               exitBoxSelect();

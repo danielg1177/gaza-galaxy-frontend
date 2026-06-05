@@ -6061,3 +6061,71 @@ No other changes. `resetGame()` already clears all the necessary in-game state (
 - No double-submit errors in the backend logs.
 
 ---
+
+## Phase 56 — Bug Fix: Farewell Turn Still Loops Back (Silent `endTurn` Early-Return + Missing Game-Over Guard)
+
+### Task 226 — Frontend: Route Eliminated Async Players in `endTurn()` Through `acknowledgeKnockout`
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Problem:** `endTurn()` had an early-return guard for eliminated players:
+```typescript
+if (humanPlayer.isEliminated) {
+  set({ shouldReturnHome: true });
+  return;
+}
+```
+For async games, this returns the player to the home screen WITHOUT calling the backend. `current_user_id` stays unchanged. The game immediately shows as "your turn" again for the same turn number. This is the primary cause of the farewell turn loop.
+
+**Fix:** When `humanPlayer.isEliminated` is true AND the game is async (`record.asyncGameId != null`), set `eliminatedPlayerPendingKnockout: true` (if not already set) and call `get().acknowledgeKnockout()`. This routes the submit through the correct farewell-turn submission path instead of silently returning home.
+
+**Verification:**
+- Eliminated async player taps End Turn → `endTurn()` catches the eliminated state → `acknowledgeKnockout()` fires → farewell turn submitted → player goes home → game card no longer shows "your turn".
+- If `eliminatedPlayerPendingKnockout` was already `true` (Phase 54 detection worked), the `acknowledgeKnockout` guard at the start prevents double-invocation.
+
+---
+
+### Task 227 — Frontend: Add Game-Over Guard in `acknowledgeKnockout` — Submit Finished State if No Next Human Found
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Problem:** The loop in `acknowledgeKnockout` that searches for the next human player:
+```typescript
+let nextHumanPlayerId = stateAfterForfeit.currentPlayerId;  // fallback = self
+for (let offset = 1; ...) {
+  if (!candidate.isEliminated && !candidate.isAI) {
+    nextHumanPlayerId = candidate.id;
+    break;
+  }
+}
+```
+If no valid human is found (e.g. all other players are AI or eliminated), it silently falls back to the farewell player's own ID. The backend then sets `current_user_id` back to the eliminated player, creating an infinite turn loop.
+
+**Fix:**
+1. Change `nextHumanPlayerId` default to `null` instead of `stateAfterForfeit.currentPlayerId`.
+2. If the loop ends with `nextHumanPlayerId === null`: the game is over. Find the single surviving player (if any), build a `finishedState` with `status: 'finished'`, `winnerId`, and submit it. The backend's finished-game path sets `current_user_id = null` and `status = 'finished'`.
+3. Add console logging of player list, farewell player, and resolved next player for diagnosis.
+
+**Verification:**
+- Eliminated player in a game where only AI opponents remain → `acknowledgeKnockout` submits finished state → game ends, creator goes home, game card shows as finished (not "your turn").
+- Eliminated player in a game with another human → loop finds human → normal farewell submit → friend's turn advances correctly.
+
+---
+
+### Task 228 — Frontend: Always Disable End Turn Button When `isSubmittingTurn = true`
+
+**File:** `frontend/src/screens/GameScreen.tsx`
+
+**Problem:** The End Turn button's `disabled` prop was:
+```typescript
+disabled={!isKnockoutTurn && isSubmittingTurn}
+```
+This meant during a knockout turn (`isKnockoutTurn = true`), the button remained tappable even while `isSubmittingTurn = true`. Multiple rapid taps could trigger the UI flow multiple times (though the synchronous guard in `acknowledgeKnockout` prevents double submits, the UI remained non-disabled which was confusing and potentially risky).
+
+**Fix:** Change to `disabled={isSubmittingTurn}` — always disable when submitting, regardless of knockout state.
+
+**Verification:**
+- Tapping End Turn on a knockout turn immediately disables the button until the backend submit completes (or fails and the flag is restored).
+- Normal End Turn behavior unchanged.
+
+---
