@@ -659,6 +659,7 @@ export const useGameStore = create<GameStore>()(
       pendingFarewellPlayerIds: [],
       isSubmittingTurn: false,
       shouldReturnHome: false,
+      isViewingFinishedGame: false,
     });
   },
 
@@ -1365,6 +1366,7 @@ export const useGameStore = create<GameStore>()(
       pendingFarewellPlayerIds: [],
       isSubmittingTurn: false,
       shouldReturnHome: false,
+      isViewingFinishedGame: false,
     });
   },
 
@@ -1382,7 +1384,14 @@ export const useGameStore = create<GameStore>()(
   },
 
   clearPendingTurnReport: () => {
-    set({ turnReport: [] });
+    const record = get().getActiveRecord();
+    const localPlayerId = record !== null ? getLocalHumanPlayerId(record.state) : undefined;
+    const currentArchive = get().playerBattleArchiveByPlayerId;
+    const newArchive =
+      localPlayerId !== undefined
+        ? { ...currentArchive, [localPlayerId]: [] }
+        : currentArchive;
+    set({ turnReport: [], playerBattleArchiveByPlayerId: newArchive });
   },
 
   setAiObserverMode: (value) => set({ aiObserverMode: value }),
