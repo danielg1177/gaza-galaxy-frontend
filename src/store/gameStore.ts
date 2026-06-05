@@ -1418,17 +1418,11 @@ export const useGameStore = create<GameStore>()(
       return;
     }
     const localPlayerId = getLocalHumanPlayerId(record.state);
-    const currentArchive = get().playerBattleArchiveByPlayerId;
-    const newArchive =
-      localPlayerId !== undefined
-        ? { ...currentArchive, [localPlayerId]: [] }
-        : currentArchive;
     const turnKey = battleReportTurnKey(record.id, record.state, localPlayerId, {
       skipActivePlayerCheck: get().isViewingFinishedGame,
     });
     set({
       turnReport: [],
-      playerBattleArchiveByPlayerId: newArchive,
       games: get().games.map((g) =>
         g.id === record.id
           ? {
