@@ -466,12 +466,12 @@ function buildPlayerReports(
 export const useGameStore = create<GameStore>()(
   persist(
     (set, get) => ({
-  games: [],
+  games: [] as GameRecord[],
   _hasHydrated: false,
   activeGameId: null,
   selectedPlanetId: null,
   pendingFleet: null,
-  queuedOrders: [],
+  queuedOrders: [] as PendingFleet[],
   showingLockScreen: false,
   turnReport: [],
   playerBattleArchiveByPlayerId: {},
