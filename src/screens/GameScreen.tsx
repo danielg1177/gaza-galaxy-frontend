@@ -2994,16 +2994,11 @@ export default function GameScreen() {
         return;
       }
     }
-    if (eliminatedPlayerPendingKnockout) {
-      acknowledgeKnockout();
-    }
     setShowBattleReportModal(false);
     acknowledgeBattleReport();
   }, [
     isViewingFinishedGame,
     markFinalBattleViewed,
-    eliminatedPlayerPendingKnockout,
-    acknowledgeKnockout,
     acknowledgeBattleReport,
   ]);
 

@@ -401,7 +401,25 @@ One task to detect the eliminated-farewell-turn scenario in `loadAsyncGame` and 
 
 ---
 
+## Phase 55 — Bug Fix: Farewell Turn Loops Back to Eliminated Player (Double-Submit Race Condition)
+
+**Status:** Complete (2026-06-05).
+
+Two tasks fixing a race condition where `acknowledgeKnockout` is triggered from two UI entry points simultaneously:
+
+1. Closing the battle report modal (via `handleCloseBattleReport`) called `acknowledgeKnockout()`.
+2. The End Turn button (already the intended sole trigger) also calls `acknowledgeKnockout()`.
+
+Because `eliminatedPlayerPendingKnockout` was only cleared in the async success callback, a second call could pass the guard while the first submit was still in-flight, sending a duplicate farewell submit. The backend rejected the second (stale 409) but the first submit succeeded with `currentPlayerId = nextHumanPlayerId`. However in edge cases this created inconsistent state causing the turn to loop back.
+
+- ~~**Task 224**~~ — Frontend: Clear `eliminatedPlayerPendingKnockout` synchronously at the start of `acknowledgeKnockout` to prevent double-invocation; restore it on error so the player can retry *(complete 2026-06-05)*
+- ~~**Task 225**~~ — Frontend: Remove `acknowledgeKnockout()` call from `handleCloseBattleReport` — End Turn button is the sole entry point *(complete 2026-06-05)*
+
+---
+
 ## Changelog
+- 2026-06-05: Phase 55 complete (Tasks 224–225) — `acknowledgeKnockout` now clears `eliminatedPlayerPendingKnockout` synchronously before the async submit, preventing double-invocation; restored on error for retry; `handleCloseBattleReport` no longer calls `acknowledgeKnockout` so End Turn is the single trigger.
+- 2026-06-05: Phase 55 added (Tasks 224–225) — farewell turn loops back to eliminated player; root cause: `handleCloseBattleReport` + End Turn both called `acknowledgeKnockout` while flag was still true; double submit race condition.
 - 2026-06-05: Backend `TurnController::submit()` `actions` rule changed from `required` to `present` (Laravel `required` rejects empty arrays; `present` allows them).
 - 2026-06-05: `acknowledgeKnockout` async path updated to walk player list skipping both eliminated AND AI players when computing `nextHumanPlayerId` — backend requires `currentPlayerId` to map to a human user.
 - 2026-06-05: Phase 54 complete (Task 223) — `loadAsyncGame` now detects eliminated farewell turn (`detail.isMyTurn && localPlayer.isEliminated`) and sets `eliminatedPlayerPendingKnockout: true` + `showingLockScreen: true`; `acknowledgeKnockout` chain now fires correctly end-to-end.

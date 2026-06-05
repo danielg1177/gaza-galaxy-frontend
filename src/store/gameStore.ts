@@ -1329,6 +1329,9 @@ export const useGameStore = create<GameStore>()(
     if (record === null || !get().eliminatedPlayerPendingKnockout) {
       return;
     }
+    // Clear synchronously to prevent double-invocation from concurrent UI events.
+    set({ eliminatedPlayerPendingKnockout: false, isSubmittingTurn: true });
+
     const farewellPlayerId = record.state.currentPlayerId;
     const stateAfterForfeit = {
       ...record.state,
@@ -1354,8 +1357,6 @@ export const useGameStore = create<GameStore>()(
         turnNumber: record.state.turnNumber + 1,
       };
 
-      set({ isSubmittingTurn: true });
-
       void (async () => {
         try {
           await submitTurn(asyncGameId, {
@@ -1369,12 +1370,12 @@ export const useGameStore = create<GameStore>()(
           requestHomeRefresh();
           set({
             isSubmittingTurn: false,
-            eliminatedPlayerPendingKnockout: false,
             shouldReturnHome: true,
           });
         } catch (err) {
           console.error('[acknowledgeKnockout] submitTurn failed:', err);
-          set({ isSubmittingTurn: false });
+          // Restore flag so the player can retry via End Turn.
+          set({ eliminatedPlayerPendingKnockout: true, isSubmittingTurn: false });
 
           const alertBody =
             err instanceof ApiError

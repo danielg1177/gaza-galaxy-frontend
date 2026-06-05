@@ -6023,3 +6023,41 @@ No other changes. `resetGame()` already clears all the necessary in-game state (
 - Pass-and-play games: `acknowledgeKnockout` passes through the existing non-async path unchanged. No regressions.
 
 ---
+
+## Phase 55 — Bug Fix: Farewell Turn Loops Back to Eliminated Player (Double-Submit Race Condition)
+
+### Task 224 — Frontend: Clear `eliminatedPlayerPendingKnockout` Synchronously at Start of `acknowledgeKnockout`
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Problem:** `eliminatedPlayerPendingKnockout` was only set to `false` inside the async success callback of `acknowledgeKnockout`. This meant the flag remained `true` during the entire duration of the network request. If a second call to `acknowledgeKnockout` occurred before the first resolved (e.g. the user tapped End Turn while the battle report was still closing), both calls would pass the `!get().eliminatedPlayerPendingKnockout` guard and fire duplicate `submitTurn` requests. The backend accepted whichever arrived first and rejected the second with a 409. In some orderings this caused `current_user_id` to reflect an inconsistent state.
+
+**Fix:**
+1. At the very top of `acknowledgeKnockout`, immediately after the `if (record === null || !get().eliminatedPlayerPendingKnockout)` guard, add a synchronous `set({ eliminatedPlayerPendingKnockout: false, isSubmittingTurn: true })`. This atomically disables re-entry before any async work begins.
+2. Remove the separate `set({ isSubmittingTurn: true })` call that existed just before the `void (async () => { ... })()` block (it is now redundant).
+3. In the `catch` block, restore the flag: `set({ eliminatedPlayerPendingKnockout: true, isSubmittingTurn: false })` so the player can retry via End Turn if the submit fails.
+4. In the success path, remove `eliminatedPlayerPendingKnockout: false` from the `set(...)` call since it was already cleared synchronously.
+
+**Verification:**
+- Rapidly tapping End Turn twice does not fire two `submitTurn` requests — the second tap is a no-op because the flag is already `false`.
+- If the submit fails (network error), the "End Turn" button becomes active again and the player can retry.
+
+---
+
+### Task 225 — Frontend: Remove `acknowledgeKnockout()` from `handleCloseBattleReport`
+
+**File:** `frontend/src/screens/GameScreen.tsx`
+
+**Problem:** `handleCloseBattleReport` checked `if (eliminatedPlayerPendingKnockout)` and called `acknowledgeKnockout()` when the player dismissed the battle report modal. The End Turn button already calls `acknowledgeKnockout()` when `isKnockoutTurn` is true. This created two independent entry points for the same action, making the double-invocation race condition easy to hit: the user closes the battle report, the flag fires once, then taps End Turn before the flag clears, firing a second time.
+
+**Fix:**
+1. Remove the `if (eliminatedPlayerPendingKnockout) { acknowledgeKnockout(); }` block from `handleCloseBattleReport`.
+2. Remove `eliminatedPlayerPendingKnockout` and `acknowledgeKnockout` from the `useCallback` dependency array of `handleCloseBattleReport` (they are no longer referenced).
+3. End Turn button remains the single, explicit, intentional entry point for acknowledging a knockout.
+
+**Verification:**
+- Closing the battle report modal on a farewell turn does NOT submit the turn or navigate home — the player sees their final map state and must tap End Turn.
+- Tapping End Turn correctly calls `acknowledgeKnockout`, submits the farewell turn, navigates home, and refreshes the home screen.
+- No double-submit errors in the backend logs.
+
+---
