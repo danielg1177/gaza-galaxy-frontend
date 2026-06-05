@@ -316,24 +316,43 @@ function assignAis(
     }
   }
 
-  // Fallback: zone uniqueness and human-separation constraints are dropped.
-  // This handles high player counts where strict constraints are geometrically impossible
-  // (e.g. 4 AIs on a large map where both humans occupy opposite edge zones).
+  // Fallback: zone uniqueness constraint is dropped but we still attempt to maximise
+  // distance from human home planets. Sort all remaining neutrals by their minimum
+  // distance to any human starting planet (farthest first) so the AI lands as far
+  // away as the map allows even when the strict threshold cannot be met.
   const assignedPlanetIndices = new Set([
     ...humanAssignments.values(),
     ...lastAssignment.values(),
   ]);
-  for (const playerId of aiPlayerIds) {
-    if (lastAssignment.has(playerId)) continue;
-    for (let i = 0; i < map.planets.length; i++) {
-      if (map.planets[i].owner === 'neutral' && !assignedPlanetIndices.has(i)) {
-        lastAssignment.set(playerId, i);
-        assignedPlanetIndices.add(i);
-        break;
-      }
+
+  const remainingNeutrals: Array<{ index: number; minHumanDist: number }> = [];
+  for (let i = 0; i < map.planets.length; i++) {
+    if (map.planets[i].owner === 'neutral' && !assignedPlanetIndices.has(i)) {
+      const minDist =
+        humanPositions.length > 0
+          ? Math.min(
+              ...humanPositions.map((hp) =>
+                computeClickDistance(map.planets[i].position, hp),
+              ),
+            )
+          : Infinity;
+      remainingNeutrals.push({ index: i, minHumanDist: minDist });
     }
   }
-  console.warn('AI spawn fallback: zone/separation constraints unsatisfiable, remaining AIs placed on nearest available neutral planet');
+  remainingNeutrals.sort((a, b) => b.minHumanDist - a.minHumanDist);
+
+  for (const playerId of aiPlayerIds) {
+    if (lastAssignment.has(playerId)) continue;
+    const next = remainingNeutrals.shift();
+    if (next !== undefined) {
+      lastAssignment.set(playerId, next.index);
+      assignedPlanetIndices.add(next.index);
+    }
+  }
+
+  console.warn(
+    'AI spawn fallback: zone/separation constraints unsatisfiable, remaining AIs placed on farthest available neutral planet from humans',
+  );
   return lastAssignment;
 }
 
