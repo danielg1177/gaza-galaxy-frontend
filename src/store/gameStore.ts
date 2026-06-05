@@ -1350,63 +1350,26 @@ export const useGameStore = create<GameStore>()(
     if (record.asyncGameId != null) {
       const asyncGameId = record.asyncGameId;
       const farewellPlayers = stateAfterForfeit.players;
-      const farewellCurrentIdx = farewellPlayers.findIndex(
-        (p) => p.id === stateAfterForfeit.currentPlayerId,
-      );
-      let nextHumanPlayerId: string | null = null;
-      for (let offset = 1; offset <= farewellPlayers.length; offset++) {
-        const candidate = farewellPlayers[(farewellCurrentIdx + offset) % farewellPlayers.length];
-        if (!candidate.isEliminated && !candidate.isAI) {
-          nextHumanPlayerId = candidate.id;
-          break;
-        }
-      }
-
       console.log('[acknowledgeKnockout] farewellPlayerId:', farewellPlayerId);
       console.log('[acknowledgeKnockout] players:', JSON.stringify(farewellPlayers.map(p => ({
         id: p.id, isEliminated: p.isEliminated, isAI: p.isAI,
       }))));
-      console.log('[acknowledgeKnockout] nextHumanPlayerId:', nextHumanPlayerId);
       console.log('[acknowledgeKnockout] preTurnNumber:', record.state.turnNumber);
 
-      // No surviving human player — the game is over (AI won). Submit a finished state.
-      if (nextHumanPlayerId === null) {
-        const survivingPlayer = farewellPlayers.find((p) => !p.isEliminated) ?? null;
-        const finishedState = {
-          ...stateAfterForfeit,
-          status: 'finished' as const,
-          winnerId: survivingPlayer?.id ?? null,
-          currentPlayerId: stateAfterForfeit.currentPlayerId,
-          turnNumber: record.state.turnNumber + 1,
-        };
-        void (async () => {
-          try {
-            await submitTurn(asyncGameId, {
-              actions: [],
-              resultingState: finishedState,
-              turnNumber: record.state.turnNumber,
-              roundNumber: record.state.roundNumber,
-              events: [],
-            });
-            get().resetGame();
-            requestHomeRefresh();
-            set({ isSubmittingTurn: false, shouldReturnHome: true });
-          } catch (err) {
-            console.error('[acknowledgeKnockout] game-over submitTurn failed:', err);
-            set({ eliminatedPlayerPendingKnockout: true, isSubmittingTurn: false });
-            const alertBody =
-              err instanceof ApiError
-                ? `Server returned ${err.status}: ${err.message}`
-                : 'Could not submit your turn. Your moves were not saved — try again.';
-            showAlert('Submit Failed', alertBody);
-          }
-        })();
-        return;
-      }
+      // Advance past the farewell player using the same engine logic as endTurn.
+      // advanceToNextNonEliminatedPlayer + runAiTurnsUntilHuman correctly handles
+      // game-over (status becomes 'finished' when only 1 player survives) and
+      // finds the next human player after running any AI turns.
+      const advancedFromFarewell = advanceToNextNonEliminatedPlayer(stateAfterForfeit);
+      const { state: afterAiState } = runAiTurnsUntilHuman({
+        ...advancedFromFarewell,
+        events: [],
+      });
+
+      console.log('[acknowledgeKnockout] nextPlayerId:', afterAiState.currentPlayerId, 'status:', afterAiState.status);
 
       const nextState = {
-        ...stateAfterForfeit,
-        currentPlayerId: nextHumanPlayerId,
+        ...afterAiState,
         turnNumber: record.state.turnNumber + 1,
       };
 

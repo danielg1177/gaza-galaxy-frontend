@@ -430,13 +430,14 @@ Three additional defects remain after Phase 55 that prevent the farewell turn fr
 3. **End Turn button stays tappable during a knockout submission**, allowing additional presses while `isSubmittingTurn = true` (previously only disabled for non-knockout turns).
 
 - ~~**Task 226**~~ — Frontend: Route eliminated async players in `endTurn()` through `acknowledgeKnockout` instead of silently returning home *(complete 2026-06-05)*
-- ~~**Task 227**~~ — Frontend: Add game-over guard in `acknowledgeKnockout` — if no next human found, submit finished state instead of looping back to eliminated player *(complete 2026-06-05)*
+- ~~**Task 227**~~ — Frontend: Replace manual next-player loop in `acknowledgeKnockout` with `advanceToNextNonEliminatedPlayer` + `runAiTurnsUntilHuman` — reuses engine logic that correctly handles game-over and AI turns *(complete 2026-06-05)*
 - ~~**Task 228**~~ — Frontend: Always disable End Turn button when `isSubmittingTurn = true`, regardless of knockout state *(complete 2026-06-05)*
+- ~~**Task 229**~~ — Frontend: Revert premature game-over guard (Task 227 v1) that submitted `status: finished` when loop found no human; replaced with engine-driven approach *(complete 2026-06-05)*
 
 ---
 
 ## Changelog
-- 2026-06-05: Phase 56 complete (Tasks 226–228) — `endTurn()` now routes eliminated async players through `acknowledgeKnockout` instead of silently returning home; game-over safety guard added to `acknowledgeKnockout` (submits finished state if no next human found); End Turn button always disabled during `isSubmittingTurn`. Console logging added to `acknowledgeKnockout` for diagnosis.
+- 2026-06-05: Phase 56 complete (Tasks 226–229) — `endTurn()` routes eliminated async players through `acknowledgeKnockout` (fallback for detection miss); `acknowledgeKnockout` async path replaced manual next-player loop with `advanceToNextNonEliminatedPlayer` + `runAiTurnsUntilHuman` (correctly handles game-over, AI turns, all player counts); End Turn always disabled during submission. Premature game-over guard reverted.
 - 2026-06-05: Phase 55 complete (Tasks 224–225) — `acknowledgeKnockout` now clears `eliminatedPlayerPendingKnockout` synchronously before the async submit, preventing double-invocation; restored on error for retry; `handleCloseBattleReport` no longer calls `acknowledgeKnockout` so End Turn is the single trigger.
 - 2026-06-05: Phase 55 added (Tasks 224–225) — farewell turn loops back to eliminated player; root cause: `handleCloseBattleReport` + End Turn both called `acknowledgeKnockout` while flag was still true; double submit race condition.
 - 2026-06-05: Backend `TurnController::submit()` `actions` rule changed from `required` to `present` (Laravel `required` rejects empty arrays; `present` allows them).
