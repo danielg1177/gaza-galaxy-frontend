@@ -371,7 +371,19 @@ One task to wire the End Turn button for eliminated players so it correctly adva
 
 ---
 
+## Phase 52 — Bug Fix: Async Eliminated Player's Turn Not Advanced on Backend After Knockout
+
+**Status:** Complete (2026-06-05).
+
+One task to submit an empty turn to the backend inside `acknowledgeKnockout` for async games, so `current_user_id` advances to the next player and the home screen no longer shows the eliminated player's turn as pending:
+
+- ~~**Task 221**~~ — Frontend: Submit empty turn to backend in `acknowledgeKnockout` for async eliminated players *(complete 2026-06-05)*
+
+---
+
 ## Changelog
+- 2026-06-05: Phase 52 complete (Task 221) — `acknowledgeKnockout` async path now submits empty turn (`actions: []`, `turnNumber + 1`) before navigating home; backend `current_user_id` advances; retry-on-failure path added.
+- 2026-06-05: Phase 52 added (Task 221) — async eliminated player navigates home but backend `current_user_id` never advances; home screen still shows "your turn"; fix by submitting empty turn from `acknowledgeKnockout`.
 - 2026-06-05: Phase 51 complete (Task 220) — End Turn button now renders and calls `acknowledgeKnockout()` during knockout turns; battle report close also triggers advance; double-fire is safe via early-return guard.
 - 2026-06-05: Phase 51 added (Task 220) — End Turn does nothing for eliminated player; wire End Turn to advance to next player or end game if last human.
 - 2026-06-05: Phase 50 complete (Task 219) — `applyHomePlanetElimination` now skips `forfeitEliminatedPlayerPlanets` for human players; planets preserved through farewell turn, forfeited in `acknowledgeKnockout`.

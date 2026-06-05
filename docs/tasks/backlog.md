@@ -5867,3 +5867,56 @@ When `game.status === 'finished'`, the home screen game card is either disabled 
 - Tapping "End Turn" multiple times rapidly does not submit twice or advance twice (debounce or loading-state guard).
 
 ---
+
+## Phase 52 — Bug Fix: Async Eliminated Player's Turn Not Advanced on Backend After Knockout
+
+**Status:** Not started.
+
+**Problem:** In async multiplayer, when an eliminated player acknowledges their knockout (closes the battle report or taps End Turn), the app navigates home correctly but the backend's `current_user_id` is never advanced. The backend still shows the eliminated player as the current player, so their home screen game card continues to display "your turn" indefinitely — and the next human player never receives a "your turn" push notification.
+
+**Root cause:** `acknowledgeKnockout()` in `gameStore.ts` detects the async path (`record.asyncGameId != null`) and sets `shouldReturnHome: true`, but never calls `submitTurn`. The backend's `TurnController::submit()` is the only mechanism that advances `games.current_user_id`; without a submit, the backend state is stuck.
+
+**Required fix:** In `acknowledgeKnockout` for async games, compute the post-forfeit, next-player state and submit it to the backend before navigating home — exactly as `endTurn()` does for a normal async turn.
+
+---
+
+### Task 221 — Frontend: Submit empty turn to backend in `acknowledgeKnockout` for async eliminated players
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Requirements:**
+
+1. **Compute the submitted state.** Inside the `if (record.asyncGameId != null)` block of `acknowledgeKnockout`, after computing `stateAfterForfeit`, also compute:
+   ```ts
+   const nextState = {
+     ...advanceToNextNonEliminatedPlayer(stateAfterForfeit),
+     turnNumber: record.state.turnNumber + 1,
+   };
+   ```
+   This mirrors what `resolveTurn` produces for a normal turn: `currentPlayerId` advances to the next non-eliminated player and `turnNumber` increments by 1 so the backend stale-check stays in sync for the next player's submit.
+
+2. **Submit to backend.** Call `submitTurn` (imported from `gamesService`) with:
+   ```ts
+   await submitTurn(record.asyncGameId, {
+     actions: [],
+     resultingState: nextState,
+     turnNumber: record.state.turnNumber,   // PRE-resolution value, same pattern as endTurn()
+     roundNumber: record.state.roundNumber,
+     events: [],
+   });
+   ```
+   Mirror the same `try/catch` pattern used in `endTurn()`: on success, set `shouldReturnHome: true`; on failure, show an error alert (do NOT navigate home — leave the player on their game screen so they can retry).
+
+3. **Show a loading state.** Set `isSubmittingTurn: true` before the async call and `isSubmittingTurn: false` after (success or failure). This prevents double-taps and shows the existing submit spinner in the UI.
+
+4. **Update the stored game state.** On success, update the game record in the store with `nextState` (so any local cache reflects the advance), exactly as `endTurn` does.
+
+5. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- Async multiplayer game (2 human + 1 AI). Player 1 is eliminated. Player 1 acknowledges knockout (closes battle report or taps End Turn). Player 1 is navigated home. On Player 1's home screen, the game card no longer shows "your turn" — the game is no longer their active turn. Player 2's device receives a "your turn" push notification shortly after.
+- If the backend submit fails (e.g. network error), an error alert appears and Player 1 remains on the game screen with their game state intact — they can tap End Turn again to retry.
+- Pass-and-play games: `acknowledgeKnockout` passes through the existing non-async path unchanged. No regressions.
+
+---

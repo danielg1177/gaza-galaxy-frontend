@@ -1327,13 +1327,43 @@ export const useGameStore = create<GameStore>()(
       map: forfeitEliminatedPlayerPlanets(record.state.map, farewellPlayerId),
     };
     if (record.asyncGameId != null) {
-      set({
-        eliminatedPlayerPendingKnockout: false,
-        shouldReturnHome: true,
-        games: get().games.map((g) =>
-          g.id === record.id ? { ...g, state: stateAfterForfeit } : g,
-        ),
-      });
+      const asyncGameId = record.asyncGameId;
+      const nextState = {
+        ...advanceToNextNonEliminatedPlayer(stateAfterForfeit),
+        turnNumber: record.state.turnNumber + 1,
+      };
+
+      set({ isSubmittingTurn: true });
+
+      void (async () => {
+        try {
+          await submitTurn(asyncGameId, {
+            actions: [],
+            resultingState: nextState,
+            turnNumber: record.state.turnNumber,
+            roundNumber: record.state.roundNumber,
+            events: [],
+          });
+          set({
+            games: get().games.map((g) =>
+              g.id === record.id ? { ...g, state: nextState } : g,
+            ),
+            isSubmittingTurn: false,
+            eliminatedPlayerPendingKnockout: false,
+            shouldReturnHome: true,
+          });
+        } catch (err) {
+          console.error('[acknowledgeKnockout] submitTurn failed:', err);
+          set({ isSubmittingTurn: false });
+
+          const alertBody =
+            err instanceof ApiError
+              ? `Server returned ${err.status}: ${err.message}`
+              : 'Could not submit your turn. Your moves were not saved — try again.';
+
+          showAlert('Submit Failed', alertBody);
+        }
+      })();
       return;
     }
     let nextState = advanceToNextNonEliminatedPlayer(stateAfterForfeit);
