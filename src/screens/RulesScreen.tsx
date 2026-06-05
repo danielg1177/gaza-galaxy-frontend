@@ -77,14 +77,6 @@ export default function RulesScreen() {
           </Text>
         </View>
 
-        {/* Home Planets */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🏠 Home Planets</Text>
-          <Text style={styles.bodyText}>
-            Each player starts with one designated home planet. Your home planet is the key to survival—if it falls to an enemy, you are eliminated from the game. Protect it at all costs!
-          </Text>
-        </View>
-
         {/* Building Types */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>🏭 Building Types</Text>

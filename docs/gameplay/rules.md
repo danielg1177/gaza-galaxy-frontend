@@ -22,11 +22,6 @@ Each planet has:
 - Buildings: Manufacturing Facility, Research Facility
 - A manufacturing allocation (slider: ships vs resources)
 
-## Home Planets
-- Each player starts with one designated home planet
-- Losing your home planet means elimination
-- Home planets start with better defenses (TBD)
-
 ## Planet Classes
 | Class | Production Quality |
 |-------|--------------------|
@@ -63,4 +58,5 @@ Research speed is NOT affected by planet class.
 - Last player with an un-captured home planet wins
 
 ## Changelog
+- 2026-06-05: Removed standalone Home Planets section (covered under Objective, Elimination, and Victory).
 - 2026-05-27: Initial rules documented from project-spec.md.

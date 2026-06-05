@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-04 (Friend request notifications on HomeScreen — polls every 60 seconds; menu button and Friends option show alert badge with count)
+2026-06-05 (Rules screen and `docs/gameplay/rules.md` — removed standalone Home Planets section; objective/elimination/victory still reference home planets)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
