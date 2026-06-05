@@ -1336,8 +1336,21 @@ export const useGameStore = create<GameStore>()(
     };
     if (record.asyncGameId != null) {
       const asyncGameId = record.asyncGameId;
+      const farewellPlayers = stateAfterForfeit.players;
+      const farewellCurrentIdx = farewellPlayers.findIndex(
+        (p) => p.id === stateAfterForfeit.currentPlayerId,
+      );
+      let nextHumanPlayerId = stateAfterForfeit.currentPlayerId;
+      for (let offset = 1; offset <= farewellPlayers.length; offset++) {
+        const candidate = farewellPlayers[(farewellCurrentIdx + offset) % farewellPlayers.length];
+        if (!candidate.isEliminated && !candidate.isAI) {
+          nextHumanPlayerId = candidate.id;
+          break;
+        }
+      }
       const nextState = {
-        ...advanceToNextNonEliminatedPlayer(stateAfterForfeit),
+        ...stateAfterForfeit,
+        currentPlayerId: nextHumanPlayerId,
         turnNumber: record.state.turnNumber + 1,
       };
 

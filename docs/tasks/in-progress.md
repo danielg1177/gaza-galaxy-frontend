@@ -402,6 +402,8 @@ One task to detect the eliminated-farewell-turn scenario in `loadAsyncGame` and 
 ---
 
 ## Changelog
+- 2026-06-05: Backend `TurnController::submit()` `actions` rule changed from `required` to `present` (Laravel `required` rejects empty arrays; `present` allows them).
+- 2026-06-05: `acknowledgeKnockout` async path updated to walk player list skipping both eliminated AND AI players when computing `nextHumanPlayerId` — backend requires `currentPlayerId` to map to a human user.
 - 2026-06-05: Phase 54 complete (Task 223) — `loadAsyncGame` now detects eliminated farewell turn (`detail.isMyTurn && localPlayer.isEliminated`) and sets `eliminatedPlayerPendingKnockout: true` + `showingLockScreen: true`; `acknowledgeKnockout` chain now fires correctly end-to-end.
 - 2026-06-05: Phase 54 added (Task 223) — root cause found: `loadAsyncGame` always sets `eliminatedPlayerPendingKnockout: false`; Tasks 221–222 fixed `acknowledgeKnockout` correctly but it was never reached; fix is to detect elimination in `loadAsyncGame`.
 - 2026-06-05: Phase 53 complete (Task 222) — `resetGame()` and `requestHomeRefresh()` called on `acknowledgeKnockout` success; local game record cleaned up and home screen immediately re-fetches from backend.
