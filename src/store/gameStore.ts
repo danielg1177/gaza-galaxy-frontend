@@ -940,7 +940,7 @@ export const useGameStore = create<GameStore>()(
       return;
     }
     if (humanPlayer.isEliminated) {
-      showAlert('Cannot End Turn', 'Your commander has been eliminated.');
+      showAlert('Cannot End Turn', 'You have been eliminated from the game.');
       return;
     }
     const asyncGameId = record.asyncGameId;
@@ -1294,6 +1294,10 @@ export const useGameStore = create<GameStore>()(
   acknowledgeKnockout: () => {
     const record = get().getActiveRecord();
     if (record === null || !get().eliminatedPlayerPendingKnockout) {
+      return;
+    }
+    if (record.asyncGameId != null) {
+      set({ eliminatedPlayerPendingKnockout: false, shouldReturnHome: true });
       return;
     }
     const farewellPlayerId = record.state.currentPlayerId;

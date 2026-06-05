@@ -330,7 +330,20 @@ Three tasks letting the eliminated/losing player open the finished game, pass th
 
 ---
 
+## Phase 48 — Bug Fix: Eliminated Player Stranded in Async Game After Knockout
+
+**Status:** Complete (2026-06-04).
+
+Two fixes for async multiplayer elimination UX: wrong alert copy when tapping End Turn as an eliminated player, and no path home after dismissing the battle report:
+
+- ~~**Task 216**~~ — Frontend: Change "Your commander has been eliminated" alert text to "You have been eliminated from the game." *(complete 2026-06-04)*
+- ~~**Task 217**~~ — Frontend: In `acknowledgeKnockout`, navigate home immediately when the active game is async (skip local state advancement) *(complete 2026-06-04)*
+
+---
+
 ## Changelog
+- 2026-06-04: Phase 48 complete (Tasks 216–217) — async eliminated player now gets correct alert copy and is navigated home on knockout acknowledgement.
+- 2026-06-04: Phase 48 added — eliminated async player sees wrong alert text and is left stranded with no way to exit after dismissing battle report.
 - 2026-06-04: Phase 47 complete (Tasks 214–215 + Backend Task 10.1) — eliminated/losing player can now open a finished async game, see "View Final Battle" lock screen, view the final battle report, then be taken home with a game-over alert.
 - 2026-06-04: Phase 47 added (Tasks 214–215) — eliminated/losing player cannot open finished async game to see the final fight; allow loading finished games, "View Final Battle" lock screen, game-over flow after battle report dismissed.
 - 2026-06-04: Phase 46 complete (Task 213) — replaced two competing auto-open effects with one `lastOpenedTurnKeyRef`-guarded effect; exactly one modal per turn.
