@@ -5868,6 +5868,57 @@ When `game.status === 'finished'`, the home screen game card is either disabled 
 
 ---
 
+## Phase 54 — Bug Fix: `loadAsyncGame` Never Sets `eliminatedPlayerPendingKnockout` — Root Cause of Farewell Turn Submit Never Firing
+
+**Status:** Not started.
+
+**Problem:** `loadAsyncGame` always sets `eliminatedPlayerPendingKnockout: false`. When an eliminated player opens an in-progress async game where it is their farewell turn, the flag stays `false`. As a result, `isKnockoutTurn` is always `false` in async games — the End Turn button routes to `endTurn()`, which has an `isEliminated` guard that silently aborts, and the battle-report close never calls `acknowledgeKnockout()`. The backend is never reached. Phases 52 and 53 correctly fixed `acknowledgeKnockout` but the function was never being called.
+
+**Root cause:** `loadAsyncGame` has no logic to detect "it is my turn AND I am eliminated." Pass-and-play games handle this because `endTurn()` runs locally and calls `set({ eliminatedPlayerPendingKnockout: true })` when it detects the local player was eliminated. Async games load state fresh from the backend — `endTurn()` is never called during load, so the flag is never set.
+
+**Fix:** At the end of `loadAsyncGame`'s non-finished branch, after computing `state` and the local player, detect the farewell-turn condition and set `eliminatedPlayerPendingKnockout: true` and `showingLockScreen: true`.
+
+---
+
+### Task 223 — Frontend: Detect eliminated farewell turn in `loadAsyncGame` and set `eliminatedPlayerPendingKnockout: true`
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Requirements:**
+
+In `loadAsyncGame`, in the non-finished branch (the large `set({...})` block around line 673), add the following detection before the `set()` call:
+
+```ts
+const localPlayerId = getLocalHumanPlayerId(state);
+const localPlayer = localPlayerId !== undefined
+  ? state.players.find((p) => p.id === localPlayerId)
+  : undefined;
+const isEliminatedFarewellTurn = detail.isMyTurn && localPlayer?.isEliminated === true;
+```
+
+Then in the `set({...})` call, change:
+```ts
+showingLockScreen: false,
+eliminatedPlayerPendingKnockout: false,
+```
+to:
+```ts
+showingLockScreen: isEliminatedFarewellTurn,
+eliminatedPlayerPendingKnockout: isEliminatedFarewellTurn,
+```
+
+No other changes. `getLocalHumanPlayerId` is already defined and exported in this file.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- Async game, local player is eliminated, it is their farewell turn. Open the game. Lock screen appears. Tap through. Battle report auto-opens showing the home-planet capture. Close the battle report → `acknowledgeKnockout()` fires → spinner shown → backend submit sent → navigate home → game card shows `alertState: 'waiting'`. Next human player receives "your turn" push notification.
+- Async game, local player is NOT eliminated, it is their turn. `isEliminatedFarewellTurn = false`. `showingLockScreen` and `eliminatedPlayerPendingKnockout` remain `false`. Normal turn flow unchanged.
+- Pass-and-play games: `loadAsyncGame` is never called for pass-and-play. No regressions.
+
+---
+
 ## Phase 53 — Bug Fix: Home Screen Still Shows "Your Turn" After Async Knockout Acknowledgement
 
 **Status:** Not started.

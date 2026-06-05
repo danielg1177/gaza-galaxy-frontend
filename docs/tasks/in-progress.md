@@ -391,7 +391,19 @@ One task to call `resetGame()` and `requestHomeRefresh()` inside the async `ackn
 
 ---
 
+## Phase 54 — Bug Fix: `loadAsyncGame` Never Sets `eliminatedPlayerPendingKnockout` — Root Cause of Farewell Turn Submit Never Firing
+
+**Status:** Complete (2026-06-05).
+
+One task to detect the eliminated-farewell-turn scenario in `loadAsyncGame` and set `eliminatedPlayerPendingKnockout: true` (+ show the lock screen), so the End Turn button and battle-report close correctly route to `acknowledgeKnockout` instead of the `endTurn` guard that silently aborts:
+
+- ~~**Task 223**~~ — Frontend: Detect eliminated farewell turn in `loadAsyncGame` and set `eliminatedPlayerPendingKnockout: true` *(complete 2026-06-05)*
+
+---
+
 ## Changelog
+- 2026-06-05: Phase 54 complete (Task 223) — `loadAsyncGame` now detects eliminated farewell turn (`detail.isMyTurn && localPlayer.isEliminated`) and sets `eliminatedPlayerPendingKnockout: true` + `showingLockScreen: true`; `acknowledgeKnockout` chain now fires correctly end-to-end.
+- 2026-06-05: Phase 54 added (Task 223) — root cause found: `loadAsyncGame` always sets `eliminatedPlayerPendingKnockout: false`; Tasks 221–222 fixed `acknowledgeKnockout` correctly but it was never reached; fix is to detect elimination in `loadAsyncGame`.
 - 2026-06-05: Phase 53 complete (Task 222) — `resetGame()` and `requestHomeRefresh()` called on `acknowledgeKnockout` success; local game record cleaned up and home screen immediately re-fetches from backend.
 - 2026-06-05: Phase 53 added (Task 222) — home screen still shows "your turn" after async knockout acknowledgement; `resetGame()` not called, `activeGameId` not cleared, home screen not force-refreshed.
 - 2026-06-05: Phase 52 complete (Task 221) — `acknowledgeKnockout` async path now submits empty turn (`actions: []`, `turnNumber + 1`) before navigating home; backend `current_user_id` advances; retry-on-failure path added.

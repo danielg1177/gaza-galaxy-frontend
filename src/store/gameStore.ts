@@ -670,17 +670,24 @@ export const useGameStore = create<GameStore>()(
       ? buildPlayerReports(detail.latestEvents!, state.players, state.map.planets)
       : null;
 
+    const localPlayerId = getLocalHumanPlayerId(state);
+    const localPlayer =
+      localPlayerId !== undefined
+        ? state.players.find((p) => p.id === localPlayerId)
+        : undefined;
+    const isEliminatedFarewellTurn = detail.isMyTurn && localPlayer?.isEliminated === true;
+
     set({
       games: nextGames,
       activeGameId: recordId,
       selectedPlanetId: null,
       pendingFleet: null,
       queuedOrders,
-      showingLockScreen: false,
+      showingLockScreen: isEliminatedFarewellTurn,
       turnReport: detail.isMyTurn ? (detail.latestEvents ?? []) : [],
       playerBattleArchiveByPlayerId: asyncReports?.archive ?? {},
       playerTurnReportByPlayerId: asyncReports?.turnReport ?? {},
-      eliminatedPlayerPendingKnockout: false,
+      eliminatedPlayerPendingKnockout: isEliminatedFarewellTurn,
       pendingFarewellPlayerIds: [],
       isSubmittingTurn: false,
       shouldReturnHome: false,
