@@ -341,7 +341,43 @@ Two fixes for async multiplayer elimination UX: wrong alert copy when tapping En
 
 ---
 
+## Phase 49 — Bug Fix: Home Planet Capture Not Prioritized or Highlighted in Battle Report
+
+**Status:** Complete (2026-06-05).
+
+One task to sort the home planet capture card to the top of the battle report, add a red danger banner above it, and apply serious card styling to make the severity of losing your home planet immediately clear:
+
+- ~~**Task 218**~~ — Frontend: Move home planet capture card to top of battle report; add danger banner and serious card styling *(complete 2026-06-05)*
+
+---
+
+## Phase 50 — Bug Fix: Eliminated Player's Owned Planets Show as Neutral During Their Final Turn
+
+**Status:** Complete (2026-06-05).
+
+One task to ensure all planets owned by an eliminated player remain displayed in their faction color for the full duration of their final turn — zero-troop planets must not appear neutral until surviving players start the next round:
+
+- ~~**Task 219**~~ — Frontend: Preserve eliminated player's planet ownership display for their entire final turn *(complete 2026-06-05)*
+
+---
+
+## Phase 51 — Bug Fix: End Turn Does Nothing for Eliminated Player
+
+**Status:** Complete (2026-06-05).
+
+One task to wire the End Turn button for eliminated players so it correctly advances to the next player (or ends the game when the eliminated player was the last human):
+
+- ~~**Task 220**~~ — Frontend: Wire End Turn for eliminated player to advance to next player (or end game if last human) *(complete 2026-06-05)*
+
+---
+
 ## Changelog
+- 2026-06-05: Phase 51 complete (Task 220) — End Turn button now renders and calls `acknowledgeKnockout()` during knockout turns; battle report close also triggers advance; double-fire is safe via early-return guard.
+- 2026-06-05: Phase 51 added (Task 220) — End Turn does nothing for eliminated player; wire End Turn to advance to next player or end game if last human.
+- 2026-06-05: Phase 50 complete (Task 219) — `applyHomePlanetElimination` now skips `forfeitEliminatedPlayerPlanets` for human players; planets preserved through farewell turn, forfeited in `acknowledgeKnockout`.
+- 2026-06-05: Phase 50 added (Task 219) — eliminated player's zero-troop owned planets show as neutral immediately after battle report dismissed; preserve planet ownership display for full final turn.
+- 2026-06-05: Phase 49 complete (Task 218) — home planet capture card sorted to top; red "Your home planet was taken over." danger banner and red-border card styling added.
+- 2026-06-05: Phase 49 added (Task 218) — home planet capture card buried in battle report with no emphasis; sort to top, add red danger banner, apply serious card styling.
 - 2026-06-04: Phase 48 complete (Tasks 216–217) — async eliminated player now gets correct alert copy and is navigated home on knockout acknowledgement.
 - 2026-06-04: Phase 48 added — eliminated async player sees wrong alert text and is left stranded with no way to exit after dismissing battle report.
 - 2026-06-04: Phase 47 complete (Tasks 214–215 + Backend Task 10.1) — eliminated/losing player can now open a finished async game, see "View Final Battle" lock screen, view the final battle report, then be taken home with a game-over alert.

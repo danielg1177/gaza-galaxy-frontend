@@ -5731,3 +5731,139 @@ When `game.status === 'finished'`, the home screen game card is either disabled 
 - Opening a normal in-progress async game still shows "Start Turn".
 
 ---
+
+## Phase 49 — Bug Fix: Home Planet Capture Not Prioritized or Highlighted in Battle Report
+
+**Status:** Not started.
+
+**Problem:** When a player opens their turn after their home planet was captured, the home planet battle report card appears somewhere in the middle of the list with no special emphasis. The player deserves an immediate, unmissable signal that their home base has fallen. Currently the card looks identical to any other combat card and can be buried under unrelated fleet-arrival entries.
+
+**Desired behavior:**
+1. Any battle report card where the player's own home planet was captured by an enemy is sorted to the **top** of the battle report card list, above all other cards.
+2. A full-width banner appears **above** that card reading something like "Your home planet was taken over." in a high-contrast danger style (red background, bold white text).
+3. The home-planet capture card itself has visually serious styling — red/dark border, red-tinted background, and a warning or skull icon next to the planet name — so it reads as more severe than a routine combat card.
+
+---
+
+### Task 218 — Frontend: Move home planet capture card to top of battle report; add danger banner and serious card styling
+
+**Files:** Battle report modal/component (e.g. `frontend/src/components/BattleReportModal.tsx`) and individual card component (e.g. `frontend/src/components/BattleReportCard.tsx`)
+
+**Requirements:**
+
+1. **Sort home planet capture card to top.** In the sorted list of battle report cards rendered inside the modal, detect any card representing combat on the local player's home planet where the outcome was an enemy capture (the planet changed owner away from the local player). Move that card (or cards, in the unlikely multi-way case) to index 0, above all other cards.
+
+2. **Render a "Home Planet Taken" danger banner.** Immediately above the home-planet capture card — only when one exists — render a full-width banner with:
+   - Background: solid red or dark red (e.g. `#b00020` or `#7f0000`).
+   - Text: `"Your home planet was taken over."` in bold white, centered or left-aligned with padding.
+   - An icon to the left of the text (⚠️ or a skull symbol, or a custom SVG if one exists in the codebase).
+
+3. **Enhanced card styling for the home-planet capture card.** Apply the following only to the home-planet capture card:
+   - Border color: red (`#b00020` or equivalent).
+   - Background: a semi-transparent red tint (e.g. `rgba(176, 0, 32, 0.08)`).
+   - Planet name text: bold and slightly larger than normal card headers.
+   - A small warning/skull icon rendered to the left of the planet name inside the card header row.
+
+4. **No other changes.** All other cards retain their normal ordering and styling. The banner and enhanced styling apply exclusively when the player's home planet was captured this round.
+
+5. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- Open a turn where the local player's home planet was captured. The home-planet combat card is the first card in the battle report. A red "Your home planet was taken over." banner sits directly above it. The card has a red border and red-tinted background with a bold planet name.
+- Open a turn where the local player's home planet was attacked but NOT captured (defender held). No danger banner appears; card appears in its normal position.
+- Open a turn where the local player's home planet was not involved in any combat. No banner appears. Normal card order.
+- Open a turn with no combat at all. Battle report is empty or shows only fleet-arrival cards. No banner.
+
+---
+
+## Phase 50 — Bug Fix: Eliminated Player's Owned Planets Show as Neutral During Their Final Turn
+
+**Status:** Not started.
+
+**Problem:** After an eliminated player views their battle report and dismisses it, most of the planets they owned — particularly any with 0 troops (ships sent away as fleets) — are displayed as neutral rather than belonging to the player. This directly contradicts the core game rule that planet ownership persists until a planet is actively captured by an enemy. The player should see all their owned planets in their faction color for the entirety of their final turn. Only after they end their turn should surviving players see those planets revert to neutral.
+
+**Root cause (to investigate):**
+- The fog-of-war or planet-visibility code may be treating 0-troop planets as unowned/invisible for the eliminated player.
+- The `resolveTurn` or post-resolution cleanup step may be setting `planet.ownerId` to `null` for all of the eliminated player's 0-troop planets as part of elimination processing, rather than leaving ownership intact until the next round.
+- The planet rendering code in `GameScreen` may be using `troops > 0` as a proxy for ownership when deciding which color/icon to display.
+
+**Desired behavior:**
+- **During the eliminated player's final turn:** all planets they owned at the start of that round display with their faction color, regardless of troop count. Only planets that were actively captured by an enemy this round show the new owner.
+- **After the eliminated player ends their turn:** in the next round, surviving players see the eliminated player's former zero-troop planets as neutral (no owner, no ships). This is the normal flow of the turn engine and should already be correct.
+
+---
+
+### Task 219 — Frontend: Preserve eliminated player's planet ownership display for their entire final turn
+
+**Files:** `frontend/src/store/gameStore.ts`, `frontend/src/screens/GameScreen.tsx`, fog-of-war / visibility logic (e.g. `frontend/src/game/fogOfWar.ts` or equivalent)
+
+**Requirements:**
+
+1. **Investigate root cause.** Trace why planets with `troops === 0` show as neutral for the eliminated player after dismissing the battle report. Specifically check:
+   - Whether fog-of-war visibility logic excludes 0-troop planets from the player's own visible set.
+   - Whether `resolveTurn`, elimination processing, or any post-resolution `set()` call clears `planet.ownerId` for 0-troop planets belonging to the eliminated player.
+   - Whether the `GameScreen` planet rendering reads `troops > 0` (or any similar heuristic) to decide whether to show a player color vs. neutral styling, instead of reading `planet.ownerId` directly.
+
+2. **Fix planet display.** A planet is owned by whoever last captured it; `ownerId` is the single source of truth. Ensure:
+   - `planet.ownerId` is never cleared to `null` purely because `troops === 0`. It should only change when an enemy fleet wins combat there.
+   - The planet-rendering code in `GameScreen` uses `planet.ownerId` as the ownership authority. A planet with `ownerId === localPlayerId` and `troops === 0` must still render with the local player's faction color.
+   - The eliminated player's own planets are never hidden or neutralized by the fog-of-war system (a player can always see their own planets in full).
+
+3. **Confirm surviving-players view is correct.** After the eliminated player ends their turn, the next player's game state should show those formerly-empty planets as neutral (`ownerId === null` or equivalent, `troops === 0`). This transition should be part of the normal turn-engine elimination logic already in place; confirm it is working correctly and add it only if it is missing.
+
+4. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- Pass-and-play game. Eliminate a player (capture their home planet). On that player's final turn, dismiss the battle report. All planets they owned that were **not** captured this round — including ones with 0 troops — still display with their faction color on the map.
+- Planets that **were** actively captured by an enemy this round correctly show the new owner's color. These are unaffected by this fix.
+- End the eliminated player's turn. On the surviving player's next turn, the eliminated player's former zero-troop planets now appear neutral.
+- No regressions in normal (non-eliminated) planet display for other players.
+
+---
+
+## Phase 51 — Bug Fix: End Turn Does Nothing for Eliminated Player
+
+**Status:** Not started.
+
+**Problem:** After an eliminated player views their battle report on their final turn, tapping "End Turn" produces no result — no turn advancement, no navigation, nothing. Other players (human and AI) are still in the game and waiting. The eliminated player is effectively locked in a dead-end state with no way to yield their turn and let the game continue.
+
+**Desired behavior:**
+- Tapping "End Turn" for an eliminated player advances the turn to the next player in order.
+- If the eliminated player is the last human in the game, the game ends immediately — a "Game Over" alert is shown and the app navigates home.
+- In async multiplayer games, the eliminated player's turn is submitted to the backend (with empty actions) so the next human player is unblocked.
+
+---
+
+### Task 220 — Frontend: Wire End Turn for eliminated player to advance to next player (or end game if last human)
+
+**Files:** `frontend/src/store/gameStore.ts`, `frontend/src/screens/GameScreen.tsx`
+
+**Requirements:**
+
+1. **Find the blocking condition.** Trace the path from the "End Turn" button tap to `endTurn()` in `gameStore.ts` and identify every guard that fires for an eliminated player. Common suspects:
+   - An early-return guard on `player.status === 'eliminated'` or `isEliminated` that silently drops the call.
+   - A missing condition that prevents the `resolveTurn` / turn-advancement path from running for an eliminated player.
+   - In async mode: a guard blocking `submitTurn` when the player has no valid actions or when the player is marked eliminated in the local state.
+
+2. **Allow eliminated players to end their turn.** An eliminated player still occupies a turn slot and must be able to yield it. When an eliminated player taps End Turn:
+   - **Pass-and-play / solo:** advance `currentPlayerId` to the next non-eliminated player in the turn order. If there are AI players after the eliminated player in the order, run their AI turns (or skip them in the normal AI-resolution flow) before passing control to the next human.
+   - **Async multiplayer:** call `submitTurn` with `actions: []` and `resulting_state` unchanged (or reflecting the unchanged state). The backend advances `current_user_id` to the next human.
+
+3. **End the game when the eliminated player is the last human.** Before advancing, check whether any other human (non-AI) player is still active (not eliminated):
+   - If **yes**: advance to the next player normally (pass-and-play lock screen, or async submit + navigate home).
+   - If **no**: declare the game over. Determine the winner using the existing winner-detection logic (surviving player, most planets, or similar). Show a "Game Over" alert and navigate home.
+
+4. **Button state.** The "End Turn" button must not be disabled or hidden for eliminated players. If it is currently gated behind an `isEliminated` check that hides or disables it, remove or invert that gate. A spinner/loading state while the async submit is in flight is acceptable.
+
+5. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- Pass-and-play, 3-player game (2 human + 1 AI). Player 1 is eliminated. On their final turn, "End Turn" is tappable. Tapping it advances to the next human player (lock screen appears for Player 2). Player 2 can continue the game normally.
+- Pass-and-play, 2-player game (1 human + 1 AI). Human player is eliminated. Tapping "End Turn" shows a "Game Over" alert and navigates home. No crash, no frozen state.
+- Async multiplayer: eliminated player taps "End Turn" → turn is submitted to backend with empty actions → next human player's device receives a "your turn" push notification.
+- Tapping "End Turn" multiple times rapidly does not submit twice or advance twice (debounce or loading-state guard).
+
+---

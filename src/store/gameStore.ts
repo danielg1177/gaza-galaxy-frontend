@@ -10,6 +10,7 @@ import {
   STARTING_GOLD,
 } from '../game/productionEngine';
 import { generateMap } from '../game/mapGenerator';
+import { forfeitEliminatedPlayerPlanets } from '../game/combatEngine';
 import { HOME_PLANET_CLASS_CONFIG, placeSpawns } from '../game/spawnPlacer';
 import {
   resolveTurn,
@@ -1320,12 +1321,22 @@ export const useGameStore = create<GameStore>()(
     if (record === null || !get().eliminatedPlayerPendingKnockout) {
       return;
     }
+    const farewellPlayerId = record.state.currentPlayerId;
+    const stateAfterForfeit = {
+      ...record.state,
+      map: forfeitEliminatedPlayerPlanets(record.state.map, farewellPlayerId),
+    };
     if (record.asyncGameId != null) {
-      set({ eliminatedPlayerPendingKnockout: false, shouldReturnHome: true });
+      set({
+        eliminatedPlayerPendingKnockout: false,
+        shouldReturnHome: true,
+        games: get().games.map((g) =>
+          g.id === record.id ? { ...g, state: stateAfterForfeit } : g,
+        ),
+      });
       return;
     }
-    const farewellPlayerId = record.state.currentPlayerId;
-    let nextState = advanceToNextNonEliminatedPlayer(record.state);
+    let nextState = advanceToNextNonEliminatedPlayer(stateAfterForfeit);
     const { state: afterAi } = runAiTurnsUntilHuman({
       ...nextState,
       events: [],

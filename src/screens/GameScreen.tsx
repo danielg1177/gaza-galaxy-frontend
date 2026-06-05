@@ -367,6 +367,30 @@ function isHumanHomePlanetConquestVictory(
   return humanPlayer !== undefined && event.attackerName === humanPlayer.name;
 }
 
+function isHumanHomePlanetCapturedByEnemy(
+  event: HumanCombatTurnEvent,
+  localHumanPlayerId: string | undefined,
+  players: Player[],
+): boolean {
+  const humanPlayer =
+    localHumanPlayerId !== undefined
+      ? players.find((player) => player.id === localHumanPlayerId)
+      : undefined;
+  if (humanPlayer === undefined || event.isHomePlanetConquest !== true) {
+    return false;
+  }
+
+  if (event.kind === 'combat') {
+    return event.defenderName === humanPlayer.name && event.attackerWon;
+  }
+
+  if (event.planetId !== undefined && event.planetId !== humanPlayer.homePlanetId) {
+    return false;
+  }
+
+  return event.winnerName !== humanPlayer.name;
+}
+
 function getHumanBattleOutcomeIsVictory(
   event: HumanCombatTurnEvent,
   localHumanPlayerId: string,
@@ -393,6 +417,7 @@ function BattleReportCard({
   planetClass,
   turnEvents,
   homePlanetConquestHighlight = false,
+  homePlanetCaptureDanger = false,
 }: {
   event: CombatTurnEvent;
   localHumanPlayerId: string | undefined;
@@ -400,6 +425,7 @@ function BattleReportCard({
   planetClass: string;
   turnEvents: TurnEvent[];
   homePlanetConquestHighlight?: boolean;
+  homePlanetCaptureDanger?: boolean;
 }) {
   const details =
     localHumanPlayerId !== undefined
@@ -409,20 +435,35 @@ function BattleReportCard({
   const remainingToShow = getVictorRemainingShips(event);
 
   return (
-    <View style={homePlanetConquestHighlight ? styles.battleReportCardWrapper : undefined}>
+    <View
+      style={
+        homePlanetConquestHighlight || homePlanetCaptureDanger
+          ? styles.battleReportCardWrapper
+          : undefined
+      }
+    >
+      {homePlanetCaptureDanger && (
+        <View style={styles.homePlanetTakenDangerBanner}>
+          <Text style={styles.homePlanetTakenDangerBannerText}>
+            ⚠️ Your home planet was taken over.
+          </Text>
+        </View>
+      )}
       {homePlanetConquestHighlight && (
         <Text style={styles.homePlanetConquestBanner}>You took their home planet!</Text>
       )}
       <View
         style={[
           styles.battleReportCard,
-          homePlanetConquestHighlight
-            ? styles.battleReportCardHomeConquest
-            : details.outcomeIsVictory === true
-              ? styles.battleReportCardVictory
-              : details.outcomeIsVictory === false
-                ? styles.battleReportCardDefeat
-                : undefined,
+          homePlanetCaptureDanger
+            ? styles.battleReportCardHomeCaptureDanger
+            : homePlanetConquestHighlight
+              ? styles.battleReportCardHomeConquest
+              : details.outcomeIsVictory === true
+                ? styles.battleReportCardVictory
+                : details.outcomeIsVictory === false
+                  ? styles.battleReportCardDefeat
+                  : undefined,
         ]}
       >
       <BattleReportRoundLabel roundNumber={event.roundNumber} />
@@ -433,7 +474,14 @@ function BattleReportCard({
           </Text>
         </View>
         <View style={styles.battleReportHeaderCenter}>
-          <Text style={styles.battleReportPlanetName}>{event.planetName}</Text>
+          <Text
+            style={[
+              styles.battleReportPlanetName,
+              homePlanetCaptureDanger && styles.battleReportPlanetNameHomeCaptureDanger,
+            ]}
+          >
+            {homePlanetCaptureDanger ? `⚠️ ${event.planetName}` : event.planetName}
+          </Text>
         </View>
         <View style={styles.battleReportHeaderEnd}>
           {details.outcomeIsVictory !== null && (
@@ -509,11 +557,13 @@ function MultiwayBattleReportCard({
   localHumanPlayerId,
   players,
   planetClass,
+  homePlanetCaptureDanger = false,
 }: {
   event: MultiwayCombatTurnEvent;
   localHumanPlayerId: string | undefined;
   players: Player[];
   planetClass: string;
+  homePlanetCaptureDanger?: boolean;
 }) {
   const humanPlayer =
     localHumanPlayerId !== undefined
@@ -529,20 +579,35 @@ function MultiwayBattleReportCard({
     event.isHomePlanetConquest === true && humanWon;
 
   return (
-    <View style={homePlanetConquestHighlight ? styles.battleReportCardWrapper : undefined}>
+    <View
+      style={
+        homePlanetConquestHighlight || homePlanetCaptureDanger
+          ? styles.battleReportCardWrapper
+          : undefined
+      }
+    >
+      {homePlanetCaptureDanger && (
+        <View style={styles.homePlanetTakenDangerBanner}>
+          <Text style={styles.homePlanetTakenDangerBannerText}>
+            ⚠️ Your home planet was taken over.
+          </Text>
+        </View>
+      )}
       {homePlanetConquestHighlight && (
         <Text style={styles.homePlanetConquestBanner}>You took their home planet!</Text>
       )}
       <View
         style={[
           styles.battleReportCard,
-          homePlanetConquestHighlight
-            ? styles.battleReportCardHomeConquest
-            : humanWon
-              ? styles.battleReportCardVictory
-              : humanInvolved && !humanWon
-                ? styles.battleReportCardDefeat
-                : undefined,
+          homePlanetCaptureDanger
+            ? styles.battleReportCardHomeCaptureDanger
+            : homePlanetConquestHighlight
+              ? styles.battleReportCardHomeConquest
+              : humanWon
+                ? styles.battleReportCardVictory
+                : humanInvolved && !humanWon
+                  ? styles.battleReportCardDefeat
+                  : undefined,
         ]}
       >
         <BattleReportRoundLabel roundNumber={event.roundNumber} />
@@ -553,7 +618,14 @@ function MultiwayBattleReportCard({
             </Text>
           </View>
           <View style={styles.battleReportHeaderCenter}>
-            <Text style={styles.battleReportPlanetName}>{event.planetName}</Text>
+            <Text
+              style={[
+                styles.battleReportPlanetName,
+                homePlanetCaptureDanger && styles.battleReportPlanetNameHomeCaptureDanger,
+              ]}
+            >
+              {homePlanetCaptureDanger ? `⚠️ ${event.planetName}` : event.planetName}
+            </Text>
           </View>
           <View style={styles.battleReportHeaderEnd}>
             {humanInvolved && (
@@ -1512,25 +1584,18 @@ export default function GameScreen() {
     );
   }, [playerBattleArchiveByPlayerId, localHumanPlayerId]);
 
-  const sortedBattleReportCombatEvents = useMemo((): CombatTurnEvent[] => {
-    return humanCombatEvents
-      .filter((e): e is CombatTurnEvent => e.kind === 'combat')
-      .sort((a, b) => {
-        const aHome = a.isHomePlanetConquest === true ? 1 : 0;
-        const bHome = b.isHomePlanetConquest === true ? 1 : 0;
-        return bHome - aHome;
-      });
-  }, [humanCombatEvents]);
-
-  const sortedBattleReportMultiwayEvents = useMemo((): MultiwayCombatTurnEvent[] => {
-    return humanCombatEvents
-      .filter((e): e is MultiwayCombatTurnEvent => e.kind === 'multiway_combat')
-      .sort((a, b) => {
-        const aHome = a.isHomePlanetConquest === true ? 1 : 0;
-        const bHome = b.isHomePlanetConquest === true ? 1 : 0;
-        return bHome - aHome;
-      });
-  }, [humanCombatEvents]);
+  const sortedBattleReportEvents = useMemo((): HumanCombatTurnEvent[] => {
+    const players = gameState?.players ?? [];
+    return [...humanCombatEvents].sort((a, b) => {
+      const aHomeCapture = isHumanHomePlanetCapturedByEnemy(a, localHumanPlayerId, players)
+        ? 1
+        : 0;
+      const bHomeCapture = isHumanHomePlanetCapturedByEnemy(b, localHumanPlayerId, players)
+        ? 1
+        : 0;
+      return bHomeCapture - aHomeCapture;
+    });
+  }, [gameState?.players, humanCombatEvents, localHumanPlayerId]);
 
   const playerTurnReport =
     playerTurnReportByPlayerId[localHumanPlayerId ?? ''] ?? [];
@@ -3913,8 +3978,7 @@ export default function GameScreen() {
         visible={
           showBattleReportModal &&
           !isSubmittingTurn &&
-          (sortedBattleReportCombatEvents.length > 0 ||
-            sortedBattleReportMultiwayEvents.length > 0)
+          sortedBattleReportEvents.length > 0
         }
         transparent
         animationType="fade"
@@ -3927,34 +3991,46 @@ export default function GameScreen() {
               <Text style={styles.knockoutBanner}>You have been knocked out of the game!</Text>
             )}
             <ScrollView style={styles.battleReportScroll} nestedScrollEnabled>
-              {sortedBattleReportCombatEvents.map((event, index) => (
-                <BattleReportCard
-                  key={`combat-${event.planetName}-${index}`}
-                  event={event}
-                  localHumanPlayerId={localHumanPlayerId}
-                  players={gameState?.players ?? []}
-                  turnEvents={turnReport}
-                  homePlanetConquestHighlight={isHumanHomePlanetConquestVictory(
-                    event,
-                    localHumanPlayerId,
-                    gameState?.players ?? [],
-                  )}
-                  planetClass={
-                    gameState?.map.planets.find((p) => p.name === event.planetName)?.class ?? ''
-                  }
-                />
-              ))}
-              {sortedBattleReportMultiwayEvents.map((event, index) => (
-                <MultiwayBattleReportCard
-                  key={`multiway-${event.planetName}-${index}`}
-                  event={event}
-                  localHumanPlayerId={localHumanPlayerId}
-                  players={gameState?.players ?? []}
-                  planetClass={
-                    gameState?.map.planets.find((p) => p.name === event.planetName)?.class ?? ''
-                  }
-                />
-              ))}
+              {sortedBattleReportEvents.map((event, index) => {
+                const players = gameState?.players ?? [];
+                const planetClass =
+                  gameState?.map.planets.find((p) => p.name === event.planetName)?.class ?? '';
+                const homePlanetCaptureDanger = isHumanHomePlanetCapturedByEnemy(
+                  event,
+                  localHumanPlayerId,
+                  players,
+                );
+
+                if (event.kind === 'combat') {
+                  return (
+                    <BattleReportCard
+                      key={`combat-${event.planetName}-${index}`}
+                      event={event}
+                      localHumanPlayerId={localHumanPlayerId}
+                      players={players}
+                      turnEvents={turnReport}
+                      homePlanetCaptureDanger={homePlanetCaptureDanger}
+                      homePlanetConquestHighlight={isHumanHomePlanetConquestVictory(
+                        event,
+                        localHumanPlayerId,
+                        players,
+                      )}
+                      planetClass={planetClass}
+                    />
+                  );
+                }
+
+                return (
+                  <MultiwayBattleReportCard
+                    key={`multiway-${event.planetName}-${index}`}
+                    event={event}
+                    localHumanPlayerId={localHumanPlayerId}
+                    players={players}
+                    homePlanetCaptureDanger={homePlanetCaptureDanger}
+                    planetClass={planetClass}
+                  />
+                );
+              })}
             </ScrollView>
             <Pressable
               style={[styles.primaryButton, styles.battleReportCloseButton]}
@@ -4010,25 +4086,29 @@ export default function GameScreen() {
         isHumanTurn &&
         !showingAiObserver &&
         status === 'active' &&
-        !isKnockoutTurn &&
         !isReadOnly && (
         <>
           <Pressable
             style={[
               styles.endTurnButton,
               { bottom: insets.bottom + 16 },
-              isSubmittingTurn && styles.endTurnButtonDisabled,
+              !isKnockoutTurn && isSubmittingTurn && styles.endTurnButtonDisabled,
             ]}
-            disabled={isSubmittingTurn}
+            disabled={!isKnockoutTurn && isSubmittingTurn}
             onPress={() => {
               cancelDrag();
               exitBoxSelect();
-              endTurn();
+              if (isKnockoutTurn) {
+                acknowledgeKnockout();
+              } else {
+                endTurn();
+              }
               dismissPlanetDetail();
             }}
           >
             <Text style={styles.endTurnButtonText}>End Turn</Text>
           </Pressable>
+          {!isKnockoutTurn && (
           <Pressable
             style={[
               styles.boxSelectToggle,
@@ -4063,6 +4143,7 @@ export default function GameScreen() {
               color={boxSelectMode ? '#e0f7f9' : COLORS.text}
             />
           </Pressable>
+          )}
         </>
       )}
 
@@ -4375,6 +4456,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginBottom: 4,
+  },
+  homePlanetTakenDangerBanner: {
+    backgroundColor: '#8B0000',
+  },
+  homePlanetTakenDangerBannerText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  battleReportCardHomeCaptureDanger: {
+    borderColor: '#b00020',
+    borderWidth: 2,
+    backgroundColor: 'rgba(176, 0, 32, 0.08)',
+  },
+  battleReportPlanetNameHomeCaptureDanger: {
+    fontWeight: '700',
   },
   battleReportCardVictory: {
     backgroundColor: 'rgba(39, 107, 64, 0.12)',

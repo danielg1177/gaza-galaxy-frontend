@@ -33,6 +33,22 @@ function getOwnerName(ownerId: OwnerId, players: Player[] | undefined): string {
   return players?.find((player) => player.id === ownerId)?.name ?? ownerId;
 }
 
+/** Clears ownership on all planets still held by an eliminated player (buildings intact). */
+export function forfeitEliminatedPlayerPlanets(
+  map: GameMap,
+  eliminatedPlayerId: string,
+): GameMap {
+  return {
+    ...map,
+    planets: map.planets.map((planet) => {
+      if (planet.owner === eliminatedPlayerId) {
+        return { ...planet, owner: 'neutral', shipCount: 0 };
+      }
+      return planet;
+    }),
+  };
+}
+
 function applyHomePlanetElimination(
   map: GameMap,
   players: Player[],
@@ -42,17 +58,11 @@ function applyHomePlanetElimination(
   const updatedPlayers = players.map((player) =>
     player.id === defenderPlayer.id ? { ...player, isEliminated: true } : player,
   );
-  const forfeitedMap: GameMap = {
-    ...map,
-    planets: map.planets.map((planet) => {
-      if (planet.owner === defenderPlayer.id) {
-        return { ...planet, owner: 'neutral', shipCount: 0 };
-      }
-      return planet;
-    }),
-  };
   const updatedFleets = fleets.filter((fleet) => fleet.ownerId !== defenderPlayer.id);
-  return { map: forfeitedMap, players: updatedPlayers, fleets: updatedFleets };
+  const resultMap = defenderPlayer.isAI
+    ? forfeitEliminatedPlayerPlanets(map, defenderPlayer.id)
+    : map;
+  return { map: resultMap, players: updatedPlayers, fleets: updatedFleets };
 }
 
 export function resolveArrival(
