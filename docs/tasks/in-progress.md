@@ -381,7 +381,19 @@ One task to submit an empty turn to the backend inside `acknowledgeKnockout` for
 
 ---
 
+## Phase 53 — Bug Fix: Home Screen Still Shows "Your Turn" After Async Knockout Acknowledgement
+
+**Status:** Complete (2026-06-05).
+
+One task to call `resetGame()` and `requestHomeRefresh()` inside the async `acknowledgeKnockout` success path so the local game record is cleaned up and the home screen immediately re-fetches fresh game data from the backend:
+
+- ~~**Task 222**~~ — Frontend: Call `resetGame()` and `requestHomeRefresh()` after successful submit in `acknowledgeKnockout` *(complete 2026-06-05)*
+
+---
+
 ## Changelog
+- 2026-06-05: Phase 53 complete (Task 222) — `resetGame()` and `requestHomeRefresh()` called on `acknowledgeKnockout` success; local game record cleaned up and home screen immediately re-fetches from backend.
+- 2026-06-05: Phase 53 added (Task 222) — home screen still shows "your turn" after async knockout acknowledgement; `resetGame()` not called, `activeGameId` not cleared, home screen not force-refreshed.
 - 2026-06-05: Phase 52 complete (Task 221) — `acknowledgeKnockout` async path now submits empty turn (`actions: []`, `turnNumber + 1`) before navigating home; backend `current_user_id` advances; retry-on-failure path added.
 - 2026-06-05: Phase 52 added (Task 221) — async eliminated player navigates home but backend `current_user_id` never advances; home screen still shows "your turn"; fix by submitting empty turn from `acknowledgeKnockout`.
 - 2026-06-05: Phase 51 complete (Task 220) — End Turn button now renders and calls `acknowledgeKnockout()` during knockout turns; battle report close also triggers advance; double-fire is safe via early-return guard.

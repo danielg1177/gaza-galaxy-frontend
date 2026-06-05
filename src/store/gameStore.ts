@@ -40,6 +40,7 @@ import { ensureStorageMigrated } from '../utils/migrateStorage';
 import type { ApiGameDetail } from '../services/gamesService';
 import { ApiError } from '../services/apiClient';
 import { getGame, submitTurn } from '../services/gamesService';
+import { requestHomeRefresh } from '../services/homeRefreshEvents';
 
 export interface PlayerSlot {
   type: 'human' | 'ai';
@@ -1344,10 +1345,9 @@ export const useGameStore = create<GameStore>()(
             roundNumber: record.state.roundNumber,
             events: [],
           });
+          get().resetGame();
+          requestHomeRefresh();
           set({
-            games: get().games.map((g) =>
-              g.id === record.id ? { ...g, state: nextState } : g,
-            ),
             isSubmittingTurn: false,
             eliminatedPlayerPendingKnockout: false,
             shouldReturnHome: true,

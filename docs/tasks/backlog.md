@@ -5868,6 +5868,58 @@ When `game.status === 'finished'`, the home screen game card is either disabled 
 
 ---
 
+## Phase 53 — Bug Fix: Home Screen Still Shows "Your Turn" After Async Knockout Acknowledgement
+
+**Status:** Not started.
+
+**Problem:** After an async eliminated player's `acknowledgeKnockout` submit succeeds and they navigate home, the home screen game card still shows "your turn." The backend has correctly advanced `current_user_id`, but the local game state is not cleaned up and the home screen does not immediately force-refresh its game list.
+
+**Root cause:** The normal `endTurn()` success path calls `get().resetGame()` (which deletes the local game record and clears `activeGameId`) and navigation happens cleanly. `acknowledgeKnockout` does neither — the stale local record and un-cleared `activeGameId` can interfere with home-screen rendering. Additionally, `requestHomeRefresh()` (the direct event-bus trigger used by push notifications) is never called, so the home screen waits for its `useFocusEffect` to fire and its `listGames()` network call to return before showing fresh data — creating a visible stale window.
+
+---
+
+### Task 222 — Frontend: Call `resetGame()` and `requestHomeRefresh()` after successful submit in `acknowledgeKnockout`
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Requirements:**
+
+Inside the `try` block of the async `acknowledgeKnockout` IIFE, on the success path (after `await submitTurn(...)` resolves), replace:
+```ts
+set({
+  games: get().games.map((g) =>
+    g.id === record.id ? { ...g, state: nextState } : g,
+  ),
+  isSubmittingTurn: false,
+  eliminatedPlayerPendingKnockout: false,
+  shouldReturnHome: true,
+});
+```
+with:
+```ts
+get().resetGame();   // deletes local game record, clears activeGameId — mirrors endTurn() success
+requestHomeRefresh();  // triggers immediate home-screen game-list refresh
+set({
+  isSubmittingTurn: false,
+  eliminatedPlayerPendingKnockout: false,
+  shouldReturnHome: true,
+});
+```
+
+`requestHomeRefresh` must be imported from `'../services/homeRefreshEvents'`.
+
+No other changes. `resetGame()` already clears all the necessary in-game state (`activeGameId`, `queuedOrders`, battle archives, etc.). The separate `set(...)` after it only needs to clear the three remaining knockout-specific flags.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+
+- Async game where the local player is eliminated. Acknowledge knockout (close battle report or tap End Turn). App navigates to the home screen. The game card immediately shows `alertState: 'waiting'` (not "your turn"). No stale "your turn" badge visible at any point.
+- The next human player receives a "your turn" push notification after the submit.
+- Pass-and-play games: `acknowledgeKnockout` passes through the non-async path unchanged. No regressions.
+
+---
+
 ## Phase 52 — Bug Fix: Async Eliminated Player's Turn Not Advanced on Backend After Knockout
 
 **Status:** Not started.
