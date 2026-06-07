@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-07 (Planet tap hit radius tightened)
+2026-06-07 (In-transit fleet markers use app ship icon)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -174,7 +174,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 ## What Works Right Now
 - **Home → Game flow:** configure match on HomeScreen; async multiplayer games fetched from API on focus (`listGames`); tap async game only when `isMyTurn` → per-card loading while `getGame` in flight → `loadAsyncGame` → GameScreen (mid-turn restore when saved); opponent-turn (`waiting`) cards visible but not tappable; pass-and-play games remain local in Zustand and persist after **Exit to Home** (tappable under **Pass & Play**); Friends pill + invites refresh on focus (silent on fetch failure)
 - **AI setup defaults:** AI difficulty is no longer user-configurable in the setup UI; all AI opponents are created as hard difficulty for both pass-and-play and async game creation flows
-- **GameScreen:** 2D pannable map on warm off-white background (`BG_COLOR` `#f5f0eb`, light-mode `COLORS`, `CELL_SIZE` 18, `PLANET_VISUAL_SCALE` 1.5 for map planet nodes, default scale ~0.6), fog-aware planet tinting (local human home planet light brown `#c8a26b`, other owned planets green `#2e8a50`, all non-owned planets uniform neutral slate `#7a7a96`), class/name/troop labels on owned planets (non-owned labels muted via `COLORS.textMuted`, troops hidden), owned-planet tap/drag feedback uses enlarged node (`PLANET_SIZE_SELECTED` ~39px at 1.5× scale), animated indigo accent border + outer glow pulse (tap selection and fleet drag origin share the same treatment), 3px accent drag line; in-transit fleet markers at destinations (→ + dot) in owner player colour via `getPlayerColor`
+- **GameScreen:** 2D pannable map on warm off-white background (`BG_COLOR` `#f5f0eb`, light-mode `COLORS`, `CELL_SIZE` 18, `PLANET_VISUAL_SCALE` 1.5 for map planet nodes, default scale ~0.6), fog-aware planet tinting (local human home planet light brown `#c8a26b`, other owned planets green `#2e8a50`, all non-owned planets uniform neutral slate `#7a7a96`), class/name/troop labels on owned planets (non-owned labels muted via `COLORS.textMuted`, troops hidden), owned-planet tap/drag feedback uses enlarged node (`PLANET_SIZE_SELECTED` ~39px at 1.5× scale), animated indigo accent border + outer glow pulse (tap selection and fleet drag origin share the same treatment), 3px accent drag line; in-transit and queued-departure fleet markers use `Space_Ship.png` rotated toward destination; ship-count labels use owner colour via `getPlayerColor`
 - **Owned planet modal:** redesigned card with centered header + close button, class tile + large troop counter, Factory/Research Lab build chips (single tap places into next available slot), display-only empty slot grid plus tappable filled tiles (`🏭`/`🔬`), and factory-gated production slider label (`XX% troops / YY% gold`)
 - **Production split feedback:** planet modal slider now also shows live projected output (`⚔ X.X troops/turn · 💰 Y.Y gold/turn`) that updates continuously while dragging
 - **Build-order validation and economy feedback:** tapping Factory/Lab chips places immediately (no slot pick step), deducts gold instantly in the status bar, and build chips gray out when no slots remain; insufficient-gold chip taps show a brief red **Not enough gold** label in the planet modal (between build chips and slot grid)
@@ -222,6 +222,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-07: In-transit and queued-departure fleet markers — `FleetLayer` renders `assets/Space_Ship.png` rotated toward destination (replaces player-colored triangle polygons); dashed route lines and owner-colored ship-count labels unchanged; `findFleetAtMapCoords` hit radius follows `FLEET_SHIP_SIZE`.
 - 2026-06-07: Planet tap/drag hit radius tightened again — `PLANET_HIT_RADIUS` multiplier 1.85→1.45 (~39px screen-space radius at default zoom, down from ~61px originally); zoom-scaled `findPlanetAtMapCoords` unchanged.
 - 2026-06-06: Battle Report modal — win/loss summary bar at top (`BattleReportSummaryBar`); scroll hint ("↓ More battles below") when list overflows and user has not reached the bottom.
 - 2026-06-06: Strategic map modal planet dots tripled — `PLANET_DOT_SCALE=3` in `StrategicMapModal.tsx`; main game map unchanged.

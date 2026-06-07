@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { PlatformSlider } from '../components/PlatformSlider';
-import Svg, { Circle, G, Line, Polygon, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, G, Image as SvgImage, Line, Text as SvgText } from 'react-native-svg';
 import Animated, {
   runOnJS,
   runOnUI,
@@ -875,8 +875,8 @@ const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(2, Math.round((3 / 18) * CELL_SIZ
 const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_BOX_SELECT_RING_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_SELECTION_ACCENT = '#4060c8';
-const FLEET_ARROW_HALF_LENGTH = Math.max(2, Math.round((5 / 18) * CELL_SIZE));
-const FLEET_ARROW_HALF_WIDTH = Math.max(2, Math.round((4 / 18) * CELL_SIZE));
+const FLEET_SHIP_SIZE = Math.max(16, Math.round((20 / 18) * CELL_SIZE));
+const FLEET_SHIP_IMAGE = require('../../assets/Space_Ship.png');
 const FLEET_MARKER_FONT_SIZE = Math.max(2, Math.round((8 / 18) * CELL_SIZE));
 const FLEET_IN_TRANSIT_FONT_SIZE = Math.max(2, Math.round((10 / 18) * CELL_SIZE));
 const FLEET_MARKER_TEXT_OFFSET_X = Math.max(1, Math.round((6 / 18) * CELL_SIZE));
@@ -1107,7 +1107,7 @@ function findFleetAtMapCoords(
   planets: Planet[],
   scale: number,
 ): Fleet | undefined {
-  const hitRadius = Math.max(CELL_SIZE * 0.6, (CELL_SIZE * 1.8) / scale);
+  const hitRadius = Math.max(FLEET_SHIP_SIZE / 2, (FLEET_SHIP_SIZE * 1.1) / scale);
   let best: Fleet | undefined;
   let bestDist = Infinity;
   for (const fleet of fleets) {
@@ -1439,26 +1439,45 @@ function PlanetNode({
 
 const PENDING_DEPARTURE_OFFSET_PX = CELL_SIZE;
 
-function fleetArrowPolygonPoints(
-  cx: number,
-  cy: number,
-  towardX: number,
-  towardY: number,
-): string {
+function fleetShipRotationDeg(cx: number, cy: number, towardX: number, towardY: number): number {
   const dx = towardX - cx;
   const dy = towardY - cy;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  const ux = len < 0.001 ? 1 : dx / len;
-  const uy = len < 0.001 ? 0 : dy / len;
-  const tipX = cx + ux * FLEET_ARROW_HALF_LENGTH;
-  const tipY = cy + uy * FLEET_ARROW_HALF_LENGTH;
-  const baseX = cx - ux * FLEET_ARROW_HALF_LENGTH;
-  const baseY = cy - uy * FLEET_ARROW_HALF_LENGTH;
-  const leftX = baseX + uy * FLEET_ARROW_HALF_WIDTH;
-  const leftY = baseY - ux * FLEET_ARROW_HALF_WIDTH;
-  const rightX = baseX - uy * FLEET_ARROW_HALF_WIDTH;
-  const rightY = baseY + ux * FLEET_ARROW_HALF_WIDTH;
-  return `${tipX},${tipY} ${leftX},${leftY} ${rightX},${rightY}`;
+  if (Math.sqrt(dx * dx + dy * dy) < 0.001) {
+    return 0;
+  }
+  // App icon ship faces up; rotate so nose points toward destination.
+  return (Math.atan2(dx, -dy) * 180) / Math.PI;
+}
+
+function FleetShipMarker({
+  cx,
+  cy,
+  towardX,
+  towardY,
+  size,
+  opacity = 1,
+}: {
+  cx: number;
+  cy: number;
+  towardX: number;
+  towardY: number;
+  size: number;
+  opacity?: number;
+}) {
+  const half = size / 2;
+  const rotation = fleetShipRotationDeg(cx, cy, towardX, towardY);
+  return (
+    <G transform={`rotate(${rotation}, ${cx}, ${cy})`} opacity={opacity}>
+      <SvgImage
+        x={cx - half}
+        y={cy - half}
+        width={size}
+        height={size}
+        href={FLEET_SHIP_IMAGE}
+        preserveAspectRatio="xMidYMid meet"
+      />
+    </G>
+  );
 }
 
 function FleetLayer({
@@ -1517,7 +1536,7 @@ function FleetLayer({
               strokeDasharray="3 3"
               opacity={0.6}
             />
-            <Polygon points={fleetArrowPolygonPoints(x, y, destX, destY)} fill={color} />
+            <FleetShipMarker cx={x} cy={y} towardX={destX} towardY={destY} size={FLEET_SHIP_SIZE} />
             <SvgText
               x={x + FLEET_MARKER_TEXT_OFFSET_X}
               y={y - FLEET_MARKER_TEXT_OFFSET_Y}
@@ -1561,9 +1580,12 @@ function FleetLayer({
                 strokeDasharray="3 3"
                 opacity={0.5}
               />
-              <Polygon
-                points={fleetArrowPolygonPoints(dotX, dotY, destCenter.x, destCenter.y)}
-                fill={HUMAN_COLOR}
+              <FleetShipMarker
+                cx={dotX}
+                cy={dotY}
+                towardX={destCenter.x}
+                towardY={destCenter.y}
+                size={FLEET_SHIP_SIZE}
                 opacity={0.7}
               />
               <SvgText

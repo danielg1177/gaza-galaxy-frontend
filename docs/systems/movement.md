@@ -139,6 +139,7 @@ No randomness. Same positions and fleet list always produce the same transit tim
 - 2026-06-03: Bug fix — drag dispatch from 0-troop planet opens modal at 0 ships; Confirm clamps to `modalMaxShips` (cannot queue outbound fleet when garrison is 0).
 - 2026-06-02: In-transit fleet tap tooltip — auto-dismiss after 4s with fade; manual **✕** dismiss in `GameScreen`.
 - 2026-06-01: Fleet dispatch modal — tap ship count to type a value; clamped to `0…max` on blur/submit; − / + / **All** unchanged.
+- 2026-06-07: In-transit and queued-departure fleet markers use the app spaceship icon (`assets/Space_Ship.png`), rotated toward destination; ship-count labels remain owner-colored.
 - 2026-05-28: In-transit and queued-departure fleet markers use arrow-head polygons (tip toward destination) instead of circles; ship-count labels use owner color (same as marker).
 - 2026-05-28: Task 76 — removed minimum 1-ship garrison on dispatch; `shipCount` may equal `origin.shipCount`.
 - 2026-05-28: Task 74 — round-wrap `advanceFleets` arrivals resolved immediately in `turnEngine`; updated `advanceFleets` comment.

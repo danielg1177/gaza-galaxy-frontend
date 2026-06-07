@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## In-transit fleet markers use app ship icon
+**Completed:** 2026-06-07
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/systems/movement.md`, `docs/tasks/completed.md`
+**Notes:** `FleetLayer` replaces triangle `Polygon` markers with `Space_Ship.png` via `react-native-svg` `Image`, rotated with `atan2(dx, -dy)` so the nose points toward the destination; applies to in-transit fleets and queued-departure markers; route lines and owner-colored count labels unchanged.
+
+---
+
 ## Planet tap hit radius tightened
 **Completed:** 2026-06-07
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
