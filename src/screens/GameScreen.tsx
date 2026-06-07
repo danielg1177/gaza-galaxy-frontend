@@ -91,6 +91,24 @@ function displayPlanetClass(planetClass: string): string {
   return planetClass.toLowerCase();
 }
 
+/** Per-letter upward shift as a fraction of fontSize (negative translateY). Tuned for a–p. */
+const PLANET_CLASS_OPTICAL_OFFSET_RATIO: Partial<Record<string, number>> = {
+  a: 0.12,
+  c: 0.12,
+  e: 0.12,
+  g: 0.19,
+  n: 0.08,
+  o: 0.08,
+  p: 0.1,
+};
+
+/** Nudge lowercase glyphs up so x-height reads centered in a circle (not the em-box). */
+function planetClassOpticalOffsetY(planetClass: string, fontSize: number): number {
+  const letter = displayPlanetClass(planetClass);
+  const ratio = PLANET_CLASS_OPTICAL_OFFSET_RATIO[letter] ?? 0;
+  return -Math.round(fontSize * ratio);
+}
+
 function parseFleetShipCountFromDraft(
   draft: string,
   modalMaxShips: number,
@@ -472,7 +490,14 @@ function BattleReportCard({
       <BattleReportRoundLabel roundNumber={event.roundNumber} />
       <View style={styles.battleReportHeader}>
         <View style={styles.battleReportPlanetCircle}>
-          <Text style={styles.battleReportPlanetCircleText}>
+          <Text
+            style={[
+              styles.battleReportPlanetCircleText,
+              {
+                transform: [{ translateY: planetClassOpticalOffsetY(planetClass, 16) }],
+              },
+            ]}
+          >
             {displayPlanetClass(planetClass)}
           </Text>
         </View>
@@ -616,7 +641,14 @@ function MultiwayBattleReportCard({
         <BattleReportRoundLabel roundNumber={event.roundNumber} />
         <View style={styles.battleReportHeader}>
           <View style={styles.battleReportPlanetCircle}>
-            <Text style={styles.battleReportPlanetCircleText}>
+            <Text
+              style={[
+                styles.battleReportPlanetCircleText,
+                {
+                  transform: [{ translateY: planetClassOpticalOffsetY(planetClass, 16) }],
+                },
+              ]}
+            >
               {displayPlanetClass(planetClass)}
             </Text>
           </View>
@@ -697,20 +729,22 @@ function MultiwayBattleReportCard({
 }
 
 const CELL_SIZE = 18;
-const PLANET_HIT_RADIUS = CELL_SIZE * 2.25;
-// Visual sizes scaled from prior CELL_SIZE=18 baseline
-const PLANET_SIZE = Math.round((18 / 18) * CELL_SIZE);
-const PLANET_SIZE_SELECTED = Math.round((26 / 18) * CELL_SIZE);
-const PLANET_NAME_LABEL_WIDTH = Math.round((48 / 18) * CELL_SIZE);
-const PLANET_NAME_ABOVE_GAP = Math.max(1, Math.round((2 / 18) * CELL_SIZE));
-const PLANET_LABEL_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE));
-const PLANET_CLASS_FONT_SIZE = Math.max(2, Math.round((10.5 / 18) * CELL_SIZE));
-const PLANET_BATTLE_ICON_MARGIN = Math.max(1, Math.round((1 / 18) * CELL_SIZE));
-const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((9 / 18) * CELL_SIZE));
-const SHIP_COUNT_LABEL_MARGIN_TOP = Math.max(0, Math.round((2 / 18) * CELL_SIZE));
-const PLANET_BATTLE_ICON_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE));
-const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(2, Math.round((3 / 18) * CELL_SIZE));
-const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE));
+const PLANET_VISUAL_SCALE = 1.5;
+const PLANET_HIT_RADIUS = CELL_SIZE * 2.25 * PLANET_VISUAL_SCALE;
+// Visual sizes scaled from prior CELL_SIZE=18 baseline, then PLANET_VISUAL_SCALE
+const PLANET_SIZE = Math.round((18 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE);
+const PLANET_SIZE_SELECTED = Math.round((26 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE);
+const PLANET_NAME_LABEL_WIDTH = Math.round((48 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE);
+const PLANET_NAME_ABOVE_GAP = Math.max(1, Math.round((2 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_LABEL_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_CLASS_FONT_SIZE = Math.max(2, Math.round((10.5 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_BATTLE_ICON_MARGIN = Math.max(1, Math.round((1 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((9 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const SHIP_COUNT_LABEL_MARGIN_TOP = Math.max(0, Math.round((2 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_BATTLE_ICON_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(2, Math.round((3 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_BOX_SELECT_RING_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_SELECTION_ACCENT = '#4060c8';
 const FLEET_ARROW_HALF_LENGTH = Math.max(2, Math.round((5 / 18) * CELL_SIZE));
 const FLEET_ARROW_HALF_WIDTH = Math.max(2, Math.round((4 / 18) * CELL_SIZE));
@@ -1084,6 +1118,26 @@ function snapToHomePlanet(
   return { scale, translateX: clamped.x, translateY: clamped.y };
 }
 
+function mapPlanetClassLabelStyle(
+  circleSize: number,
+  borderWidth: number,
+  isOwned: boolean,
+  planetClass: string,
+) {
+  const innerSize = circleSize - borderWidth * 2;
+  return [
+    styles.planetClassLabel,
+    {
+      width: innerSize,
+      height: innerSize,
+      lineHeight: innerSize,
+      textAlign: 'center' as const,
+      transform: [{ translateY: planetClassOpticalOffsetY(planetClass, PLANET_CLASS_FONT_SIZE) }],
+    },
+    !isOwned && styles.planetClassLabelFogged,
+  ];
+}
+
 function PlanetNode({
   planet,
   color,
@@ -1154,6 +1208,8 @@ function PlanetNode({
     borderRadius: size / 2,
     backgroundColor: color,
   };
+  const circleBorderWidth = highlighted ? PLANET_HIGHLIGHT_BORDER_WIDTH : 0;
+  const classLabelStyle = mapPlanetClassLabelStyle(size, circleBorderWidth, isOwned, planet.class);
 
   const planetBody = (
     <>
@@ -1192,16 +1248,12 @@ function PlanetNode({
               },
             ]}
           >
-            <Text style={[styles.planetClassLabel, !isOwned && styles.planetClassLabelFogged]}>
-              {displayPlanetClass(planet.class)}
-            </Text>
+            <Text style={classLabelStyle}>{displayPlanetClass(planet.class)}</Text>
           </RNAnimated.View>
         </>
       ) : (
         <View style={[styles.planetCircle, circleFrame]}>
-          <Text style={[styles.planetClassLabel, !isOwned && styles.planetClassLabelFogged]}>
-            {displayPlanetClass(planet.class)}
-          </Text>
+          <Text style={classLabelStyle}>{displayPlanetClass(planet.class)}</Text>
         </View>
       )}
       {isOwned && adjustedShipCount > 0 && (
@@ -1231,12 +1283,12 @@ function PlanetNode({
         <View
           style={{
             position: 'absolute',
-            left: circleLeft - 4,
-            top: circleTop - 4,
-            width: size + 8,
-            height: size + 8,
-            borderRadius: (size + 8) / 2,
-            borderWidth: 2,
+            left: circleLeft - PLANET_BOX_SELECT_RING_PADDING,
+            top: circleTop - PLANET_BOX_SELECT_RING_PADDING,
+            width: size + PLANET_BOX_SELECT_RING_PADDING * 2,
+            height: size + PLANET_BOX_SELECT_RING_PADDING * 2,
+            borderRadius: (size + PLANET_BOX_SELECT_RING_PADDING * 2) / 2,
+            borderWidth: PLANET_HIGHLIGHT_BORDER_WIDTH,
             borderColor: '#00c9d4',
             backgroundColor: 'transparent',
           }}
@@ -3702,7 +3754,21 @@ export default function GameScreen() {
               <View
                 style={[styles.planetClassTile, { backgroundColor: selectedPlanetFillColor }]}
               >
-                <Text style={styles.planetClassTileText}>
+                <Text
+                  style={[
+                    styles.planetClassTileText,
+                    {
+                      transform: [
+                        {
+                          translateY: planetClassOpticalOffsetY(
+                            selectedPlanet?.class ?? '',
+                            24,
+                          ),
+                        },
+                      ],
+                    },
+                  ]}
+                >
                   {displayPlanetClass(selectedPlanet?.class ?? '')}
                 </Text>
               </View>
@@ -4417,6 +4483,7 @@ const styles = StyleSheet.create({
     fontSize: PLANET_CLASS_FONT_SIZE,
     fontWeight: '600',
     letterSpacing: 0,
+    includeFontPadding: false,
   },
   planetClassLabelFogged: {
     color: COLORS.background,
@@ -4609,6 +4676,11 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
+    width: 34,
+    height: 34,
+    lineHeight: 34,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   battleReportHeaderCenter: {
     flex: 1,
@@ -5192,6 +5264,11 @@ const styles = StyleSheet.create({
     color: COLORS.background,
     fontSize: 24,
     fontWeight: '700',
+    width: 48,
+    height: 48,
+    lineHeight: 48,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   troopsSummary: {
     flex: 1,
