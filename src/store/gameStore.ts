@@ -527,6 +527,10 @@ export const useGameStore = create<GameStore>()(
       pendingFarewellPlayerIds: [],
       isSubmittingTurn: false,
       shouldReturnHome: false,
+      isViewingFinishedGame: false,
+      showingAiObserver: false,
+      pendingAiTurnInput: null,
+      pendingAiPlayerId: null,
     });
   },
 
@@ -562,6 +566,16 @@ export const useGameStore = create<GameStore>()(
       pendingFarewellPlayerIds: [],
       isSubmittingTurn: false,
       shouldReturnHome: false,
+      // Always clear finished-game flag and AI observer state when loading a
+      // local game so stale flags from a previous async finished-game session
+      // never bleed in. Without this, isViewingFinishedGame = true causes
+      // battleReportTurnKey to use skipActivePlayerCheck = true, which gives
+      // every AI observer turn a unique turnKey and fires the auto-open once
+      // per AI turn instead of once per human turn.
+      isViewingFinishedGame: false,
+      showingAiObserver: false,
+      pendingAiTurnInput: null,
+      pendingAiPlayerId: null,
     });
   },
 
@@ -625,6 +639,9 @@ export const useGameStore = create<GameStore>()(
         eliminatedPlayerPendingKnockout: false,
         pendingFarewellPlayerIds: [],
         isViewingFinishedGame: true,
+        showingAiObserver: false,
+        pendingAiTurnInput: null,
+        pendingAiPlayerId: null,
       });
       return;
     }
@@ -709,6 +726,9 @@ export const useGameStore = create<GameStore>()(
       isSubmittingTurn: false,
       shouldReturnHome: false,
       isViewingFinishedGame: false,
+      showingAiObserver: false,
+      pendingAiTurnInput: null,
+      pendingAiPlayerId: null,
     });
   },
 
