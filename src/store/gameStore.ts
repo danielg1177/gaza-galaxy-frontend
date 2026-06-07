@@ -134,6 +134,7 @@ export interface GameStore {
   activeGameMessages: GameMessage[];
   isFetchingMessages: boolean;
   isSendingMessage: boolean;
+  notificationBadgeCount: number;
   startNewGame: (config: GameConfig) => void;
   loadGame: (id: string) => void;
   loadAsyncGame: (detail: ApiGameDetail) => void;
@@ -163,6 +164,7 @@ export interface GameStore {
   fetchMessages: (gameId: number) => Promise<void>;
   sendMessage: (gameId: number, content: string) => Promise<void>;
   clearMessages: () => void;
+  setNotificationBadgeCount: (count: number) => void;
   isAsyncGame: () => boolean;
   getVisibleGameState: () => GameState | null;
 }
@@ -501,6 +503,7 @@ export const useGameStore = create<GameStore>()(
   activeGameMessages: [],
   isFetchingMessages: false,
   isSendingMessage: false,
+  notificationBadgeCount: 0,
 
   startNewGame: (config) => {
     const seed = Date.now();
@@ -1565,6 +1568,8 @@ export const useGameStore = create<GameStore>()(
     set({ activeGameMessages: [] });
   },
 
+  setNotificationBadgeCount: (count) => set({ notificationBadgeCount: count }),
+
   isAsyncGame: () => {
     const record = get().getActiveRecord();
     return record?.asyncGameId != null;
@@ -1583,7 +1588,7 @@ export const useGameStore = create<GameStore>()(
         removeItem: (name) => AsyncStorage.removeItem(name),
       })),
       version: 1,
-      // Session-only fields (e.g. activeGameMessages) are omitted — not persisted.
+      // Session-only fields (e.g. activeGameMessages, notificationBadgeCount) are omitted — not persisted.
       partialize: (state) => ({
         games: state.games.filter((g) => !g.asyncGameId),
         finalBattleViewedByGameId: state.finalBattleViewedByGameId,

@@ -65,6 +65,8 @@ function parseNotificationGameId(data: Record<string, unknown> | undefined): num
 export default function App() {
   const isLoadingAuth = useAuthStore((s) => s.isLoadingAuth);
   const currentUser = useAuthStore((s) => s.currentUser);
+  const notificationBadgeCount = useGameStore((s) => s.notificationBadgeCount);
+  const setNotificationBadgeCount = useGameStore((s) => s.setNotificationBadgeCount);
   const pendingGameId = useRef<number | null>(null);
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
@@ -122,6 +124,24 @@ export default function App() {
       }
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    if (currentUser !== null) return;
+    setNotificationBadgeCount(0);
+    if (typeof navigator !== 'undefined' && 'clearAppBadge' in navigator) {
+      navigator.clearAppBadge().catch(() => {});
+    }
+  }, [currentUser, setNotificationBadgeCount]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    if (!('setAppBadge' in navigator)) return;
+    if (notificationBadgeCount > 0) {
+      navigator.setAppBadge(notificationBadgeCount).catch(() => {});
+    } else {
+      navigator.clearAppBadge().catch(() => {});
+    }
+  }, [notificationBadgeCount]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;

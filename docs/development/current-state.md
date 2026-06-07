@@ -222,7 +222,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
-- 2026-06-06: Lowercase planet class letters optically centered — per-letter `PLANET_CLASS_OPTICAL_OFFSET_RATIO` (a/c/e ~12%, g ~19%, n/o ~8%, p ~10%; other a–p letters use geometric center only).
+- 2026-06-06: Lowercase planet class letters optically centered — per-letter `PLANET_CLASS_OPTICAL_OFFSET_RATIO` (a ~12%, c/e ~11%, g ~19%, n/o ~8%, p ~10%; other a–p letters use geometric center only).
 - 2026-06-06: Planet map nodes doubled — `PLANET_VISUAL_SCALE=2` in `GameScreen` scales planet circles, labels, selection glow, box-select ring, touch target, and zoom-adjusted `PLANET_HIT_RADIUS`; grid `CELL_SIZE` and movement click math unchanged.
 - 2026-06-06: Planet tap/drag feedback less subtle — `PlanetNode` selection and drag-origin states enlarge the circle, add a pulsing outer glow ring, and use a solid-to-dim indigo accent border (replacing the old faint pulse-to-transparent and white drag ring); fleet/measurement `DragLine` at 3px full opacity (was 2px; briefly 4px).
 - 2026-06-03: Bug fix — fleet dispatch from 0-troop planet — `handleDragEnd` sets initial modal count to `min(1, garrison − queued)`; `handleConfirmFleet` clamps to `modalMaxShips` before queueing.

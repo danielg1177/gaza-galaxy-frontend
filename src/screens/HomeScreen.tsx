@@ -449,6 +449,7 @@ export default function HomeScreen() {
   const loadAsyncGame = useGameStore((s) => s.loadAsyncGame);
   const finalBattleViewedByGameId = useGameStore((s) => s.finalBattleViewedByGameId);
   const deleteLocalGame = useGameStore((s) => s.deleteGame);
+  const setNotificationBadgeCount = useGameStore((s) => s.setNotificationBadgeCount);
 
   const localGames = useMemo(
     () => games.filter((record) => record.asyncGameId == null),
@@ -511,7 +512,7 @@ export default function HomeScreen() {
     })();
   }, [playMode]);
 
-  const refreshAsyncGames = useCallback(async () => {
+  const refreshAsyncGames = useCallback(async (): Promise<ApiGame[] | null> => {
     const isFirstLoad = isFirstAsyncGamesLoad.current;
     if (isFirstLoad) {
       setAsyncGamesLoading(true);
@@ -520,21 +521,22 @@ export default function HomeScreen() {
     try {
       const list = await listGames();
       const userId = useAuthStore.getState().currentUser?.id;
-      setAsyncGames(
-        list.map((game) =>
-          sessionCreatedGameIds.has(game.id) && userId != null
-            ? {
-                ...game,
-                createdByUserId: game.createdByUserId ?? userId,
-                isCreator: game.isCreator ?? true,
-              }
-            : game,
-        ),
+      const mapped = list.map((game) =>
+        sessionCreatedGameIds.has(game.id) && userId != null
+          ? {
+              ...game,
+              createdByUserId: game.createdByUserId ?? userId,
+              isCreator: game.isCreator ?? true,
+            }
+          : game,
       );
+      setAsyncGames(mapped);
+      return mapped;
     } catch {
       if (isFirstLoad) {
         setAsyncGames([]);
       }
+      return null;
     } finally {
       if (isFirstLoad) {
         setAsyncGamesLoading(false);
@@ -553,7 +555,7 @@ export default function HomeScreen() {
         }
 
         try {
-          await refreshAsyncGames();
+          const gamesResult = await refreshAsyncGames();
 
           const [requestsResult, invitesResult] = await Promise.all([
             getFriendRequests().catch(() => null),
@@ -566,6 +568,14 @@ export default function HomeScreen() {
           if (invitesResult !== null) {
             setInvites(invitesResult);
           }
+
+          const gamesForBadge = gamesResult ?? asyncGames;
+          const myTurnCount = gamesForBadge.filter((g) => g.isMyTurn).length;
+          const friendCount =
+            requestsResult !== null ? requestsResult.length : pendingRequestCount;
+          const inviteCount =
+            invitesResult !== null ? invitesResult.length : invites.length;
+          setNotificationBadgeCount(friendCount + inviteCount + myTurnCount);
         } finally {
           if (showLoading) {
             setIsRefreshing(false);
@@ -573,7 +583,7 @@ export default function HomeScreen() {
         }
       })();
     },
-    [refreshAsyncGames],
+    [refreshAsyncGames, asyncGames, pendingRequestCount, invites, setNotificationBadgeCount],
   );
 
   const handleManualRefresh = useCallback(() => {

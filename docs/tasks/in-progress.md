@@ -450,14 +450,14 @@ Backend prerequisites (Phase 11 in `backend/docs/project/roadmap.md`) must be co
 
 ## Phase 58 — Feature: PWA App Notification Badge
 
-**Status:** Not started. See `docs/tasks/backlog.md` Phase 58 for full task specifications.
+**Status:** Complete (2026-06-06).
 
 Four tasks to display a live numeric badge on the installed PWA app icon showing the total number of notifications requiring attention (pending friend requests + pending game invites + async games where it is the user's turn):
 
-- **Task 235** — Frontend: Add `notificationBadgeCount` to `gameStore.ts` + `setNotificationBadgeCount` action
-- **Task 236** — Frontend: Compute badge count in `HomeScreen.tsx` after each refresh and push it into the store
-- **Task 237** — Frontend: Apply Web App Badging API (`navigator.setAppBadge`) in `App.tsx` reactively on badge count changes
-- **Task 238** — Frontend: Clear badge count when `currentUser` becomes null (token expiry / logout auth guard)
+- ~~**Task 235**~~ — Frontend: Add `notificationBadgeCount` to `gameStore.ts` + `setNotificationBadgeCount` action *(complete 2026-06-06)*
+- ~~**Task 236**~~ — Frontend: Compute badge count in `HomeScreen.tsx` after each refresh and push it into the store *(complete 2026-06-06)*
+- ~~**Task 237**~~ — Frontend: Apply Web App Badging API (`navigator.setAppBadge`) in `App.tsx` reactively on badge count changes *(complete 2026-06-06)*
+- ~~**Task 238**~~ — Frontend: Clear badge count when `currentUser` becomes null (token expiry / logout auth guard) *(complete 2026-06-06)*
 
 ---
 
