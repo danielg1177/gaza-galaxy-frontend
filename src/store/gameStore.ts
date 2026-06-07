@@ -1483,6 +1483,11 @@ export const useGameStore = create<GameStore>()(
     if (activeGameId !== null) {
       get().deleteGame(activeGameId);
     }
+    // Only remove the just-finished game's acknowledgement. Wiping all entries
+    // was causing other games' battle reports to re-show after any turn
+    // submission, because every game lost its persisted acknowledgement.
+    const { [activeGameId ?? '']: _removed, ...remainingAcknowledged } =
+      get().acknowledgedBattleReportTurnKeyByGameId;
     set({
       activeGameId: null,
       selectedPlanetId: null,
@@ -1497,7 +1502,7 @@ export const useGameStore = create<GameStore>()(
       isSubmittingTurn: false,
       shouldReturnHome: false,
       isViewingFinishedGame: false,
-      acknowledgedBattleReportTurnKeyByGameId: {},
+      acknowledgedBattleReportTurnKeyByGameId: remainingAcknowledged,
     });
   },
 
@@ -1612,6 +1617,7 @@ export const useGameStore = create<GameStore>()(
       partialize: (state) => ({
         games: state.games.filter((g) => !g.asyncGameId),
         finalBattleViewedByGameId: state.finalBattleViewedByGameId,
+        acknowledgedBattleReportTurnKeyByGameId: state.acknowledgedBattleReportTurnKeyByGameId,
       }),
       onRehydrateStorage: () => () => {
         useGameStore.setState({ _hasHydrated: true });
