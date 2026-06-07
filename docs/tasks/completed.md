@@ -1,5 +1,19 @@
 # Completed Tasks
 
+## All 🚀 emoji replaced with ShipIcon
+**Completed:** 2026-06-07
+**Files modified:** `src/components/ShipIcon.tsx` (new), `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** Shared `ShipIcon` (`Space_Ship.png`, 22px, 45° right) used in battle report cards, fleet-arrived turn report rows, and Rules **Fleet Movement** heading; no 🚀 remaining in `src/`.
+
+---
+
+## Battle report troop icons use tilted ship image
+**Completed:** 2026-06-07
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** `BattleReportShipIcon` renders `Space_Ship.png` at 22px with `rotate(45deg)` beside troop counts in `BattleReportCard` and `FleetArrivedReportCard`; replaces 🚀 emoji. *(Superseded by shared `ShipIcon` component in same session.)*
+
+---
+
 ## Home planet turn-start snap zoom reduced
 **Completed:** 2026-06-07
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`

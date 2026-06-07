@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { PlatformSlider } from '../components/PlatformSlider';
+import { ShipIcon } from '../components/ShipIcon';
 
 type RulesNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Rules'>;
 
@@ -231,7 +232,10 @@ export default function RulesScreen() {
 
         {/* Fleet Movement */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🚀 Fleet Movement</Text>
+          <View style={styles.sectionTitleRow}>
+            <ShipIcon size={20} />
+            <Text style={styles.sectionTitle}>Fleet Movement</Text>
+          </View>
           <Text style={styles.bodyText}>
             Dispatch fleets from one planet to another across the galaxy. Transit time is measured in turns and depends on the distance between planets.
           </Text>
@@ -345,12 +349,17 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 28,
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
   sectionTitle: {
     color: COLORS.text,
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: 0.5,
-    marginBottom: 12,
   },
   bodyText: {
     color: COLORS.text,

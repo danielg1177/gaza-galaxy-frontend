@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-07 (Home planet turn-start snap zoom reduced)
+2026-06-07 (All 🚀 emoji replaced with ShipIcon)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -222,6 +222,8 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-07: All 🚀 emoji replaced with shared `ShipIcon` (`src/components/ShipIcon.tsx`) — battle report cards, turn-report fleet arrivals, and Rules **Fleet Movement** section; `formatTurnEvent` fleet_arrived string no longer includes emoji (UI uses `FleetArrivedReportCard` + `ShipIcon`).
+- 2026-06-07: Battle report troop icons — `BattleReportCard` and `FleetArrivedReportCard` replace 🚀 with `Space_Ship.png` rotated 45° right (`BattleReportShipIcon`); in-transit map markers unchanged.
 - 2026-06-07: Home planet turn-start snap zoom reduced — `HOME_PLANET_SNAP_SCALE` 1.0→0.85 so initial load and pass-and-play lock-screen dismiss show more surrounding map while still centering on home.
 - 2026-06-07: In-transit and queued-departure fleet markers — `FleetLayer` renders `assets/Space_Ship.png` rotated toward destination (replaces player-colored triangle polygons); dashed route lines and owner-colored ship-count labels unchanged; `findFleetAtMapCoords` hit radius follows `FLEET_SHIP_SIZE`.
 - 2026-06-07: Planet tap/drag hit radius tightened again — `PLANET_HIT_RADIUS` multiplier 1.85→1.45 (~39px screen-space radius at default zoom, down from ~61px originally); zoom-scaled `findPlanetAtMapCoords` unchanged.

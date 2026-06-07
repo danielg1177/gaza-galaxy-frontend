@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { PlatformSlider } from '../components/PlatformSlider';
+import { ShipIcon, SPACE_SHIP_IMAGE } from '../components/ShipIcon';
 import Svg, { Circle, G, Image as SvgImage, Line, Text as SvgText } from 'react-native-svg';
 import Animated, {
   runOnJS,
@@ -173,7 +174,7 @@ function formatTurnEvent(
 ): string {
   switch (event.kind) {
     case 'fleet_arrived':
-      return `${event.planetName}: ${event.shipCount} 🚀`;
+      return `${event.planetName}: ${event.shipCount}`;
     case 'combat': {
       const sides = getBattleReportSides(
         event,
@@ -236,10 +237,13 @@ function FleetArrivedReportCard({ event }: { event: FleetArrivedTurnEvent }) {
   return (
     <View style={[styles.battleReportCard, styles.fleetArrivedReportCard]}>
       <BattleReportRoundLabel roundNumber={event.roundNumber} />
-      <Text style={styles.battleReportLine}>
-        <Text style={styles.fleetArrivedPlanetName}>{event.planetName}</Text>
-        {`: ${event.shipCount} 🚀`}
-      </Text>
+      <View style={styles.fleetArrivedCountRow}>
+        <Text style={styles.battleReportLine}>
+          <Text style={styles.fleetArrivedPlanetName}>{event.planetName}</Text>
+          {`: ${event.shipCount} `}
+        </Text>
+        <ShipIcon />
+      </View>
       <Text style={styles.fleetArrivedAttackerName}>{event.attackerName}</Text>
     </View>
   );
@@ -658,7 +662,7 @@ function BattleReportCard({
         <View style={styles.battleReportTroopColumn}>
           <View style={styles.battleReportTroopCountRow}>
             <Text style={styles.battleReportTroopCount}>{sides.leftTroops}</Text>
-            <Text style={styles.battleReportTroopIcon}>🚀</Text>
+            <ShipIcon />
           </View>
           <Text
             style={
@@ -676,7 +680,7 @@ function BattleReportCard({
         <View style={styles.battleReportTroopColumn}>
           <View style={styles.battleReportTroopCountRow}>
             <Text style={styles.battleReportTroopCount}>{sides.rightTroops}</Text>
-            <Text style={styles.battleReportTroopIcon}>🚀</Text>
+            <ShipIcon />
           </View>
           <Text
             style={
@@ -876,7 +880,6 @@ const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZ
 const PLANET_BOX_SELECT_RING_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_SELECTION_ACCENT = '#4060c8';
 const FLEET_SHIP_SIZE = Math.max(16, Math.round((20 / 18) * CELL_SIZE));
-const FLEET_SHIP_IMAGE = require('../../assets/Space_Ship.png');
 const FLEET_MARKER_FONT_SIZE = Math.max(2, Math.round((8 / 18) * CELL_SIZE));
 const FLEET_IN_TRANSIT_FONT_SIZE = Math.max(2, Math.round((10 / 18) * CELL_SIZE));
 const FLEET_MARKER_TEXT_OFFSET_X = Math.max(1, Math.round((6 / 18) * CELL_SIZE));
@@ -1473,7 +1476,7 @@ function FleetShipMarker({
         y={cy - half}
         width={size}
         height={size}
-        href={FLEET_SHIP_IMAGE}
+        href={SPACE_SHIP_IMAGE}
         preserveAspectRatio="xMidYMid meet"
       />
     </G>
@@ -4949,8 +4952,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.text,
   },
-  battleReportTroopIcon: {
-    fontSize: 22,
+  fleetArrivedCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   battleReportTroopLabelYou: {
     fontSize: 12,
