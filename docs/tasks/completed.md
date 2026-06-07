@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Planet tap/drag selection feedback — less subtle
+**Completed:** 2026-06-06
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** Enlarged selected/drag-origin planet node (`PLANET_SIZE_SELECTED` 20→26px), thicker accent border, animated outer glow ring, unified indigo pulse for tap selection and fleet drag origin (removed faint white drag ring); drag line 4px at full opacity. Display-only; `npx tsc --noEmit` passes clean.
+
+---
+
 ## Fleet dispatch from 0-troop planet
 **Completed:** 2026-06-03
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/development/known-issues.md`, `docs/systems/movement.md`, `docs/tasks/completed.md`

@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-05 (Rules screen — added Fog of War section; new campaign form defaults to Play with Friends instead of Pass & Play)
+2026-06-06 (Planet tap/drag selection feedback strengthened — larger accent ring, outer glow pulse, thicker drag line)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -174,7 +174,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 ## What Works Right Now
 - **Home → Game flow:** configure match on HomeScreen; async multiplayer games fetched from API on focus (`listGames`); tap async game only when `isMyTurn` → per-card loading while `getGame` in flight → `loadAsyncGame` → GameScreen (mid-turn restore when saved); opponent-turn (`waiting`) cards visible but not tappable; pass-and-play games remain local in Zustand and persist after **Exit to Home** (tappable under **Pass & Play**); Friends pill + invites refresh on focus (silent on fetch failure)
 - **AI setup defaults:** AI difficulty is no longer user-configurable in the setup UI; all AI opponents are created as hard difficulty for both pass-and-play and async game creation flows
-- **GameScreen:** 2D pannable map on warm off-white background (`BG_COLOR` `#f5f0eb`, light-mode `COLORS`, `CELL_SIZE` 18, default scale ~0.6), fog-aware planet tinting (local human home planet light brown `#c8a26b`, other owned planets green `#2e8a50`, all non-owned planets uniform neutral slate `#7a7a96`), class/name/troop labels on owned planets (non-owned labels muted via `COLORS.textMuted`, troops hidden), owned-planet accent-tint selection pulse, drag-origin white ring accent, in-transit fleet markers at destinations (→ + dot) in owner player colour via `getPlayerColor`
+- **GameScreen:** 2D pannable map on warm off-white background (`BG_COLOR` `#f5f0eb`, light-mode `COLORS`, `CELL_SIZE` 18, default scale ~0.6), fog-aware planet tinting (local human home planet light brown `#c8a26b`, other owned planets green `#2e8a50`, all non-owned planets uniform neutral slate `#7a7a96`), class/name/troop labels on owned planets (non-owned labels muted via `COLORS.textMuted`, troops hidden), owned-planet tap/drag feedback uses enlarged node (`PLANET_SIZE_SELECTED` 26px), animated indigo accent border + outer glow pulse (tap selection and fleet drag origin share the same treatment), 4px accent drag line; in-transit fleet markers at destinations (→ + dot) in owner player colour via `getPlayerColor`
 - **Owned planet modal:** redesigned card with centered header + close button, class tile + large troop counter, Factory/Research Lab build chips (single tap places into next available slot), display-only empty slot grid plus tappable filled tiles (`🏭`/`🔬`), and factory-gated production slider label (`XX% troops / YY% gold`)
 - **Production split feedback:** planet modal slider now also shows live projected output (`⚔ X.X troops/turn · 💰 Y.Y gold/turn`) that updates continuously while dragging
 - **Build-order validation and economy feedback:** tapping Factory/Lab chips places immediately (no slot pick step), deducts gold instantly in the status bar, and build chips gray out when no slots remain; insufficient-gold chip taps show a brief red **Not enough gold** label in the planet modal (between build chips and slot grid)
@@ -222,6 +222,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-06: Planet tap/drag feedback less subtle — `PlanetNode` selection and drag-origin states enlarge the circle, add a pulsing outer glow ring, and use a solid-to-dim indigo accent border (replacing the old faint pulse-to-transparent and white drag ring); fleet/measurement `DragLine` at 3px full opacity (was 2px; briefly 4px).
 - 2026-06-03: Bug fix — fleet dispatch from 0-troop planet — `handleDragEnd` sets initial modal count to `min(1, garrison − queued)`; `handleConfirmFleet` clamps to `modalMaxShips` before queueing.
 - 2026-06-03: Restored **Watch AI Turns** toggle on `HomeScreen` new-game setup (visible when at least one AI slot is configured); wires to existing `aiObserverMode` / in-game observer UI in `gameStore` and `GameScreen`.
 - 2026-06-02: Insufficient ships error handling — `processSendFleet` error now shows origin and destination planet names; `gameStore.endTurn` catches "Cannot send" errors and auto-selects the origin planet so player can see exactly which planet has the issue and what the target was.

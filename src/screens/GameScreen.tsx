@@ -700,7 +700,7 @@ const CELL_SIZE = 18;
 const PLANET_HIT_RADIUS = CELL_SIZE * 2.25;
 // Visual sizes scaled from prior CELL_SIZE=18 baseline
 const PLANET_SIZE = Math.round((18 / 18) * CELL_SIZE);
-const PLANET_SIZE_SELECTED = Math.round((20 / 18) * CELL_SIZE);
+const PLANET_SIZE_SELECTED = Math.round((26 / 18) * CELL_SIZE);
 const PLANET_NAME_LABEL_WIDTH = Math.round((48 / 18) * CELL_SIZE);
 const PLANET_NAME_ABOVE_GAP = Math.max(1, Math.round((2 / 18) * CELL_SIZE));
 const PLANET_LABEL_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE));
@@ -709,7 +709,9 @@ const PLANET_BATTLE_ICON_MARGIN = Math.max(1, Math.round((1 / 18) * CELL_SIZE));
 const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((9 / 18) * CELL_SIZE));
 const SHIP_COUNT_LABEL_MARGIN_TOP = Math.max(0, Math.round((2 / 18) * CELL_SIZE));
 const PLANET_BATTLE_ICON_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE));
-const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(1, Math.round((2 / 18) * CELL_SIZE));
+const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(2, Math.round((3 / 18) * CELL_SIZE));
+const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE));
+const PLANET_SELECTION_ACCENT = '#4060c8';
 const FLEET_ARROW_HALF_LENGTH = Math.max(2, Math.round((5 / 18) * CELL_SIZE));
 const FLEET_ARROW_HALF_WIDTH = Math.max(2, Math.round((4 / 18) * CELL_SIZE));
 const FLEET_MARKER_FONT_SIZE = Math.max(2, Math.round((8 / 18) * CELL_SIZE));
@@ -1025,7 +1027,7 @@ function DragLine({
         styles.dragLine,
         {
           left: startX,
-          top: startY - 1,
+          top: startY - 1.5,
           width: length,
           transform: [{ rotate: `${angle}deg` }],
         },
@@ -1125,7 +1127,11 @@ function PlanetNode({
 
   const borderColor = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(70, 96, 200, 0.5)', 'rgba(0,0,0,0)'],
+    outputRange: ['rgba(64, 96, 200, 1)', 'rgba(64, 96, 200, 0.45)'],
+  });
+  const glowOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.6, 0.28],
   });
 
   const touchStyle = [
@@ -1160,32 +1166,39 @@ function PlanetNode({
       >
         {planet.name}
       </Text>
-      {highlighted && !isDragOrigin && isOwned ? (
-        <RNAnimated.View
-          style={[
-            styles.planetCircle,
-            circleFrame,
-            {
+      {highlighted ? (
+        <>
+          <RNAnimated.View
+            style={{
+              position: 'absolute',
+              left: circleLeft - PLANET_HIGHLIGHT_GLOW_PADDING,
+              top: circleTop - PLANET_HIGHLIGHT_GLOW_PADDING,
+              width: size + PLANET_HIGHLIGHT_GLOW_PADDING * 2,
+              height: size + PLANET_HIGHLIGHT_GLOW_PADDING * 2,
+              borderRadius: (size + PLANET_HIGHLIGHT_GLOW_PADDING * 2) / 2,
               borderWidth: PLANET_HIGHLIGHT_BORDER_WIDTH,
-              borderColor,
-            },
-          ]}
-        >
-          <Text style={[styles.planetClassLabel, !isOwned && styles.planetClassLabelFogged]}>
-            {displayPlanetClass(planet.class)}
-          </Text>
-        </RNAnimated.View>
+              borderColor: PLANET_SELECTION_ACCENT,
+              opacity: glowOpacity,
+              backgroundColor: 'transparent',
+            }}
+          />
+          <RNAnimated.View
+            style={[
+              styles.planetCircle,
+              circleFrame,
+              {
+                borderWidth: PLANET_HIGHLIGHT_BORDER_WIDTH,
+                borderColor,
+              },
+            ]}
+          >
+            <Text style={[styles.planetClassLabel, !isOwned && styles.planetClassLabelFogged]}>
+              {displayPlanetClass(planet.class)}
+            </Text>
+          </RNAnimated.View>
+        </>
       ) : (
-        <View
-          style={[
-            styles.planetCircle,
-            circleFrame,
-            {
-              borderWidth: isDragOrigin ? PLANET_HIGHLIGHT_BORDER_WIDTH : 0,
-              borderColor: 'rgba(255,255,255,0.6)',
-            },
-          ]}
-        >
+        <View style={[styles.planetCircle, circleFrame]}>
           <Text style={[styles.planetClassLabel, !isOwned && styles.planetClassLabelFogged]}>
             {displayPlanetClass(planet.class)}
           </Text>
@@ -4353,9 +4366,9 @@ const styles = StyleSheet.create({
   },
   dragLine: {
     position: 'absolute',
-    height: 2,
+    height: 3,
     backgroundColor: COLORS.accent,
-    opacity: 0.9,
+    opacity: 1,
     zIndex: 10,
     transformOrigin: 'left center',
   },

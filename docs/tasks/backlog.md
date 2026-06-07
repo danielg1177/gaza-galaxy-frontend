@@ -6344,3 +6344,138 @@ interface ConversationModalProps {
 - The "Chat" option is absent in solo and pass-and-play games.
 
 ---
+
+## Phase 58 — Feature: PWA App Notification Badge
+
+The PWA app icon badge shows a live count of all items requiring the user's attention: pending friend requests + pending game invites + async multiplayer games where it is the user's turn. Uses the [Web App Badging API](https://developer.mozilla.org/en-US/docs/Web/API/Badging_API) (`navigator.setAppBadge(n)` / `navigator.clearAppBadge()`), which is supported on Chrome/Edge for Android and desktop PWAs installed to the home screen or taskbar.
+
+**Badge count formula:** `pendingFriendRequests + pendingGameInvites + myTurnGames`
+
+All three data sources are already fetched every time `HomeScreen.refreshOnFocus` runs (on screen focus, every 60 s, and on app foreground). No new backend endpoint is required.
+
+Work tasks in order: 235 → 236 → 237 → 238.
+
+---
+
+### Task 235 — Frontend: Add `notificationBadgeCount` to `gameStore.ts` + `setNotificationBadgeCount` action
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Requirements:**
+
+1. Add `notificationBadgeCount: number` to the store state interface. Default value: `0`.
+
+2. Add `setNotificationBadgeCount(count: number): void` to the store actions interface.
+
+3. Implement the action: `set({ notificationBadgeCount: count })`.
+
+4. Exclude `notificationBadgeCount` from the Zustand `persist` config (it must always be recomputed from live server data on next load). Add it to the `partialize` exclusion list if the store uses one, or to the list of fields skipped by the existing storage filter.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- `useGameStore.getState().notificationBadgeCount` returns `0` on a fresh load.
+- Calling `setNotificationBadgeCount(5)` updates the value in the store.
+- After an app restart, `notificationBadgeCount` is `0` (not hydrated from AsyncStorage).
+
+---
+
+### Task 236 — Frontend: Compute badge count in `HomeScreen.tsx` and push it into the store
+
+**File:** `frontend/src/screens/HomeScreen.tsx`
+
+**Requirements:**
+
+1. Import `useGameStore` (already imported) and destructure `setNotificationBadgeCount` from it.
+
+2. In `refreshOnFocus` (the async block that calls `refreshAsyncGames`, `getFriendRequests`, and `listInvites`), after all three data sources have been fetched and local state has been updated, compute and store the badge count:
+
+   ```ts
+   const myTurnCount = latestAsyncGames.filter((g) => g.isMyTurn).length;
+   const total = (latestRequestCount ?? pendingRequestCount)
+     + (latestInvites ?? invites).length
+     + myTurnCount;
+   setNotificationBadgeCount(total);
+   ```
+
+   Use the freshly-fetched values — not the pre-refresh state snapshot. If a fetch fails (caught as `null`), fall back to the current state variable for that bucket so the badge does not reset to zero on a transient network error.
+
+3. Also call `setNotificationBadgeCount(0)` inside the `logout` handler (or wherever the user's session is torn down in `HomeScreen`) so the badge clears immediately on sign-out.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Log in as a user with 1 pending friend request, 1 pending invite, and 2 async games where it is the user's turn. After HomeScreen loads, `useGameStore.getState().notificationBadgeCount` should equal `4`.
+- Accept one invite → badge drops to `3` on next refresh.
+- Log out → badge resets to `0`.
+
+---
+
+### Task 237 — Frontend: Apply Web App Badging API in `App.tsx` on badge count changes
+
+**File:** `frontend/App.tsx`
+
+**Requirements:**
+
+1. Subscribe to `notificationBadgeCount` from `useGameStore` at the top level of `App.tsx` (or in a small dedicated hook `useAppBadge` extracted from `App.tsx`):
+
+   ```ts
+   const notificationBadgeCount = useGameStore((s) => s.notificationBadgeCount);
+   ```
+
+2. Add a `useEffect` that fires whenever `notificationBadgeCount` changes:
+
+   ```ts
+   useEffect(() => {
+     if (typeof navigator === 'undefined') return;           // SSR / non-browser guard
+     if (!('setAppBadge' in navigator)) return;              // API not supported — skip silently
+
+     if (notificationBadgeCount > 0) {
+       navigator.setAppBadge(notificationBadgeCount).catch(() => {});
+     } else {
+       navigator.clearAppBadge().catch(() => {});
+     }
+   }, [notificationBadgeCount]);
+   ```
+
+3. Do **not** call the Badging API from the service worker at this stage — the reactive `useEffect` in the app shell is sufficient for foreground updates, and the 60-second polling + app-focus refresh in HomeScreen keeps the badge current. A service-worker update path can be added in a future phase if needed.
+
+4. Also call `navigator.clearAppBadge()` (guarded the same way) inside the `logout` handler or the `useEffect` that reacts to `currentUser` becoming `null`, so the badge clears when the user signs out.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Install the app as a PWA in Chrome on desktop or Android.
+- With pending notifications, confirm the app icon shows a numeric badge equal to `pendingFriendRequests + pendingGameInvites + myTurnGames`.
+- After accepting all invites and taking all pending turns, confirm the badge disappears.
+- Log out → badge clears immediately.
+- On a browser that does not support the Badging API (e.g. Firefox), confirm no JS errors are thrown.
+
+---
+
+### Task 238 — Frontend: Also clear badge count on `currentUser` becoming null (auth guard)
+
+**File:** `frontend/App.tsx`
+
+**Requirements:**
+
+Add a `useEffect` on `currentUser` (already available from `useAuthStore`):
+
+```ts
+useEffect(() => {
+  if (currentUser !== null) return;
+  setNotificationBadgeCount(0);
+  if (typeof navigator !== 'undefined' && 'clearAppBadge' in navigator) {
+    navigator.clearAppBadge().catch(() => {});
+  }
+}, [currentUser, setNotificationBadgeCount]);
+```
+
+This ensures the badge clears even if the session expires server-side (401 token expiry path) rather than through a manual logout, covering edge cases that Task 237's logout handler might not reach.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Badge clears when `currentUser` is set to `null` by the auth store (token expiry, manual logout, or `loadStoredAuth` failure).
+
+---
