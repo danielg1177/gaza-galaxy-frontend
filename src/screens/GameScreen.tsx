@@ -888,7 +888,7 @@ const DEFAULT_MAP_SCALE =
   Math.round(
     ((REFERENCE_VIEWPORT_WIDTH * 0.55) / (SMALL_MAP_CELLS * CELL_SIZE)) * 10,
   ) / 10;
-const HOME_PLANET_SNAP_SCALE = 1.0;
+const HOME_PLANET_SNAP_SCALE = 0.85;
 const MAP_VIEWPORT_PADDING = 150;
 const BG_COLOR = '#f5f0eb';
 const HUMAN_COLOR = '#2e5bcc';

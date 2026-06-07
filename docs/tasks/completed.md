@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Home planet turn-start snap zoom reduced
+**Completed:** 2026-06-07
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** `HOME_PLANET_SNAP_SCALE` 1.0→0.85; applies on game load and pass-and-play lock-screen dismiss via existing `snapToHomePlanet` / `animateMapToSnap`.
+
+---
+
 ## In-transit fleet markers use app ship icon
 **Completed:** 2026-06-07
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/systems/movement.md`, `docs/tasks/completed.md`
