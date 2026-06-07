@@ -14,6 +14,7 @@ const MAP_BG = '#e8e2d8';
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 6;
 const VIEWPORT_PADDING = 24;
+const PLANET_DOT_SCALE = 3;
 
 const COLORS = {
   panel: '#faf7f4',
@@ -117,7 +118,7 @@ export default function StrategicMapModal({
 }: StrategicMapModalProps) {
   const mapPixelWidth = map.width * CELL_SIZE;
   const mapPixelHeight = map.height * CELL_SIZE;
-  const dotSize = Math.max(4, Math.round(CELL_SIZE * 0.45 * 1.25));
+  const dotSize = Math.max(4, Math.round(CELL_SIZE * 0.45 * 1.25 * PLANET_DOT_SCALE));
 
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
 

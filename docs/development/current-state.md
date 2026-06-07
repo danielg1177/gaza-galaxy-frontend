@@ -222,6 +222,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-06: Strategic map modal planet dots tripled — `PLANET_DOT_SCALE=3` in `StrategicMapModal.tsx`; main game map unchanged.
 - 2026-06-06: In-transit fleet ship counts use slightly larger label (`FLEET_IN_TRANSIT_FONT_SIZE` 10/18 baseline); pending-departure queued-order labels unchanged.
 - 2026-06-06: Planet map label layout — `PlanetNode` name label moved below the circle (smaller semibold); owned troop count moved above-right of the circle (smaller semibold), tucked to the top-right rim via `SHIP_COUNT_RIGHT_INSET`; class letter inside circle unchanged.
 - 2026-06-06: Lowercase planet class letters optically centered — per-letter `PLANET_CLASS_OPTICAL_OFFSET_RATIO` (a ~12%, c/e/m/n ~8%, o ~9%, g ~19%, p ~10%; other a–p letters use geometric center only).
