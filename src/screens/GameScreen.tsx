@@ -1559,6 +1559,7 @@ export default function GameScreen() {
   const prevShowingLockScreenRef = useRef(showingLockScreen);
   const pendingGameOverAlertRef = useRef(false);
   const lastOpenedTurnKeyRef = useRef('');
+  const showBattleReportModalRef = useRef(false);
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
 
@@ -1732,6 +1733,8 @@ export default function GameScreen() {
     reportBuiltEvents,
   ]);
 
+  showBattleReportModalRef.current = showBattleReportModal;
+
   useEffect(() => {
     if (humanCombatEvents.length === 0) {
       setShowBattleReportModal(false);
@@ -1749,7 +1752,7 @@ export default function GameScreen() {
     if (
       humanCombatEvents.length > 0 &&
       !showingLockScreen &&
-      !showBattleReportModal &&
+      !showBattleReportModalRef.current &&
       turnKey !== lastOpenedTurnKeyRef.current &&
       acknowledgedBattleReportTurnKeyByGameId[activeGameId ?? ''] !== turnKey
     ) {
@@ -1763,7 +1766,6 @@ export default function GameScreen() {
     humanCombatEvents.length,
     isViewingFinishedGame,
     localHumanPlayerId,
-    showBattleReportModal,
     showingLockScreen,
   ]);
 
