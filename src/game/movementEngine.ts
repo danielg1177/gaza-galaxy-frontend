@@ -2,7 +2,7 @@ import type { Fleet, Position } from './types';
 
 export const BASE_FLEET_RANGE_CLICKS = 11;
 export const BASE_FLEET_SPEED_CLICKS_PER_TURN = 5;
-export const RANGE_CLICKS_PER_TECH_LEVEL = 1;
+export const RANGE_CLICKS_PER_TECH_LEVEL = 2;
 export const SPEED_CLICKS_PER_TECH_LEVEL = 1;
 
 export function effectiveRange(techLevel: number): number {
