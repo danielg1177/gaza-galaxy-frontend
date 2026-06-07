@@ -99,7 +99,7 @@ const PLANET_CLASS_OPTICAL_OFFSET_RATIO: Partial<Record<string, number>> = {
   g: 0.19,
   m: 0.08,
   n: 0.08,
-  o: 0.08,
+  o: 0.085,
   p: 0.1,
 };
 
