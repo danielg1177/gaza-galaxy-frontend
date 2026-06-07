@@ -413,6 +413,32 @@ function isHumanHomePlanetCapturedByEnemy(
   return event.winnerName !== humanPlayer.name;
 }
 
+/** True when the battle outcome transferred planet ownership (attacker capture or multi-way winner). */
+function isPlanetCaptureEvent(event: HumanCombatTurnEvent): boolean {
+  if (event.kind === 'combat') {
+    return event.attackerWon;
+  }
+  return true;
+}
+
+/**
+ * Higher priority cards appear first in the battle report.
+ * 2 = local human lost their home planet; 1 = any other capture; 0 = defender held.
+ */
+function getBattleReportCapturePriority(
+  event: HumanCombatTurnEvent,
+  localHumanPlayerId: string | undefined,
+  players: Player[],
+): number {
+  if (isHumanHomePlanetCapturedByEnemy(event, localHumanPlayerId, players)) {
+    return 2;
+  }
+  if (isPlanetCaptureEvent(event)) {
+    return 1;
+  }
+  return 0;
+}
+
 function getHumanBattleOutcomeIsVictory(
   event: HumanCombatTurnEvent,
   localHumanPlayerId: string,
@@ -1664,6 +1690,9 @@ export default function GameScreen() {
   // Track the activeGameId we last reset lastOpenedTurnKeyRef for, so we only
   // reset the ref when the game actually changes (not on every events update).
   const lastResetGameIdRef = useRef<string | null>(null);
+  // Session-level set: once a turnKey has been auto-shown this mount, never
+  // auto-show it again regardless of other guard state. Cleared on unmount.
+  const sessionShownTurnKeysRef = useRef<Set<string>>(new Set());
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
 
@@ -1776,15 +1805,11 @@ export default function GameScreen() {
 
   const sortedBattleReportEvents = useMemo((): HumanCombatTurnEvent[] => {
     const players = gameState?.players ?? [];
-    return [...humanCombatEvents].sort((a, b) => {
-      const aHomeCapture = isHumanHomePlanetCapturedByEnemy(a, localHumanPlayerId, players)
-        ? 1
-        : 0;
-      const bHomeCapture = isHumanHomePlanetCapturedByEnemy(b, localHumanPlayerId, players)
-        ? 1
-        : 0;
-      return bHomeCapture - aHomeCapture;
-    });
+    return [...humanCombatEvents].sort(
+      (a, b) =>
+        getBattleReportCapturePriority(b, localHumanPlayerId, players) -
+        getBattleReportCapturePriority(a, localHumanPlayerId, players),
+    );
   }, [gameState?.players, humanCombatEvents, localHumanPlayerId]);
 
   const battleReportOutcomeCounts = useMemo(
@@ -1875,10 +1900,12 @@ export default function GameScreen() {
       !showingLockScreen &&
       !showBattleReportModalRef.current &&
       turnKey !== lastOpenedTurnKeyRef.current &&
-      acknowledgedBattleReportTurnKeyByGameId[activeGameId ?? ''] !== turnKey
+      acknowledgedBattleReportTurnKeyByGameId[activeGameId ?? ''] !== turnKey &&
+      !sessionShownTurnKeysRef.current.has(turnKey)
     ) {
       setShowBattleReportModal(true);
       lastOpenedTurnKeyRef.current = turnKey;
+      sessionShownTurnKeysRef.current.add(turnKey);
     }
   }, [
     activeGameId,
