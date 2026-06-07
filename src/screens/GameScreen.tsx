@@ -94,11 +94,12 @@ function displayPlanetClass(planetClass: string): string {
 /** Per-letter upward shift as a fraction of fontSize (negative translateY). Tuned for a–p. */
 const PLANET_CLASS_OPTICAL_OFFSET_RATIO: Partial<Record<string, number>> = {
   a: 0.12,
-  c: 0.11,
-  e: 0.11,
+  c: 0.08,
+  e: 0.08,
   g: 0.19,
+  m: 0.08,
   n: 0.08,
-  o: 0.08,
+  o: 0.11,
   p: 0.1,
 };
 
