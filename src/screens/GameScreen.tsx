@@ -427,13 +427,22 @@ function isPlanetCaptureEvent(event: HumanCombatTurnEvent): boolean {
 
 /**
  * Higher priority cards appear first in the battle report.
- * 2 = local human lost their home planet; 1 = any other capture; 0 = defender held.
+ * 3 = human conquered an enemy home planet (player knockout);
+ * 2 = local human lost their home planet;
+ * 1 = any other capture;
+ * 0 = defender held.
  */
 function getBattleReportCapturePriority(
   event: HumanCombatTurnEvent,
   localHumanPlayerId: string | undefined,
   players: Player[],
 ): number {
+  if (
+    event.kind === 'combat' &&
+    isHumanHomePlanetConquestVictory(event, localHumanPlayerId, players)
+  ) {
+    return 3;
+  }
   if (isHumanHomePlanetCapturedByEnemy(event, localHumanPlayerId, players)) {
     return 2;
   }
