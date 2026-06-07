@@ -832,7 +832,7 @@ function MultiwayBattleReportCard({
 
 const CELL_SIZE = 18;
 const PLANET_VISUAL_SCALE = 1.5;
-const PLANET_HIT_RADIUS = CELL_SIZE * 2.25 * PLANET_VISUAL_SCALE;
+const PLANET_HIT_RADIUS = CELL_SIZE * 1.45 * PLANET_VISUAL_SCALE;
 // Visual sizes scaled from prior CELL_SIZE=18 baseline, then PLANET_VISUAL_SCALE
 const PLANET_SIZE = Math.round((18 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE);
 const PLANET_SIZE_SELECTED = Math.round((26 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE);

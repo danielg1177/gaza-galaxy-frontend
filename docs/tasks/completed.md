@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Planet tap hit radius tightened
+**Completed:** 2026-06-07
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** `PLANET_HIT_RADIUS` screen-space multiplier reduced from `2.25` → `1.85` → `1.45` (with `PLANET_VISUAL_SCALE`); tap, fleet drag-start, fleet drag-drop, and measure drag still use zoom-adjusted `findPlanetAtMapCoords`.
+
+---
+
 ## Battle Report modal — win/loss summary and scroll hint
 **Completed:** 2026-06-06
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`

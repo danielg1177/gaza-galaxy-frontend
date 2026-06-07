@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-06 (Planet map label layout — name below, troop count above-right)
+2026-06-07 (Planet tap hit radius tightened)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -222,6 +222,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-07: Planet tap/drag hit radius tightened again — `PLANET_HIT_RADIUS` multiplier 1.85→1.45 (~39px screen-space radius at default zoom, down from ~61px originally); zoom-scaled `findPlanetAtMapCoords` unchanged.
 - 2026-06-06: Battle Report modal — win/loss summary bar at top (`BattleReportSummaryBar`); scroll hint ("↓ More battles below") when list overflows and user has not reached the bottom.
 - 2026-06-06: Strategic map modal planet dots tripled — `PLANET_DOT_SCALE=3` in `StrategicMapModal.tsx`; main game map unchanged.
 - 2026-06-06: In-transit fleet ship counts use slightly larger label (`FLEET_IN_TRANSIT_FONT_SIZE` 10/18 baseline); pending-departure queued-order labels unchanged.
