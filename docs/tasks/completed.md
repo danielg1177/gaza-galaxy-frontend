@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Planet map label layout — name below, troop count above-right
+**Completed:** 2026-06-06
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** `PlanetNode` name label moved from above to below the circle (`PLANET_NAME_BELOW_GAP`); troop count moved from centered-below to above-right (`SHIP_COUNT_ABOVE_GAP`, `SHIP_COUNT_RIGHT_MARGIN`); both labels use semibold weight and slightly reduced font sizes (`PLANET_LABEL_FONT_SIZE` 6/18 baseline, `SHIP_COUNT_FONT_SIZE` 7/18 baseline). Class letter inside circle unchanged.
+
+---
+
 ## Planet tap/drag selection feedback — less subtle
 **Completed:** 2026-06-06
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`

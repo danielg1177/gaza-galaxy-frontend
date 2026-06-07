@@ -736,12 +736,13 @@ const PLANET_HIT_RADIUS = CELL_SIZE * 2.25 * PLANET_VISUAL_SCALE;
 const PLANET_SIZE = Math.round((18 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE);
 const PLANET_SIZE_SELECTED = Math.round((26 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE);
 const PLANET_NAME_LABEL_WIDTH = Math.round((48 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE);
-const PLANET_NAME_ABOVE_GAP = Math.max(1, Math.round((2 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
-const PLANET_LABEL_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_NAME_BELOW_GAP = Math.max(1, Math.round((2 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const PLANET_LABEL_FONT_SIZE = Math.max(2, Math.round((6 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_CLASS_FONT_SIZE = Math.max(2, Math.round((10.5 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_BATTLE_ICON_MARGIN = Math.max(1, Math.round((1 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
-const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((9 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
-const SHIP_COUNT_LABEL_MARGIN_TOP = Math.max(0, Math.round((2 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const SHIP_COUNT_ABOVE_GAP = 0;
+const SHIP_COUNT_RIGHT_INSET = Math.max(1, Math.round((3 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_BATTLE_ICON_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(2, Math.round((3 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
@@ -750,6 +751,7 @@ const PLANET_SELECTION_ACCENT = '#4060c8';
 const FLEET_ARROW_HALF_LENGTH = Math.max(2, Math.round((5 / 18) * CELL_SIZE));
 const FLEET_ARROW_HALF_WIDTH = Math.max(2, Math.round((4 / 18) * CELL_SIZE));
 const FLEET_MARKER_FONT_SIZE = Math.max(2, Math.round((8 / 18) * CELL_SIZE));
+const FLEET_IN_TRANSIT_FONT_SIZE = Math.max(2, Math.round((10 / 18) * CELL_SIZE));
 const FLEET_MARKER_TEXT_OFFSET_X = Math.max(1, Math.round((6 / 18) * CELL_SIZE));
 const FLEET_MARKER_TEXT_OFFSET_Y = Math.max(1, Math.round((4 / 18) * CELL_SIZE));
 // Small preset (20×20 cells) at ~55% of a ~390px-wide viewport after status bar
@@ -1199,7 +1201,7 @@ function PlanetNode({
 
   const circleLeft = touchTargetHalfSize - size / 2;
   const circleTop = touchTargetHalfSize - size / 2;
-  const nameTop = circleTop - PLANET_NAME_ABOVE_GAP - PLANET_LABEL_FONT_SIZE;
+  const nameTop = circleTop + size + PLANET_NAME_BELOW_GAP;
   const circleFrame = {
     position: 'absolute' as const,
     left: circleLeft,
@@ -1261,7 +1263,10 @@ function PlanetNode({
         <Text
           style={[
             styles.shipCountLabel,
-            { top: circleTop + size + SHIP_COUNT_LABEL_MARGIN_TOP },
+            {
+              left: circleLeft + size - SHIP_COUNT_RIGHT_INSET,
+              top: circleTop - SHIP_COUNT_ABOVE_GAP - SHIP_COUNT_FONT_SIZE,
+            },
           ]}
         >
           {adjustedShipCount}
@@ -1390,7 +1395,7 @@ function FleetLayer({
               x={x + FLEET_MARKER_TEXT_OFFSET_X}
               y={y - FLEET_MARKER_TEXT_OFFSET_Y}
               fill={color}
-              fontSize={FLEET_MARKER_FONT_SIZE}
+              fontSize={FLEET_IN_TRANSIT_FONT_SIZE}
             >
               {fleet.shipCount}
             </SvgText>
@@ -4475,6 +4480,7 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: PLANET_LABEL_FONT_SIZE,
     lineHeight: PLANET_LABEL_FONT_SIZE + 1,
+    fontWeight: '600',
   },
   planetNameLabelFogged: {
     color: COLORS.textMuted,
@@ -4491,11 +4497,10 @@ const styles = StyleSheet.create({
   },
   shipCountLabel: {
     position: 'absolute',
-    left: 0,
-    right: 0,
     color: COLORS.text,
     fontSize: SHIP_COUNT_FONT_SIZE,
-    textAlign: 'center',
+    lineHeight: SHIP_COUNT_FONT_SIZE + 1,
+    fontWeight: '600',
   },
   fleetLayer: {
     position: 'absolute',

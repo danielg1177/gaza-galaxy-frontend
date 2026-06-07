@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-06 (Planet map nodes at 150% via `PLANET_VISUAL_SCALE=1.5`)
+2026-06-06 (Planet map label layout — name below, troop count above-right)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -222,6 +222,8 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-06: In-transit fleet ship counts use slightly larger label (`FLEET_IN_TRANSIT_FONT_SIZE` 10/18 baseline); pending-departure queued-order labels unchanged.
+- 2026-06-06: Planet map label layout — `PlanetNode` name label moved below the circle (smaller semibold); owned troop count moved above-right of the circle (smaller semibold), tucked to the top-right rim via `SHIP_COUNT_RIGHT_INSET`; class letter inside circle unchanged.
 - 2026-06-06: Lowercase planet class letters optically centered — per-letter `PLANET_CLASS_OPTICAL_OFFSET_RATIO` (a ~12%, c/e/m/n ~8%, o ~9%, g ~19%, p ~10%; other a–p letters use geometric center only).
 - 2026-06-06: Planet map nodes doubled — `PLANET_VISUAL_SCALE=2` in `GameScreen` scales planet circles, labels, selection glow, box-select ring, touch target, and zoom-adjusted `PLANET_HIT_RADIUS`; grid `CELL_SIZE` and movement click math unchanged.
 - 2026-06-06: Planet tap/drag feedback less subtle — `PlanetNode` selection and drag-origin states enlarge the circle, add a pulsing outer glow ring, and use a solid-to-dim indigo accent border (replacing the old faint pulse-to-transparent and white drag ring); fleet/measurement `DragLine` at 3px full opacity (was 2px; briefly 4px).
