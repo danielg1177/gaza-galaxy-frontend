@@ -545,6 +545,16 @@ export default function HomeScreen() {
     }
   }, [sessionCreatedGameIds]);
 
+  // Keep refs for fallback values so refreshOnFocus doesn't need them in its
+  // dependency array (which would cause useFocusEffect to re-run on every
+  // refresh, creating an infinite loop).
+  const asyncGamesRef = useRef(asyncGames);
+  asyncGamesRef.current = asyncGames;
+  const pendingRequestCountRef = useRef(pendingRequestCount);
+  pendingRequestCountRef.current = pendingRequestCount;
+  const invitesRef = useRef(invites);
+  invitesRef.current = invites;
+
   const refreshOnFocus = useCallback(
     (options?: { showLoading?: boolean }) => {
       const showLoading = options?.showLoading ?? false;
@@ -569,12 +579,12 @@ export default function HomeScreen() {
             setInvites(invitesResult);
           }
 
-          const gamesForBadge = gamesResult ?? asyncGames;
+          const gamesForBadge = gamesResult ?? asyncGamesRef.current;
           const myTurnCount = gamesForBadge.filter((g) => g.isMyTurn).length;
           const friendCount =
-            requestsResult !== null ? requestsResult.length : pendingRequestCount;
+            requestsResult !== null ? requestsResult.length : pendingRequestCountRef.current;
           const inviteCount =
-            invitesResult !== null ? invitesResult.length : invites.length;
+            invitesResult !== null ? invitesResult.length : invitesRef.current.length;
           setNotificationBadgeCount(friendCount + inviteCount + myTurnCount);
         } finally {
           if (showLoading) {
@@ -583,7 +593,7 @@ export default function HomeScreen() {
         }
       })();
     },
-    [refreshAsyncGames, asyncGames, pendingRequestCount, invites, setNotificationBadgeCount],
+    [refreshAsyncGames, setNotificationBadgeCount],
   );
 
   const handleManualRefresh = useCallback(() => {

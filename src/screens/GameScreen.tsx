@@ -1661,6 +1661,9 @@ export default function GameScreen() {
   const pendingGameOverAlertRef = useRef(false);
   const lastOpenedTurnKeyRef = useRef('');
   const showBattleReportModalRef = useRef(false);
+  // Track the activeGameId we last reset lastOpenedTurnKeyRef for, so we only
+  // reset the ref when the game actually changes (not on every events update).
+  const lastResetGameIdRef = useRef<string | null>(null);
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
 
@@ -1849,9 +1852,16 @@ export default function GameScreen() {
   useEffect(() => {
     if (humanCombatEvents.length === 0) {
       setShowBattleReportModal(false);
-      lastOpenedTurnKeyRef.current = '';
+      // Only clear the opened-key ref when the game itself changes, not merely
+      // when events temporarily become empty (e.g. between store updates). This
+      // prevents the auto-open from re-firing for the same turn after the ref
+      // is spuriously cleared.
+      if (lastResetGameIdRef.current !== activeGameId) {
+        lastOpenedTurnKeyRef.current = '';
+        lastResetGameIdRef.current = activeGameId;
+      }
     }
-  }, [humanCombatEvents]);
+  }, [humanCombatEvents, activeGameId]);
 
   useEffect(() => {
     const turnKey = battleReportTurnKey(activeGameId, gameState, localHumanPlayerId, {
