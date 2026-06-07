@@ -432,6 +432,107 @@ function getHumanBattleOutcomeIsVictory(
   return humanParticipant.survived === true;
 }
 
+function countHumanBattleOutcomes(
+  events: HumanCombatTurnEvent[],
+  localHumanPlayerId: string | undefined,
+  players: Player[],
+): { wins: number; losses: number } {
+  if (localHumanPlayerId === undefined) {
+    return { wins: 0, losses: 0 };
+  }
+  let wins = 0;
+  let losses = 0;
+  for (const event of events) {
+    const outcome = getHumanBattleOutcomeIsVictory(event, localHumanPlayerId, players);
+    if (outcome === true) {
+      wins += 1;
+    } else if (outcome === false) {
+      losses += 1;
+    }
+  }
+  return { wins, losses };
+}
+
+function BattleReportSummaryBar({ wins, losses }: { wins: number; losses: number }) {
+  return (
+    <View style={styles.battleReportSummaryBar}>
+      <Text style={styles.battleReportSummaryWin}>
+        {wins} Win{wins === 1 ? '' : 's'}
+      </Text>
+      <Text style={styles.battleReportSummaryDivider}>·</Text>
+      <Text style={styles.battleReportSummaryLoss}>
+        {losses} Loss{losses === 1 ? '' : 'es'}
+      </Text>
+    </View>
+  );
+}
+
+function BattleReportScrollArea({
+  visible,
+  children,
+}: {
+  visible: boolean;
+  children: React.ReactNode;
+}) {
+  const scrollRef = useRef<ScrollView>(null);
+  const [scrollMetrics, setScrollMetrics] = useState({
+    contentHeight: 0,
+    viewportHeight: 0,
+    scrollY: 0,
+  });
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+    setScrollMetrics({ contentHeight: 0, viewportHeight: 0, scrollY: 0 });
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [visible]);
+
+  const canScroll = scrollMetrics.contentHeight > scrollMetrics.viewportHeight + 4;
+  const atBottom =
+    scrollMetrics.scrollY + scrollMetrics.viewportHeight >= scrollMetrics.contentHeight - 12;
+  const showScrollHint = canScroll && !atBottom;
+
+  return (
+    <View style={styles.battleReportScrollContainer}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.battleReportScroll}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={canScroll}
+        onLayout={(event) => {
+          const { height } = event.nativeEvent.layout;
+          setScrollMetrics((metrics) =>
+            metrics.viewportHeight === height ? metrics : { ...metrics, viewportHeight: height },
+          );
+        }}
+        onContentSizeChange={(_, contentHeight) => {
+          setScrollMetrics((metrics) =>
+            metrics.contentHeight === contentHeight
+              ? metrics
+              : { ...metrics, contentHeight },
+          );
+        }}
+        onScroll={(event) => {
+          const scrollY = event.nativeEvent.contentOffset.y;
+          setScrollMetrics((metrics) =>
+            metrics.scrollY === scrollY ? metrics : { ...metrics, scrollY },
+          );
+        }}
+        scrollEventThrottle={16}
+      >
+        {children}
+      </ScrollView>
+      {showScrollHint && (
+        <View style={styles.battleReportScrollHint} pointerEvents="none">
+          <Text style={styles.battleReportScrollHintText}>↓ More battles below</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function BattleReportCard({
   event,
   localHumanPlayerId,
@@ -1682,6 +1783,16 @@ export default function GameScreen() {
       return bHomeCapture - aHomeCapture;
     });
   }, [gameState?.players, humanCombatEvents, localHumanPlayerId]);
+
+  const battleReportOutcomeCounts = useMemo(
+    () =>
+      countHumanBattleOutcomes(
+        sortedBattleReportEvents,
+        localHumanPlayerId,
+        gameState?.players ?? [],
+      ),
+    [sortedBattleReportEvents, localHumanPlayerId, gameState?.players],
+  );
 
   const playerTurnReport =
     playerTurnReportByPlayerId[localHumanPlayerId ?? ''] ?? [];
@@ -4171,7 +4282,13 @@ export default function GameScreen() {
             {isKnockoutTurn && (
               <Text style={styles.knockoutBanner}>You have been knocked out of the game!</Text>
             )}
-            <ScrollView style={styles.battleReportScroll} nestedScrollEnabled>
+            {localHumanPlayerId !== undefined && sortedBattleReportEvents.length > 0 && (
+              <BattleReportSummaryBar
+                wins={battleReportOutcomeCounts.wins}
+                losses={battleReportOutcomeCounts.losses}
+              />
+            )}
+            <BattleReportScrollArea visible={showBattleReportModal}>
               {sortedBattleReportEvents.map((event, index) => {
                 const players = gameState?.players ?? [];
                 const planetClass =
@@ -4212,7 +4329,7 @@ export default function GameScreen() {
                   />
                 );
               })}
-            </ScrollView>
+            </BattleReportScrollArea>
             <Pressable
               style={[styles.primaryButton, styles.battleReportCloseButton]}
               onPress={handleCloseBattleReport}
@@ -4599,10 +4716,53 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 2,
   },
-  battleReportScroll: {
+  battleReportScrollContainer: {
+    position: 'relative',
     maxHeight: 360,
     marginTop: 8,
     marginBottom: 12,
+  },
+  battleReportScroll: {
+    maxHeight: 360,
+  },
+  battleReportScrollHint: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 28,
+    paddingBottom: 8,
+    alignItems: 'center',
+    backgroundColor: 'rgba(250, 247, 244, 0.94)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+  },
+  battleReportScrollHintText: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  battleReportSummaryBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  battleReportSummaryWin: {
+    color: COLORS.victory,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  battleReportSummaryDivider: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  battleReportSummaryLoss: {
+    color: COLORS.defeat,
+    fontSize: 14,
+    fontWeight: '700',
   },
   battleReportCard: {
     backgroundColor: COLORS.background,

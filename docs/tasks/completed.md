@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Battle Report modal — win/loss summary and scroll hint
+**Completed:** 2026-06-06
+**Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** `BattleReportSummaryBar` shows total wins/losses above the scroll list; `BattleReportScrollArea` detects overflow and shows "↓ More battles below" until the user scrolls to the bottom. Counts use existing `getHumanBattleOutcomeIsVictory` for 1v1 and multiway battles.
+
+---
+
 ## Planet map label layout — name below, troop count above-right
 **Completed:** 2026-06-06
 **Files modified:** `src/screens/GameScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
