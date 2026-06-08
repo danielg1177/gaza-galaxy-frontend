@@ -1929,14 +1929,30 @@ export default function GameScreen() {
     if (turnKey === null) {
       return;
     }
+    const guardAck = acknowledgedBattleReportTurnKeyByGameId[activeGameId ?? ''];
+    const guardSession = sessionShownTurnKeysRef.current.has(turnKey);
+    const guardRef = turnKey === lastOpenedTurnKeyRef.current;
+    const guardModal = showBattleReportModalRef.current;
+    // eslint-disable-next-line no-console
+    console.log('[BattleReport] auto-open check', {
+      turnKey,
+      guardModal,
+      guardRef,
+      guardAck,
+      guardSession,
+      eventsLen: humanCombatEvents.length,
+      showingLockScreen,
+    });
     if (
       humanCombatEvents.length > 0 &&
       !showingLockScreen &&
-      !showBattleReportModalRef.current &&
-      turnKey !== lastOpenedTurnKeyRef.current &&
-      acknowledgedBattleReportTurnKeyByGameId[activeGameId ?? ''] !== turnKey &&
-      !sessionShownTurnKeysRef.current.has(turnKey)
+      !guardModal &&
+      !guardRef &&
+      guardAck !== turnKey &&
+      !guardSession
     ) {
+      // eslint-disable-next-line no-console
+      console.log('[BattleReport] OPENING modal for', turnKey);
       setShowBattleReportModal(true);
       lastOpenedTurnKeyRef.current = turnKey;
       sessionShownTurnKeysRef.current.add(turnKey);
@@ -3303,6 +3319,8 @@ export default function GameScreen() {
   };
 
   const handleCloseBattleReport = useCallback(() => {
+    // eslint-disable-next-line no-console
+    console.log('[BattleReport] CLOSING modal, isViewingFinishedGame=', isViewingFinishedGame);
     if (isViewingFinishedGame) {
       const asyncGameId = useGameStore.getState().getActiveRecord()?.asyncGameId;
       if (asyncGameId != null) {
