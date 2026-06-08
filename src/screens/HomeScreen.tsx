@@ -122,16 +122,24 @@ function sortAsyncGamesByAlertPriority(games: ApiGame[]): ApiGame[] {
 }
 
 function getFinishedOutcome(game: ApiGame, username: string | undefined): FinishedOutcome {
-  if (game.alertState !== 'finished' && game.status !== 'finished') {
-    return 'unknown';
-  }
-
   if (username == null || username === '') {
     return 'unknown';
   }
 
   const nonAiPlayers = game.players.filter((player) => !player.isAi);
-  if (!nonAiPlayers.some((player) => player.inGameName === username)) {
+  const userPlayer = nonAiPlayers.find((player) => player.inGameName === username);
+
+  if (userPlayer == null) {
+    return 'unknown';
+  }
+
+  // For active games, the player may already be eliminated even while the game
+  // continues among the remaining players — show their card as a defeat.
+  if (userPlayer.isEliminated) {
+    return 'defeat';
+  }
+
+  if (game.alertState !== 'finished' && game.status !== 'finished') {
     return 'unknown';
   }
 
@@ -144,11 +152,6 @@ function getFinishedOutcome(game: ApiGame, username: string | undefined): Finish
   }
 
   if (nonEliminatedNonAi.length === 1) {
-    return 'defeat';
-  }
-
-  const userPlayer = nonAiPlayers.find((player) => player.inGameName === username);
-  if (userPlayer?.isEliminated) {
     return 'defeat';
   }
 
@@ -216,7 +219,9 @@ function AsyncGameCard({
     !isProminent &&
       (game.alertState === 'waiting' || game.alertState === 'waiting_for_players') &&
       styles.gameCardMuted,
-    !isTappable && styles.gameCardDisabled,
+    finishedOutcome === 'victory' && styles.gameCardVictory,
+    finishedOutcome === 'defeat' && styles.gameCardDefeat,
+    !isTappable && finishedOutcome === 'unknown' && styles.gameCardDisabled,
     isLoading && styles.gameCardLoading,
   ];
 
@@ -230,19 +235,9 @@ function AsyncGameCard({
       case 'waiting_for_players':
         return null;
       case 'finished':
-        if (finishedOutcome === 'victory') {
-          return (
-            <View style={styles.asyncAlertBadgeVictory}>
-              <Text style={styles.asyncAlertBadgeFinishedText}>VICTORY</Text>
-            </View>
-          );
-        }
-        if (finishedOutcome === 'defeat') {
-          return (
-            <View style={styles.asyncAlertBadgeDefeat}>
-              <Text style={styles.asyncAlertBadgeFinishedText}>DEFEAT</Text>
-            </View>
-          );
+        if (finishedOutcome === 'victory' || finishedOutcome === 'defeat') {
+          // Card background color conveys the outcome; no badge needed
+          return null;
         }
         return (
           <View style={styles.asyncAlertBadgeFinished}>
@@ -1694,6 +1689,14 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     borderRadius: 10,
     padding: 16,
+  },
+  gameCardVictory: {
+    backgroundColor: '#eaf5ec',
+    borderColor: '#2e8a50',
+  },
+  gameCardDefeat: {
+    backgroundColor: '#fdecea',
+    borderColor: '#c0392b',
   },
   gameCardPressed: {
     borderColor: COLORS.accent,

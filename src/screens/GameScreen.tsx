@@ -1811,10 +1811,15 @@ export default function GameScreen() {
     return () => clearTimeout(timeoutId);
   }, [isSubmittingTurn]);
 
-  const localHumanPlayerId = useMemo(
-    () => (gameState !== null ? getLocalHumanPlayerId(gameState) : undefined),
-    [gameState],
-  );
+  const localHumanPlayerId = useMemo(() => {
+    if (gameState === null) return undefined;
+    // For async games the record stores which player-N slot the authenticated
+    // user occupies. This is critical for finished games where currentPlayerId
+    // points to the winner — without this override every player would appear
+    // to have won.
+    if (activeRecord?.localPlayerId != null) return activeRecord.localPlayerId;
+    return getLocalHumanPlayerId(gameState);
+  }, [gameState, activeRecord?.localPlayerId]);
 
   const viewingPlayerId = showingAiObserver ? pendingAiPlayerId ?? undefined : localHumanPlayerId;
 
@@ -3380,10 +3385,14 @@ export default function GameScreen() {
     if (isViewingFinishedGame) {
       const asyncGameId = useGameStore.getState().getActiveRecord()?.asyncGameId;
       if (asyncGameId != null) {
-        pendingGameOverAlertRef.current = true;
         markFinalBattleViewed(String(asyncGameId));
         setShowBattleReportModal(false);
         acknowledgeBattleReport();
+        // Navigate home after viewing the final battle report. Show a brief
+        // "Game Over" notice so the player knows why they're being sent back.
+        Alert.alert('Game Over', 'The game has ended.', [
+          { text: 'OK', onPress: () => navigation.navigate('Home') },
+        ]);
         return;
       }
     }
@@ -3393,6 +3402,7 @@ export default function GameScreen() {
     isViewingFinishedGame,
     markFinalBattleViewed,
     acknowledgeBattleReport,
+    navigation,
   ]);
 
   const handleNewGame = () => {
@@ -4515,7 +4525,7 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={status === 'finished' && humanWon}
+        visible={status === 'finished' && humanWon && !showingLockScreen && !isViewingFinishedGame}
         transparent
         animationType="fade"
         onRequestClose={handleNewGame}
@@ -4534,7 +4544,7 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={status === 'finished' && !humanWon}
+        visible={status === 'finished' && !humanWon && !showingLockScreen && !isViewingFinishedGame}
         transparent
         animationType="fade"
         onRequestClose={handleNewGame}

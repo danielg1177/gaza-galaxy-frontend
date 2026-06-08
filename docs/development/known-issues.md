@@ -309,6 +309,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-06-08: Resolved finished-game outcome bugs — `localPlayerId` on `GameRecord`; victory/defeat modals gated; `handleCloseBattleReport` navigates home; `getFinishedOutcome` covers eliminated players in active games; card styling replaced pills with background colors.
 - 2026-06-04: Resolved multiple battle report modals on turn start — unified single-fire effect with `lastOpenedTurnKeyRef` (Phase 46, Task 213).
 - 2026-06-04: Added open issue — multiple battle report modals on turn start (Phase 46, Task 213).
 - 2026-06-04: Resolved async end turn state exposure — submit overlay now fully opaque (Phase 45, Task 212).

@@ -46,6 +46,7 @@ import {
   submitTurn,
 } from '../services/gamesService';
 import { requestHomeRefresh } from '../services/homeRefreshEvents';
+import { useAuthStore } from './authStore';
 
 export interface PlayerSlot {
   type: 'human' | 'ai';
@@ -85,6 +86,13 @@ export interface GameRecord {
   /** Un-dismissed battle report events; persisted for local games until modal close. */
   pendingTurnReport?: TurnEvent[];
   pendingTurnReportAcknowledged?: boolean;
+  /**
+   * The player-N id (e.g. "player-1") that corresponds to the authenticated user
+   * in this async game. Set when the game is loaded from the API so that the
+   * correct player is always shown regardless of whose turn it is or whether
+   * the game is finished.
+   */
+  localPlayerId?: string;
 }
 
 export interface PendingFleet {
@@ -267,6 +275,28 @@ export function getLocalHumanPlayerId(state: GameState): string | undefined {
     return current.id;
   }
   return state.players.find((p) => !p.isAI)?.id;
+}
+
+/**
+ * Determine the "player-N" id for the authenticated user in an async game.
+ * Matches the authenticated user's numeric id against the players array returned
+ * by the API (each entry has a userId for human slots). Falls back to
+ * getLocalHumanPlayerId when the match cannot be made (e.g. unauthenticated).
+ */
+function resolveAsyncLocalPlayerId(
+  apiPlayers: import('../services/gamesService').ApiGamePlayer[],
+  gameState: GameState,
+): string | undefined {
+  const currentUser = useAuthStore.getState().currentUser;
+  if (currentUser != null) {
+    const idx = apiPlayers.findIndex(
+      (p) => !p.isAi && p.userId != null && p.userId === currentUser.id,
+    );
+    if (idx >= 0) {
+      return `player-${idx}`;
+    }
+  }
+  return getLocalHumanPlayerId(gameState);
 }
 
 function buildVisibleState(state: GameState, viewingPlayerId: string): GameState {
@@ -593,6 +623,7 @@ export const useGameStore = create<GameStore>()(
       });
 
       const recordId = String(detail.id);
+      const localPlayerId = resolveAsyncLocalPlayerId(detail.players, state);
       const record: GameRecord = {
         id: recordId,
         name: detail.name,
@@ -601,6 +632,7 @@ export const useGameStore = create<GameStore>()(
         serverRoundNumber: detail.roundNumber,
         asyncIsMyTurn: detail.isMyTurn,
         state,
+        localPlayerId,
         config: {
           playMode: 'asyncMultiplayer',
           playerName: '',
@@ -674,6 +706,7 @@ export const useGameStore = create<GameStore>()(
     });
 
     const recordId = String(detail.id);
+    const localPlayerId = resolveAsyncLocalPlayerId(detail.players, state);
     const record: GameRecord = {
       id: recordId,
       name: detail.name,
@@ -682,6 +715,7 @@ export const useGameStore = create<GameStore>()(
       serverRoundNumber: detail.roundNumber,
       asyncIsMyTurn: detail.isMyTurn,
       state,
+      localPlayerId,
       config: {
         playMode: 'asyncMultiplayer',
         playerName: '',
@@ -704,7 +738,6 @@ export const useGameStore = create<GameStore>()(
       ? buildPlayerReports(detail.latestEvents!, state.players, state.map.planets)
       : null;
 
-    const localPlayerId = getLocalHumanPlayerId(state);
     const localPlayer =
       localPlayerId !== undefined
         ? state.players.find((p) => p.id === localPlayerId)
@@ -1529,7 +1562,7 @@ export const useGameStore = create<GameStore>()(
       set({ turnReport: [] });
       return;
     }
-    const localPlayerId = getLocalHumanPlayerId(record.state);
+    const localPlayerId = record.localPlayerId ?? getLocalHumanPlayerId(record.state);
     const turnKey = battleReportTurnKey(record.id, record.state, localPlayerId, {
       skipActivePlayerCheck: get().isViewingFinishedGame,
     });

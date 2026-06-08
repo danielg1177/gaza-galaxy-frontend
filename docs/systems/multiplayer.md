@@ -188,6 +188,13 @@ Pass-and-play games remain entirely local:
 ---
 
 ## Changelog
+- 2026-06-08: Fixed win/loss outcome correctness and finished-game UI.
+  - `GameRecord` now stores `localPlayerId` (e.g. `"player-1"`) — the authenticated user's player-slot ID in an async game. `loadAsyncGame` resolves it via `resolveAsyncLocalPlayerId`, which matches `detail.players[i].userId` against the current user's ID from the auth store. This replaces the broken `getLocalHumanPlayerId` fallback which always returned the winner's player-ID for finished games (causing every player to see the victory modal).
+  - `GameScreen` now prefers `activeRecord.localPlayerId` over `getLocalHumanPlayerId(gameState)` when computing `localHumanPlayerId`.
+  - Victory / defeat modals are now gated by `!showingLockScreen && !isViewingFinishedGame` so they cannot appear on top of the "Pass the device" / "See what happened" lock screen.
+  - After a player closes the final battle report in `isViewingFinishedGame` mode, `handleCloseBattleReport` now shows a "Game Over" alert and navigates home (previously it set `pendingGameOverAlertRef` but never triggered navigation).
+  - `HomeScreen` `getFinishedOutcome` now returns `'defeat'` for eliminated players even in active games (not just finished ones), so their card shows red while others continue playing.
+  - `AsyncGameCard` card styling: victory/defeat outcome now applies a green (`#eaf5ec` / `#2e8a50` border) or red (`#fdecea` / `#c0392b` border) background instead of a pill badge. The neutral "FINISHED" badge remains for ambiguous outcomes.
 - 2026-06-01: Phase 35 complete — async turn events pipeline documented: `endTurn` → `submitTurn(events)` → `turns.events_json` → `GET /api/games/{id}` `latest_events` → `loadAsyncGame` restores `turnReport`.
 - 2026-05-31: **Pass-and-Play Auto-Handoff** — lock screen now auto-dismisses after 1.5 seconds, automatically advancing to the next human player's turn without manual interaction. The "Start Turn" button remains available for manual override.
 - 2026-05-31: Task 154 complete — async game creation navigates creator directly into GameScreen on their first turn instead of returning to the lobby.
