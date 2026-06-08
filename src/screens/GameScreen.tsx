@@ -903,6 +903,7 @@ const DEFAULT_MAP_SCALE =
 const HOME_PLANET_SNAP_SCALE = 0.85;
 const MAP_VIEWPORT_PADDING = 150;
 const BG_COLOR = '#f5f0eb';
+const KNOCKOUT_MAP_BG_COLOR = '#4a1515';
 const HUMAN_COLOR = '#2e5bcc';
 const HOME_PLANET_COLOR = '#c8a26b';
 const NEUTRAL_COLOR = '#7a7a96';
@@ -1933,6 +1934,8 @@ export default function GameScreen() {
     const guardSession = sessionShownTurnKeysRef.current.has(turnKey);
     const guardRef = turnKey === lastOpenedTurnKeyRef.current;
     const guardModal = showBattleReportModalRef.current;
+    const lockScreenBlocksAutoOpen =
+      showingLockScreen && !(isAsyncGame && eliminatedPlayerPendingKnockout);
     // eslint-disable-next-line no-console
     console.log('[BattleReport] auto-open check', {
       turnKey,
@@ -1942,10 +1945,11 @@ export default function GameScreen() {
       guardSession,
       eventsLen: humanCombatEvents.length,
       showingLockScreen,
+      lockScreenBlocksAutoOpen,
     });
     if (
       humanCombatEvents.length > 0 &&
-      !showingLockScreen &&
+      !lockScreenBlocksAutoOpen &&
       !guardModal &&
       !guardRef &&
       guardAck !== turnKey &&
@@ -1960,8 +1964,10 @@ export default function GameScreen() {
   }, [
     activeGameId,
     acknowledgedBattleReportTurnKeyByGameId,
+    eliminatedPlayerPendingKnockout,
     gameState,
     humanCombatEvents.length,
+    isAsyncGame,
     isViewingFinishedGame,
     localHumanPlayerId,
     showingLockScreen,
@@ -3463,6 +3469,13 @@ export default function GameScreen() {
   const mapPixelHeight = map.height * CELL_SIZE;
   const isHumanTurn = status === 'active' && currentPlayerId === humanPlayer.id;
   const isKnockoutTurn = eliminatedPlayerPendingKnockout && isHumanTurn;
+  const playerIsKnockedOut =
+    players.find((p) => p.id === currentPlayerId)?.isEliminated === true;
+  const showMapKnockoutOverlay =
+    playerIsKnockedOut &&
+    !showBattleReportModal &&
+    pendingFleet === null &&
+    selectedPlanet === undefined;
   const pendingAiPlayer = players.find((p) => p.id === pendingAiPlayerId) ?? null;
   const currentTurnPlayer = players.find((p) => p.id === currentPlayerId);
   const currentTurnPlayerName = currentTurnPlayer?.name ?? 'another commander';
@@ -3659,7 +3672,10 @@ export default function GameScreen() {
 
       <View
         ref={mapAreaRef}
-        style={styles.mapArea}
+        style={[
+          styles.mapArea,
+          showMapKnockoutOverlay && { backgroundColor: KNOCKOUT_MAP_BG_COLOR },
+        ]}
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
           viewportWidth.value = width;
@@ -4378,46 +4394,65 @@ export default function GameScreen() {
               />
             )}
             <BattleReportScrollArea visible={showBattleReportModal}>
-              {sortedBattleReportEvents.map((event, index) => {
-                const players = gameState?.players ?? [];
-                const planetClass =
-                  gameState?.map.planets.find((p) => p.name === event.planetName)?.class ?? '';
-                const homePlanetCaptureDanger = isHumanHomePlanetCapturedByEnemy(
-                  event,
-                  localHumanPlayerId,
-                  players,
-                );
+              <View style={{ position: 'relative' }}>
+                {playerIsKnockedOut && (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      pointerEvents: 'none',
+                      zIndex: 0,
+                    }}
+                    pointerEvents="none"
+                  >
+                    <Text style={{ fontSize: 220, opacity: 0.2, lineHeight: 260 }}>💀</Text>
+                  </View>
+                )}
+                {sortedBattleReportEvents.map((event, index) => {
+                  const planetClass =
+                    gameState?.map.planets.find((p) => p.name === event.planetName)?.class ?? '';
+                  const homePlanetCaptureDanger = isHumanHomePlanetCapturedByEnemy(
+                    event,
+                    localHumanPlayerId,
+                    players,
+                  );
 
-                if (event.kind === 'combat') {
+                  if (event.kind === 'combat') {
+                    return (
+                      <BattleReportCard
+                        key={`combat-${event.planetName}-${index}`}
+                        event={event}
+                        localHumanPlayerId={localHumanPlayerId}
+                        players={players}
+                        turnEvents={turnReport}
+                        homePlanetCaptureDanger={homePlanetCaptureDanger}
+                        homePlanetConquestHighlight={isHumanHomePlanetConquestVictory(
+                          event,
+                          localHumanPlayerId,
+                          players,
+                        )}
+                        planetClass={planetClass}
+                      />
+                    );
+                  }
+
                   return (
-                    <BattleReportCard
-                      key={`combat-${event.planetName}-${index}`}
+                    <MultiwayBattleReportCard
+                      key={`multiway-${event.planetName}-${index}`}
                       event={event}
                       localHumanPlayerId={localHumanPlayerId}
                       players={players}
-                      turnEvents={turnReport}
                       homePlanetCaptureDanger={homePlanetCaptureDanger}
-                      homePlanetConquestHighlight={isHumanHomePlanetConquestVictory(
-                        event,
-                        localHumanPlayerId,
-                        players,
-                      )}
                       planetClass={planetClass}
                     />
                   );
-                }
-
-                return (
-                  <MultiwayBattleReportCard
-                    key={`multiway-${event.planetName}-${index}`}
-                    event={event}
-                    localHumanPlayerId={localHumanPlayerId}
-                    players={players}
-                    homePlanetCaptureDanger={homePlanetCaptureDanger}
-                    planetClass={planetClass}
-                  />
-                );
-              })}
+                })}
+              </View>
             </BattleReportScrollArea>
             <Pressable
               style={[styles.primaryButton, styles.battleReportCloseButton]}
@@ -4596,6 +4631,24 @@ export default function GameScreen() {
           <Text style={styles.submittingOverlayText}>Submitting turn…</Text>
         </View>
       )}
+
+      {showMapKnockoutOverlay && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1,
+            }}
+            pointerEvents="none"
+          >
+            <Text style={{ fontSize: 200, opacity: 0.32, lineHeight: 240 }}>💀</Text>
+          </View>
+        )}
     </View>
   );
 }

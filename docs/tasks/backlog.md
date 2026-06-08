@@ -6345,6 +6345,113 @@ interface ConversationModalProps {
 
 ---
 
+## Phase 59 — Feature: Knockout UI — Skull Overlay on Battle Report and Map
+
+When the active player has been knocked out (eliminated), the game should deliver a strong visual signal beyond the existing text/alert copy. Two skull overlays are added:
+
+1. **Battle report skull** — a large, semi-transparent skull is rendered in the center of the battle report modal background, sitting behind all the content cards so it's clearly visible as atmosphere without obscuring readability.
+2. **Map skull** — a large, semi-transparent skull is rendered fixed to the center of the device screen while the active player is in a knocked-out state. It does not pan or scroll with the map — it stays anchored to the viewport center regardless of how the user scrolls. It disappears once the player acknowledges the knockout and navigates away.
+
+Work tasks in order: 239 → 240.
+
+---
+
+### Task 239 — Frontend: Add skull backdrop to the battle report modal when the active player is knocked out
+
+**Files:** `frontend/src/screens/GameScreen.tsx` (battle report modal render), plus any extracted battle report component if one exists.
+
+**Context:** The battle report modal is shown after a turn resolves. When the human player has been knocked out (their home planet was captured and `isEliminated` is true for their `PlayerState`), the report should look dramatically different — a giant 💀 skull emoji rendered at the center of the modal background, behind all content, as a watermark-style backdrop.
+
+**Requirements:**
+
+1. **Locate the battle report modal.** In `GameScreen.tsx`, find the `Modal` (or equivalent container) that renders the `BattleReport`. This is likely the modal that is shown when `showBattleReport === true`.
+
+2. **Determine knockout state.** The player is knocked out if their entry in `players` (from the game store) has `isEliminated: true`. Use the `currentPlayerId` to find the relevant player. Compute `const playerIsKnockedOut = players.find(p => p.id === currentPlayerId)?.isEliminated === true`.
+
+3. **Render the skull backdrop.** Inside the modal content container (the `View` that wraps all battle report cards), add an absolutely-positioned skull element that renders only when `playerIsKnockedOut` is true:
+
+   ```tsx
+   {playerIsKnockedOut && (
+     <View
+       style={{
+         position: 'absolute',
+         top: 0, left: 0, right: 0, bottom: 0,
+         alignItems: 'center',
+         justifyContent: 'center',
+         pointerEvents: 'none',
+         zIndex: 0,
+       }}
+     >
+       <Text style={{ fontSize: 220, opacity: 0.08, lineHeight: 260 }}>💀</Text>
+     </View>
+   )}
+   ```
+
+   - `zIndex: 0` keeps it behind all battle report content cards (which should have at least `zIndex: 1` or no explicit z-index with natural stacking).
+   - `opacity: 0.08` is a starting point — adjust so the skull is clearly visible but does not make content cards hard to read.
+   - `pointerEvents: 'none'` ensures the skull does not intercept taps.
+   - The skull is centered both vertically and horizontally in the modal.
+
+4. **No layout shift.** The skull must be `position: 'absolute'` and must not participate in the flex layout of the card list. Wrapping the entire modal content in a `position: 'relative'` container (if not already done) may be necessary to establish the stacking context.
+
+5. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Open a game where the active player has `isEliminated: true` and a battle report is shown. A large skull is visible behind the battle report cards.
+- Open a normal (non-eliminated) battle report. No skull is visible.
+- Tapping the modal buttons and scrolling battle report cards works normally (skull does not intercept touches).
+
+---
+
+### Task 240 — Frontend: Add fixed skull overlay to the map when the active player is knocked out
+
+**Files:** `frontend/src/screens/GameScreen.tsx`
+
+**Context:** After the battle report is dismissed and the eliminated player is viewing the map for the last time before tapping End Turn, the game should show a large skull permanently fixed to the center of the screen. Unlike map elements (planets, fleet arrows, range rings), this skull is part of the HUD layer — it is anchored to the device viewport, not to map world coordinates. Scrolling the map does not move the skull.
+
+**Requirements:**
+
+1. **Determine knockout state.** Reuse the same `playerIsKnockedOut` derivation as Task 239 — `players.find(p => p.id === currentPlayerId)?.isEliminated === true`.
+
+2. **Render the skull in the HUD layer.** In `GameScreen.tsx`, the map and its gesture responder are contained within a parent `View`. Outside of (and after) the map view but still within the root `GameScreen` container, add a fixed-position skull overlay that only renders when `playerIsKnockedOut && !showBattleReport` (hide it when the battle report is open, since the battle report has its own skull per Task 239):
+
+   ```tsx
+   {playerIsKnockedOut && !showBattleReport && (
+     <View
+       style={{
+         position: 'absolute',
+         top: 0, left: 0, right: 0, bottom: 0,
+         alignItems: 'center',
+         justifyContent: 'center',
+         pointerEvents: 'none',
+         zIndex: 5,
+       }}
+     >
+       <Text style={{ fontSize: 200, opacity: 0.13, lineHeight: 240 }}>💀</Text>
+     </View>
+   )}
+   ```
+
+   - `position: 'absolute'` on the outer `GameScreen` root container (which should already fill the screen) ensures this View fills the screen.
+   - `zIndex: 5` places it above the map but below the action bar, status bar, and any modal/overlay elements (check existing z-index values in the file and adjust so the skull is clearly above the map tiles but below interactive HUD elements).
+   - `pointerEvents: 'none'` is critical — the skull must not block map taps, planet taps, or HUD button presses.
+   - `opacity: 0.13` is a starting point — adjust so the skull is prominent and visible on the map but not so heavy that it hides planet/fleet information.
+
+3. **Scroll-invariant.** Because the skull is rendered in the HUD layer (absolute within the screen-filling root container), not inside the map's gesture-driven transform view, it will naturally remain fixed to the screen center regardless of map scroll. Confirm by panning the map — the skull must not drift.
+
+4. **Dismiss on knockout acknowledgement.** Once the player taps "End Turn" and `acknowledgeKnockout` runs, `currentPlayerId` will change (or the game resets), causing `playerIsKnockedOut` to become false, which naturally removes the overlay. No additional cleanup code is needed.
+
+5. `npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- As an eliminated player, after dismissing the battle report, a large semi-transparent skull is visible centered on the screen.
+- Panning the map in any direction does not move the skull — it stays centered on the device screen.
+- The skull does not block planet taps, fleet drags, or the End Turn button.
+- Once the player taps End Turn and the knockout is acknowledged, the skull disappears (navigation away / state reset).
+- In a normal (non-eliminated) turn, no skull is shown on the map.
+
+---
+
 ## Phase 58 — Feature: PWA App Notification Badge
 
 The PWA app icon badge shows a live count of all items requiring the user's attention: pending friend requests + pending game invites + async multiplayer games where it is the user's turn. Uses the [Web App Badging API](https://developer.mozilla.org/en-US/docs/Web/API/Badging_API) (`navigator.setAppBadge(n)` / `navigator.clearAppBadge()`), which is supported on Chrome/Edge for Android and desktop PWAs installed to the home screen or taskbar.

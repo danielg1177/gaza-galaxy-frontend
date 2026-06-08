@@ -461,6 +461,17 @@ Four tasks to display a live numeric badge on the installed PWA app icon showing
 
 ---
 
+## Phase 59 — Feature: Knockout UI — Skull Overlay on Battle Report and Map
+
+**Status:** Complete (2026-06-07).
+
+Two tasks to add a prominent skull visual when the active player is knocked out — one on the battle report modal background and one fixed to the screen center on the map:
+
+- ~~**Task 239**~~ — Frontend: Add skull backdrop to the battle report modal when the active player is knocked out *(complete 2026-06-07)*
+- ~~**Task 240**~~ — Frontend: Add fixed skull overlay to the map when the active player is knocked out (viewport-anchored, does not scroll with the map) *(complete 2026-06-07 — placed after all modals matching lockScreen/submittingOverlay pattern; gated via `showMapKnockoutOverlay` to never conflict with open modals)*
+
+---
+
 ## Changelog
 - 2026-06-05: Phase 56 reverted (Tasks 226–227, 229) — routing `endTurn()` through `acknowledgeKnockout` broke normal turns; engine-based AI-advance inside `acknowledgeKnockout` corrupted round state. Tasks 226/227/229 reverted. Task 228 kept (End Turn disabled during submit). `acknowledgeKnockout` async path restored to pre-Phase-56 manual loop + console logging.
 - 2026-06-05: Phase 55 complete (Tasks 224–225) — `acknowledgeKnockout` now clears `eliminatedPlayerPendingKnockout` synchronously before the async submit, preventing double-invocation; restored on error for retry; `handleCloseBattleReport` no longer calls `acknowledgeKnockout` so End Turn is the single trigger.
