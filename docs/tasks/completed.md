@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## Chat modal viewport zoom lock (header + input chrome)
+**Completed:** 2026-06-07
+**Files modified:** `src/components/ConversationModal.tsx`, `src/utils/viewportZoom.ts` (new), `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** `lockViewportZoom()` while chat is visible prevents mobile-browser pinch/input zoom on web; `SafeAreaView` + inset-aware send bar; 16px text on input and bubbles; larger close/send tap targets.
+
+---
+
 ## In-game chat opens with map at default zoom
 **Completed:** 2026-06-07
 **Files modified:** `src/screens/GameScreen.tsx`, `src/components/ConversationModal.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`

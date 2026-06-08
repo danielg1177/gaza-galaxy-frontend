@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-06-07 (Chat opens with map at default zoom)
+2026-06-07 (Chat modal viewport zoom lock)
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -222,6 +222,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-06-07: Chat modal viewport zoom lock — `ConversationModal` calls `lockViewportZoom()` while open (web: `maximum-scale=1`, resets scroll) so header, input bar, and send button render at 1×; `SafeAreaView` + dynamic bottom inset; 16px input/message text; full-screen presentation.
 - 2026-06-07: In-game chat resets map zoom — opening `ConversationModal` from GameScreen snaps map to `DEFAULT_MAP_SCALE` (fully zoomed out, centered); returning from chat shows the wider view instead of home-planet snap zoom; chat `TextInput` font size 16px to avoid mobile-browser focus zoom.
 - 2026-06-07: All 🚀 emoji replaced with shared `ShipIcon` (`src/components/ShipIcon.tsx`) — battle report cards, turn-report fleet arrivals, and Rules **Fleet Movement** section; `formatTurnEvent` fleet_arrived string no longer includes emoji (UI uses `FleetArrivedReportCard` + `ShipIcon`).
 - 2026-06-07: Battle report troop icons — `BattleReportCard` and `FleetArrivedReportCard` replace 🚀 with `Space_Ship.png` rotated 45° right (`BattleReportShipIcon`); in-transit map markers unchanged.

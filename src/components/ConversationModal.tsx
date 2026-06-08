@@ -12,8 +12,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { GameMessage } from '../services/gamesService';
 import { useGameStore } from '../store/gameStore';
+import { lockViewportZoom } from '../utils/viewportZoom';
 
 interface ConversationModalProps {
   visible: boolean;
@@ -76,6 +78,7 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
   gameName,
   myUserId,
 }) => {
+  const insets = useSafeAreaInsets();
   const activeGameMessages = useGameStore((s) => s.activeGameMessages);
   const isFetchingMessages = useGameStore((s) => s.isFetchingMessages);
   const isSendingMessage = useGameStore((s) => s.isSendingMessage);
@@ -92,6 +95,13 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
     setInputText('');
     onClose();
   }, [clearMessages, onClose]);
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+    return lockViewportZoom();
+  }, [visible]);
 
   useEffect(() => {
     if (visible && !prevVisibleRef.current) {
@@ -169,77 +179,86 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
       visible={visible}
       animationType="slide"
       transparent={false}
+      presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Text style={styles.headerTitle} numberOfLines={1}>
-              {gameName}
-            </Text>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={handleClose}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.closeButtonText}>✕</Text>
-            </TouchableOpacity>
-          </View>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.container}>
+            <View style={styles.header}>
+              <Text style={styles.headerTitle} numberOfLines={1}>
+                {gameName}
+              </Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={handleClose}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityLabel="Close chat"
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
 
-          <View style={styles.messageArea}>
-            {isFetchingMessages ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={COLORS.sendActive} />
-              </View>
-            ) : (
-              <FlatList
-                ref={listRef}
-                data={activeGameMessages}
-                keyExtractor={(item) => item.id.toString()}
-                renderItem={renderMessage}
-                contentContainerStyle={styles.messageList}
-                onContentSizeChange={() => scrollToEnd()}
-              />
-            )}
-          </View>
-
-          <View style={styles.sendBar}>
-            <TextInput
-              style={styles.input}
-              placeholder="Message..."
-              placeholderTextColor={COLORS.textMuted}
-              value={inputText}
-              onChangeText={setInputText}
-              maxLength={500}
-              multiline
-              numberOfLines={4}
-              editable={!isSendingMessage}
-            />
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                canSend ? styles.sendButtonActive : styles.sendButtonDisabled,
-              ]}
-              onPress={handleSend}
-              disabled={!canSend}
-            >
-              {isSendingMessage ? (
-                <ActivityIndicator size="small" color={COLORS.text} />
+            <View style={styles.messageArea}>
+              {isFetchingMessages ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={COLORS.sendActive} />
+                </View>
               ) : (
-                <Text style={styles.sendButtonText}>➤</Text>
+                <FlatList
+                  ref={listRef}
+                  data={activeGameMessages}
+                  keyExtractor={(item) => item.id.toString()}
+                  renderItem={renderMessage}
+                  contentContainerStyle={styles.messageList}
+                  onContentSizeChange={() => scrollToEnd()}
+                  keyboardShouldPersistTaps="handled"
+                />
               )}
-            </TouchableOpacity>
+            </View>
+
+            <View style={[styles.sendBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+              <TextInput
+                style={[styles.input, Platform.OS === 'web' && styles.inputWeb]}
+                placeholder="Message..."
+                placeholderTextColor={COLORS.textMuted}
+                value={inputText}
+                onChangeText={setInputText}
+                maxLength={500}
+                multiline
+                numberOfLines={4}
+                editable={!isSendingMessage}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.sendButton,
+                  canSend ? styles.sendButtonActive : styles.sendButtonDisabled,
+                ]}
+                onPress={handleSend}
+                disabled={!canSend}
+              >
+                {isSendingMessage ? (
+                  <ActivityIndicator size="small" color={COLORS.text} />
+                ) : (
+                  <Text style={styles.sendButtonText}>➤</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
   flex: {
     flex: 1,
   },
@@ -252,7 +271,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 56 : 16,
+    paddingTop: 8,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.inputBorder,
@@ -265,10 +284,13 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   closeButton: {
-    padding: 4,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   closeButtonText: {
-    fontSize: 20,
+    fontSize: 22,
     color: COLORS.textMuted,
     fontWeight: '600',
   },
@@ -318,12 +340,12 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 4,
   },
   messageText: {
-    fontSize: 15,
+    fontSize: 16,
     color: COLORS.text,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   timestamp: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 4,
   },
@@ -339,8 +361,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 12,
+    paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: COLORS.inputBorder,
     backgroundColor: COLORS.background,
@@ -350,13 +371,18 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.inputBackground,
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
     fontSize: 16,
+    lineHeight: 22,
     color: COLORS.text,
     maxHeight: 96,
     borderWidth: 1,
     borderColor: COLORS.inputBorder,
     marginRight: 8,
+  },
+  inputWeb: {
+    // Web-only: suppress focus ring; fontSize 16+ avoids iOS Safari input zoom.
+    outlineWidth: 0,
   },
   sendButton: {
     width: 44,
@@ -372,7 +398,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.sendDisabled,
   },
   sendButtonText: {
-    fontSize: 18,
+    fontSize: 20,
     color: COLORS.text,
     fontWeight: '600',
   },
