@@ -1261,6 +1261,27 @@ function snapToHomePlanet(
   return { scale, translateX: clamped.x, translateY: clamped.y };
 }
 
+function snapToDefaultZoom(
+  viewportWidth: number,
+  viewportHeight: number,
+  mapPixelWidth: number,
+  mapPixelHeight: number,
+): { scale: number; translateX: number; translateY: number } {
+  const scale = DEFAULT_MAP_SCALE;
+  const targetTx = (viewportWidth - mapPixelWidth * scale) / 2;
+  const targetTy = (viewportHeight - mapPixelHeight * scale) / 2;
+  const clamped = clampTranslation(
+    targetTx,
+    targetTy,
+    scale,
+    mapPixelWidth,
+    mapPixelHeight,
+    viewportWidth,
+    viewportHeight,
+  );
+  return { scale, translateX: clamped.x, translateY: clamped.y };
+}
+
 function mapPlanetClassLabelStyle(
   circleSize: number,
   borderWidth: number,
@@ -2474,6 +2495,23 @@ export default function GameScreen() {
     mapHeightSV.value = gameState.map.height * CELL_SIZE;
   }, [gameState?.map.width, gameState?.map.height]);
 
+  const applyMapTransform = useCallback(
+    (targetScale: number, targetTx: number, targetTy: number) => {
+      runOnUI(
+        (snapScale: number, snapTx: number, snapTy: number) => {
+          'worklet';
+          scale.value = snapScale;
+          translateX.value = snapTx;
+          translateY.value = snapTy;
+          savedScale.value = snapScale;
+          savedTranslateX.value = snapTx;
+          savedTranslateY.value = snapTy;
+        },
+      )(targetScale, targetTx, targetTy);
+    },
+    [scale, translateX, translateY, savedScale, savedTranslateX, savedTranslateY],
+  );
+
   const animateMapToSnap = useCallback(
     (homePlanet: Planet) => {
       if (gameState === null) {
@@ -2488,20 +2526,26 @@ export default function GameScreen() {
       const mapPixelHeight = gameState.map.height * CELL_SIZE;
       const { scale: targetScale, translateX: targetTx, translateY: targetTy } =
         snapToHomePlanet(homePlanet, viewW, viewH, mapPixelWidth, mapPixelHeight);
-      runOnUI(
-        (snapScale: number, snapTx: number, snapTy: number) => {
-          'worklet';
-          scale.value = snapScale;
-          translateX.value = snapTx;
-          translateY.value = snapTy;
-          savedScale.value = snapScale;
-          savedTranslateX.value = snapTx;
-          savedTranslateY.value = snapTy;
-        },
-      )(targetScale, targetTx, targetTy);
+      applyMapTransform(targetScale, targetTx, targetTy);
     },
-    [gameState, scale, translateX, translateY, savedScale, savedTranslateX, savedTranslateY, viewportWidth, viewportHeight],
+    [applyMapTransform, gameState, viewportWidth, viewportHeight],
   );
+
+  const animateMapToDefaultZoom = useCallback(() => {
+    if (gameState === null) {
+      return;
+    }
+    const viewW = viewportWidth.value;
+    const viewH = viewportHeight.value;
+    if (viewW <= 0 || viewH <= 0) {
+      return;
+    }
+    const mapPixelWidth = gameState.map.width * CELL_SIZE;
+    const mapPixelHeight = gameState.map.height * CELL_SIZE;
+    const { scale: targetScale, translateX: targetTx, translateY: targetTy } =
+      snapToDefaultZoom(viewW, viewH, mapPixelWidth, mapPixelHeight);
+    applyMapTransform(targetScale, targetTx, targetTy);
+  }, [applyMapTransform, gameState, viewportWidth, viewportHeight]);
 
   const snapToLocalHumanHomePlanet = useCallback(() => {
     if (gameState === null || localHumanPlayerId === undefined) {
@@ -2558,6 +2602,12 @@ export default function GameScreen() {
     showingLockScreen,
     snapToLocalHumanHomePlanet,
   ]);
+
+  useEffect(() => {
+    if (showConversationModal) {
+      animateMapToDefaultZoom();
+    }
+  }, [showConversationModal, animateMapToDefaultZoom]);
 
   const pinch = Gesture.Pinch()
     .onStart((event) => {

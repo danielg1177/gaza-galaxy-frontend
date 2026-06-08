@@ -351,7 +351,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 16,
     color: COLORS.text,
     maxHeight: 96,
     borderWidth: 1,

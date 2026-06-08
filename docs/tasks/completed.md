@@ -1,5 +1,12 @@
 # Completed Tasks
 
+## In-game chat opens with map at default zoom
+**Completed:** 2026-06-07
+**Files modified:** `src/screens/GameScreen.tsx`, `src/components/ConversationModal.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** `snapToDefaultZoom` + `animateMapToDefaultZoom` run when `showConversationModal` becomes true; map returns at `DEFAULT_MAP_SCALE` centered when chat closes; chat input `fontSize` 16 to prevent mobile-browser focus zoom.
+
+---
+
 ## All 🚀 emoji replaced with ShipIcon
 **Completed:** 2026-06-07
 **Files modified:** `src/components/ShipIcon.tsx` (new), `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, `docs/development/current-state.md`, `docs/tasks/completed.md`
