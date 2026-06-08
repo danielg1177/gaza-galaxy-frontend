@@ -6586,3 +6586,57 @@ This ensures the badge clears even if the session expires server-side (401 token
 - Badge clears when `currentUser` is set to `null` by the auth store (token expiry, manual logout, or `loadStoredAuth` failure).
 
 ---
+
+## Phase 60 — Bug Fix: Exit Game Mid-Turn Fails in Complex Games
+
+**Root cause:** The `turns.in_progress_actions_json` column is `TEXT` (MySQL TEXT = max 65,535 bytes). In a complex late-game session with many planets, buildings, and fleets, `JSON.stringify(record.state)` produces a string that — once PHP double-encodes it inside the outer in_progress_actions object — easily exceeds 64 KB. MySQL strict mode throws "Data too long for column" which Laravel surfaces as a 500 error. The frontend `handleExitGame` catch block shows "Could not save your progress." The `submitTurn` path is unaffected because `resulting_state_json` was already created as `LONGTEXT`.
+
+This is a **backend-only fix**. No frontend changes are required.
+
+---
+
+### Task 241 — Backend: Migrate `turns.in_progress_actions_json` from TEXT to LONGTEXT
+
+**File:** `backend/database/migrations/` (new migration file)
+
+**Context:** See `backend/docs/development/known-issues.md` for the full root-cause write-up. `turns.in_progress_actions_json` was created as `TEXT` (max 65,535 bytes) in the original `create_turns_table` migration. This is insufficient for complex game states.
+
+**Requirements:**
+
+1. Create a new migration file: `backend/database/migrations/2026_06_08_000001_expand_in_progress_actions_json_on_turns_table.php`
+
+2. In the `up` method, change `in_progress_actions_json` from `TEXT` to `LONGTEXT`:
+
+   ```php
+   public function up(): void
+   {
+       Schema::table('turns', function (Blueprint $table) {
+           $table->longText('in_progress_actions_json')->nullable()->change();
+       });
+   }
+   ```
+
+3. In the `down` method, revert to `TEXT`:
+
+   ```php
+   public function down(): void
+   {
+       Schema::table('turns', function (Blueprint $table) {
+           $table->text('in_progress_actions_json')->nullable()->change();
+       });
+   }
+   ```
+
+4. Run `php artisan migrate` on the production database.
+
+5. Update `backend/docs/backend/database-schema.md`: change the `in_progress_actions_json` column type from `text` to `longtext` in the `turns` table definition.
+
+6. Update `backend/docs/development/task-log.md` with a completion entry.
+
+**Verification:**
+- Open a long-running async game with many planets, buildings, and fleets in transit.
+- Tap **⋮ → Exit Game** mid-turn. The save completes and the player is returned to the home screen without an error.
+- Re-open the game: the in-progress state (slider positions, queued orders) is restored exactly as left.
+- Verify `php artisan migrate:status` shows the new migration as `Ran`.
+
+---

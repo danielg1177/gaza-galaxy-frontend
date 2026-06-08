@@ -2,6 +2,27 @@
 
 ## Open Issues
 
+### ~~Exit Game mid-turn fails in complex / late-game sessions~~ (2026-06-08, resolved 2026-06-08)
+
+**Symptom:** In an async multiplayer game, tapping **⋮ → Exit Game** early in a session (few turns, few buildings) succeeds and the player is returned to the home screen. In a complex deep-game session (many planets captured, many buildings built, multiple fleets in transit) the same button shows "Failed to save — Could not save your progress. Please try again." and the player cannot exit mid-turn. Ending their turn and then navigating home still works.
+
+**Root cause:** `handleExitGame` in `GameScreen.tsx` calls `saveTurnProgress(asyncGameId, { partialStateJson: JSON.stringify(record.state), ... })`. This sends the full game state as a JSON-encoded string inside the POST body. On the backend, `TurnController::save` stores this payload via:
+
+```php
+Turn::updateOrCreate(
+    ['game_id' => ..., 'user_id' => ..., 'turn_number' => ..., 'round_number' => ...],
+    ['in_progress_actions_json' => json_encode($request->in_progress_actions)]
+);
+```
+
+The `turns.in_progress_actions_json` column was created as `TEXT` (MySQL TEXT = max **65,535 bytes**). In a deep game, `JSON.stringify(record.state)` can easily exceed 30–50 KB on its own. PHP's `json_encode` then escapes every special character in the string when wrapping it inside the outer object, pushing the stored value well above 64 KB. MySQL strict mode throws "Data too long for column 'in_progress_actions_json'" which Laravel surfaces as a 500 error. The `handleExitGame` catch block shows the generic "Could not save" alert.
+
+By contrast, `TurnController::submit` stores `resulting_state_json` in a `LONGTEXT` column (4 GB limit), which is why ending a turn never fails even with a large state.
+
+**Fix (Phase 60 / Backend Task 12.1):** A new backend migration changes `turns.in_progress_actions_json` from `TEXT` to `LONGTEXT`. No frontend changes are required.
+
+---
+
 ### ~~Async end turn exposes opponent's full game state for a split second~~ (2026-06-04, resolved 2026-06-04)
 
 **Symptom:** In async multiplayer, when the local player is the last human to take their turn in a round, tapping **End Turn** briefly shows the next player's complete game state — their planets, troop counts, buildings, and a battle report — before the app navigates home.

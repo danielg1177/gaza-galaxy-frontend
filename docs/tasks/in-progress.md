@@ -472,7 +472,18 @@ Two tasks to add a prominent skull visual when the active player is knocked out 
 
 ---
 
+## Phase 60 — Bug Fix: Exit Game Mid-Turn Fails in Complex Games
+
+**Status:** Complete (2026-06-08).
+
+One backend-only task to fix the "Could not save your progress" error when tapping Exit Game deep into a complex async game. No frontend code changes required.
+
+- ~~**Task 241**~~ — Backend: Migrate `turns.in_progress_actions_json` from TEXT to LONGTEXT (Backend Task 12.1) *(complete 2026-06-08)*
+
+---
+
 ## Changelog
+- 2026-06-08: Phase 60 added (Task 241) — Exit Game mid-turn fails in complex games; root cause: `turns.in_progress_actions_json` TEXT column (64KB) overflows for large game states; fix is backend migration to LONGTEXT.
 - 2026-06-05: Phase 56 reverted (Tasks 226–227, 229) — routing `endTurn()` through `acknowledgeKnockout` broke normal turns; engine-based AI-advance inside `acknowledgeKnockout` corrupted round state. Tasks 226/227/229 reverted. Task 228 kept (End Turn disabled during submit). `acknowledgeKnockout` async path restored to pre-Phase-56 manual loop + console logging.
 - 2026-06-05: Phase 55 complete (Tasks 224–225) — `acknowledgeKnockout` now clears `eliminatedPlayerPendingKnockout` synchronously before the async submit, preventing double-invocation; restored on error for retry; `handleCloseBattleReport` no longer calls `acknowledgeKnockout` so End Turn is the single trigger.
 - 2026-06-05: Phase 55 added (Tasks 224–225) — farewell turn loops back to eliminated player; root cause: `handleCloseBattleReport` + End Turn both called `acknowledgeKnockout` while flag was still true; double submit race condition.
