@@ -15,7 +15,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { GameMessage } from '../services/gamesService';
 import { useGameStore } from '../store/gameStore';
-import { lockViewportZoom } from '../utils/viewportZoom';
+import { lockViewportZoom, preventInputZoomOnFocus, resetScrollOnBlur } from '../utils/viewportZoom';
 
 interface ConversationModalProps {
   visible: boolean;
@@ -231,6 +231,8 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
                 multiline
                 numberOfLines={4}
                 editable={!isSendingMessage}
+                onFocus={Platform.OS === 'web' ? preventInputZoomOnFocus : undefined}
+                onBlur={Platform.OS === 'web' ? resetScrollOnBlur : undefined}
               />
               <TouchableOpacity
                 style={[
