@@ -6595,7 +6595,7 @@ This is a **backend-only fix**. No frontend changes are required.
 
 ---
 
-### Task 241 — Backend: Migrate `turns.in_progress_actions_json` from TEXT to LONGTEXT
+### ~~Task 241 — Backend: Migrate `turns.in_progress_actions_json` from TEXT to LONGTEXT~~ *(complete 2026-06-08 — see `backend/docs/project/roadmap.md` Phase 12)*
 
 **File:** `backend/database/migrations/` (new migration file)
 
@@ -6638,5 +6638,302 @@ This is a **backend-only fix**. No frontend changes are required.
 - Tap **⋮ → Exit Game** mid-turn. The save completes and the player is returned to the home screen without an error.
 - Re-open the game: the in-progress state (slider positions, queued orders) is restored exactly as left.
 - Verify `php artisan migrate:status` shows the new migration as `Ran`.
+
+---
+
+## Phase 61 — Feature: Chat Auto-Refresh While ConversationModal is Open
+
+When the conversation modal is open and an opponent sends a new message, the message should appear automatically without requiring the player to close and reopen the modal.
+
+---
+
+### Task 242 — Frontend: Poll for new messages every 5 seconds while ConversationModal is open
+
+**File:** `frontend/src/components/ConversationModal.tsx`
+
+**Requirements:**
+
+1. Add a `useEffect` that runs whenever `visible` is `true` (and `gameId` is set). Inside the effect, call `loadMessages(gameId)` immediately on open, then set a `setInterval` to call `loadMessages(gameId)` every **5000 ms**.
+2. Clear the interval in the effect's cleanup function (both on unmount and when `visible` becomes `false`). This prevents network requests while the modal is closed.
+3. The existing `loadMessages` store action already merges new messages into the list by appending those with a higher id than the last known message. No deduplication logic needs to be added — just call it.
+4. After each successful poll, the backend marks messages as read (the existing `GET /games/{id}/messages` call updates `last_read_message_id` on the server). This is already handled by the existing service call inside `loadMessages`.
+5. **Do not reset the scroll position on every poll.** Only scroll to the bottom when the message count increases after a poll. Use a `useRef` to track the previous message count; if the count grew, scroll the list to the bottom after state updates settle.
+6. The interval must be cleared when `visible` changes from `true` to `false` (e.g. user closes the modal while it is open). Do not leave a dangling interval.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Open the conversation modal in an active game. In a second session (other player), send a new message. Within 5 seconds the new message appears in the first player's modal without any user action.
+- Verify via network inspector that fetch requests to `/games/{id}/messages` stop as soon as the modal is closed.
+- Confirm the scroll position does not jump on every 5-second tick — it only scrolls to the bottom when new messages actually arrive.
+- In a solo or pass-and-play game (no opponents) the interval fires harmlessly and returns the same messages each time.
+
+---
+
+## Phase 62 — Bug Fix: Multiplayer Knockout Farewell Turn (Definitive Flow)
+
+This phase provides a definitive, regression-free specification for async multiplayer knockout turns. The feature has had multiple regressions in Phases 52–56. All prior partial implementations should be treated as scaffolding; the tasks below supersede them where they conflict.
+
+**The invariant (applies to every scenario, no exceptions):**
+> Every player who is knocked out of an async multiplayer game ALWAYS receives a farewell turn with the defeated UI before the game proceeds. There is no scenario where a knocked-out player skips their farewell turn. This applies regardless of turn order, who created the game, whether AIs are still alive, or whether only one human player remains.
+
+---
+
+**Full scenario walk-through:**
+
+**Scenario A — Attacker goes before the eliminated player:**
+1. Player A (attacker) ends their turn. Their submitted `resulting_state` includes Player B eliminated.
+2. Backend sets `current_user_id = Player B` for their farewell turn. The game remains `in_progress`.
+3. Player B receives a "your turn" notification (see Backend Task 13.3 — no spoiler).
+4. Player B opens the game. `loadAsyncGame` detects `isMyTurn: true` AND `myPlayer.isEliminated: true`. It sets `eliminatedPlayerPendingKnockout: true` and shows the "View Final Battle" lock screen.
+5. Player B taps through the lock screen. The battle report auto-opens with the skull overlay. Player B scrolls the map and reviews the final battle state. All interactive elements are blocked.
+6. Player B taps End Turn. `acknowledgeKnockout()` fires: submits `actions: []` to the backend.
+7. Backend advances `current_user_id` to the next alive human player (or ends the game if no alive players remain after Player B's farewell).
+8. Play continues normally.
+
+**Scenario B — Eliminated player goes before the attacker (created the game):**
+Same as Scenario A except after Player B's farewell turn is submitted, play returns to Player A (the attacker). The AI turns are embedded in Player A's turn resolution as usual.
+
+**Scenario C — Last player standing (all others defeated):**
+1. Player A's turn eliminates the last remaining opponent (Player B). All AI players are already eliminated. Player A is the only alive player.
+2. The frontend resolves the turn and detects Player A has won — displays the victory state. Player A can still scroll freely.
+3. Player A taps End Turn. `endTurn()` submits the turn with `currentPlayerId = Player B` (the eliminated player for their farewell) — see Task 243. The frontend submits `status: 'in_progress'` pointing to Player B (NOT `status: 'finished'`). The game is not over yet from the backend's perspective.
+4. Backend: sets `current_user_id = Player B`. Player B receives a "your turn" notification (the existing copy "It's your turn in {game}!" is already neutral — no spoiler).
+5. Player B opens the game, sees the farewell turn / defeated UI.
+6. Player B taps End Turn. `acknowledgeKnockout()` detects only Player A (1 alive human) and submits `status: 'finished'` — see Task 244. Backend marks game finished, `winner_user_id = Player A`. Notifications fire.
+7. Game is over.
+
+**Scenario D — Multiple eliminated players in the same turn:**
+`immediateKnockouts` contains all newly eliminated human IDs. `endTurn` overrides `currentPlayerId` to `immediateKnockouts[0]` (the first eliminated player by array order). After that player's farewell, their `acknowledgeKnockout` either points to the next eliminated player (if still more) or ends the game — handled by the `aliveHumans.length <= 1` check in Task 244.
+
+---
+
+No backend changes required for Phase 62. The backend's `TurnController::submit()` already routes turns to any non-AI player the frontend specifies in `resulting_state.currentPlayerId`, and the existing "your turn" notification copy is already neutral. All fixes are frontend-only.
+
+**Root causes identified:**
+
+1. **`endTurn` never redirects to the eliminated player for async games.** The immediate-knockout redirect is inside a `passAndPlay`-only guard (`if (nextState.playMode === 'passAndPlay' && ...)`) — async games bypass it entirely. Fix: add an `else if` branch outside that guard for async/other modes.
+
+2. **`acknowledgeKnockout` loops the turn back to the winner.** The next-player walk finds the only alive player (Player A) and submits `currentPlayerId = Player A`. Fix: when `aliveHumans.length <= 1`, submit `status: 'finished'` instead.
+
+Work tasks in order: Task 243 → Task 244.
+
+---
+
+### Task 243 — Frontend: Fix `endTurn` to redirect async submitted state to eliminated player's farewell slot
+
+**File:** `frontend/src/store/gameStore.ts`
+
+**Context:** In `endTurn` (around line 1164), there is an `if (nextState.playMode === 'passAndPlay' && nextState.status === 'active')` block. The `else if (immediateKnockouts.length > 0)` that overrides `finalState.currentPlayerId` is nested inside that block, so async games bypass it entirely. The eliminated player is skipped and never receives a farewell turn.
+
+**Required change:**
+
+Add a new top-level `else if` after the closing `}` of the `passAndPlay` block:
+
+```ts
+} else if (immediateKnockouts.length > 0 && nextState.status === 'active') {
+  // Async multiplayer (and any other non-passAndPlay mode):
+  // Point the submitted state at the eliminated player so the backend
+  // sets current_user_id to them and they receive a "your turn" notification.
+  // pendingKnockout intentionally stays false here — the outgoing player
+  // (the attacker) is not eliminated. The eliminated player's own session
+  // will set eliminatedPlayerPendingKnockout when they call loadAsyncGame.
+  finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
+}
+```
+
+No other changes. The existing passAndPlay block is unchanged.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- In a 2-human async game, Player A ends a turn that eliminates Player B. Player A submits and navigates home normally.
+- Player B receives a "your turn" push notification.
+- Player B opens the game. `loadAsyncGame` detects `isMyTurn: true && player.isEliminated: true` → shows the "View Final Battle" lock screen and sets `eliminatedPlayerPendingKnockout: true`.
+- No change to pass-and-play farewell turn behaviour.
+
+---
+
+### Task 244 — Frontend: Fix `acknowledgeKnockout` to end the game when the winner is the only alive player
+
+**File:** `frontend/src/store/gameStore.ts` (`acknowledgeKnockout` action)
+
+**Context:** The function's async branch walks `farewellPlayers` to find the next non-eliminated non-AI player and submits `currentPlayerId = that player`. When the attacker (Player A) is the only surviving human, it finds Player A and loops the turn back to them. The game should end instead.
+
+**Required change:**
+
+In the async branch of `acknowledgeKnockout`, replace the `nextHumanPlayerId` walk + `nextState` construction (currently around lines 1413–1436) with this logic:
+
+```ts
+const aliveHumans = farewellPlayers.filter((p) => !p.isEliminated && !p.isAI);
+
+let nextState: typeof stateAfterForfeit;
+if (aliveHumans.length <= 1) {
+  // Only the winner remains — submit status: 'finished' so the backend ends the game
+  const winner = aliveHumans[0];
+  nextState = {
+    ...stateAfterForfeit,
+    status: 'finished',
+    currentPlayerId: winner?.id ?? stateAfterForfeit.currentPlayerId,
+    turnNumber: record.state.turnNumber + 1,
+  };
+} else {
+  // Multiple alive players — find the next non-eliminated non-AI in turn order
+  const farewellCurrentIdx = farewellPlayers.findIndex(
+    (p) => p.id === stateAfterForfeit.currentPlayerId,
+  );
+  let nextHumanPlayerId = stateAfterForfeit.currentPlayerId;
+  for (let offset = 1; offset <= farewellPlayers.length; offset++) {
+    const candidate = farewellPlayers[(farewellCurrentIdx + offset) % farewellPlayers.length];
+    if (!candidate.isEliminated && !candidate.isAI) {
+      nextHumanPlayerId = candidate.id;
+      break;
+    }
+  }
+  nextState = {
+    ...stateAfterForfeit,
+    currentPlayerId: nextHumanPlayerId,
+    turnNumber: record.state.turnNumber + 1,
+  };
+}
+```
+
+Keep the `console.log` lines if desired (or remove them). Keep the `submitTurn(...)` call, success handler, and error handler completely unchanged.
+
+`npx tsc --noEmit` must pass clean. No other changes.
+
+**Verification:**
+- **Scenario: last player.** Player B's `acknowledgeKnockout` submits `status: 'finished'`. Backend marks game finished. Game does not loop back to Player A's turn.
+- **Scenario: other players remain.** Player C is still alive. Player B's `acknowledgeKnockout` submits `currentPlayerId = Player C`. Game continues to Player C's turn normally.
+- No regressions: normal (non-eliminated) async turns are unaffected.
+
+---
+
+### Task 245 — Frontend: Winner's turn game-over display — show victory state and End Turn submits normally
+
+**File:** `frontend/src/screens/GameScreen.tsx` and `frontend/src/store/gameStore.ts`
+
+**Goal:** When the active player wins (they are the last alive player after their `resolveTurn` call), they should see their victory state clearly and be able to scroll the map freely. Tapping End Turn on a victory turn must submit the turn to the backend normally (via `endTurn()`, not `acknowledgeKnockout`). The backend then handles advancing to the eliminated player's farewell turn or ending the game.
+
+**Required behaviour:**
+
+1. After `resolveTurn` runs in `endTurn()` or `resolveLocalTurn()`, check if the current player is the sole non-eliminated player. If so, set a `gameWon: true` flag in the store (this already shows the victory UI overlay).
+2. The victory UI should allow full map scrolling (no interaction lock — just read-only, the player can pan and zoom to survey their empire).
+3. The End Turn button remains visible and functional when `gameWon: true`. Tapping it calls `endTurn()` as normal — the same path as any other turn submission. Do NOT route a winning turn through `acknowledgeKnockout`.
+4. After `endTurn()` succeeds (async submit): call `resetGame()`, `requestHomeRefresh()`, and navigate home as normal.
+5. The "You won" overlay or alert fires before the End Turn tap — the player sees their win, then taps End Turn to finish.
+
+**Note on existing implementation:** If the victory overlay already exists and works, this task is a verification + any corrections needed. The key constraint is: End Turn for a winner uses `endTurn()`, not `acknowledgeKnockout()`.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- In a 2-player game where Player A eliminates Player B (last alive opponent): Player A sees the victory state on their turn, scrolls the map freely, then taps End Turn. Turn submits successfully.
+- In the other session: Player B receives a turn notification, opens the game, sees farewell turn / defeated UI.
+- Player A is not stuck on the game screen after tapping End Turn — they are navigated home.
+
+---
+
+## Phase 63 — Feature: Finished Game State Viewer
+
+After a game ends, any player who participated should be able to open the game from the home screen and see the winner's final map state — the planets, troop counts, in-flight fleets, and factories as they stood at the end of the winner's last turn.
+
+The display is read-only (no interactions). The color coding differs depending on whether the viewer is the winner or a defeated player.
+
+**Color coding rules (for non-winner viewers):**
+- Winner's planets: displayed in **red** (enemy faction color)
+- Winner's home planet: displayed in **blue** (special landmark highlight)
+- Viewer's own original home planet: displayed in **green** (even if it is now owned by the winner)
+- All other neutral or uncontested planets: displayed as neutral
+
+**Color coding rules (for the winner viewer):**
+- All their own planets: displayed in their normal faction color (no special coloring)
+- No special red/blue/green overrides needed
+
+Backend prerequisite (Phase 14 in `backend/docs/project/roadmap.md`) must be complete before the frontend task begins.
+
+---
+
+### Backend Task 14.1 — Backend: Return `final_state_json` in `GET /api/games/{id}` for finished games
+
+**File:** `backend/app/Http/Controllers/GameController.php`
+
+**Goal:** For games with `status = finished`, the `GET /api/games/{id}` response must include the winner's final game state so the frontend can render it.
+
+**Required change:**
+
+In `GameController::show()`, after the existing `latest_events` lookup:
+
+1. Check if `$game->status === 'finished'`.
+2. If so, query the `turns` table for the most recently submitted turn for this game (highest `turn_number`, then `round_number`, where `resulting_state_json IS NOT NULL`).
+3. Decode `resulting_state_json` and include it in the response as `final_state_json`.
+4. If no such turn exists (edge case), `final_state_json` should be `null`.
+5. For games that are NOT finished, `final_state_json` should be `null` (do not expose partial state of in-progress games).
+
+The response shape for `GET /api/games/{id}` becomes:
+```json
+{
+  "game": { ... },
+  "state_json": ...,
+  "is_my_turn": ...,
+  "alert_state": ...,
+  "in_progress_actions": ...,
+  "latest_events": [...],
+  "final_state_json": { ... } | null
+}
+```
+
+Update `docs/backend/api-contract.md`, `docs/backend/game-state.md`, `docs/development/task-log.md`, and `docs/project/current-state.md`.
+
+**Verification:**
+- `GET /api/games/{id}` for a finished game returns a populated `final_state_json` object that matches the winner's last submitted `resulting_state`.
+- `GET /api/games/{id}` for an in-progress game returns `final_state_json: null`.
+- Non-member requests still receive 403.
+
+---
+
+### Task 246 — Frontend: Finished game viewer — winner's final map state with red/blue/green color coding
+
+**Files:** `frontend/src/store/gameStore.ts` (`loadAsyncGame`), `frontend/src/screens/GameScreen.tsx`
+
+**Goal:** When a player opens a finished game from the home screen, they see the winner's final map state in a read-only view. The viewer can scroll and zoom the map but cannot interact with it. A "Close" button returns them to the home screen.
+
+**Requirements:**
+
+**1. Loading the finished game (`loadAsyncGame`):**
+- Detect `detail.game.status === 'finished'`.
+- Load `detail.final_state_json` as the game state (NOT `detail.state_json` which is the initial state).
+- Set a store flag `isViewingFinishedGame: true`.
+- Skip the lock screen, battle report auto-open, and any turn-resolution logic.
+- Set `currentPlayerId` to the viewer's own player ID so the existing fog-of-war and "my planets" logic applies correctly (but see color override below).
+
+**2. Color overrides for non-winner viewers:**
+- Determine: `viewerIsWinner = (detail.game.winner_user_id === currentUserId)`.
+- If `viewerIsWinner === false`, override planet display colors:
+  - **Winner's planets:** render in RED regardless of the winner's actual faction color.
+  - **Winner's home planet** (the planet with `isHome: true` belonging to the winner): render in **BLUE**.
+  - **Viewer's original home planet** (the planet with `isHome: true` that was assigned to the viewer at game start — find by matching the viewer's `GamePlayer` slot and their original home planet ID stored in the game state): render in **GREEN**, even if its current owner is the winner.
+  - All other planets: render as neutral or in their actual owner's color.
+- If `viewerIsWinner === true`: render all planets in their normal faction color. No overrides needed.
+
+**3. Read-only UI:**
+- All fleet drag interactions disabled.
+- All build buttons hidden or disabled.
+- Production slider hidden or disabled.
+- End Turn button hidden.
+- ⋮ menu: only "Close" (navigate home) and "Chat" (if applicable).
+- A prominent "Final State" or "Game Over" label visible in the HUD.
+- In-flight fleets from `final_state_json` are rendered on the map as visual arrows (no cancel interaction).
+
+**4. Navigating away:**
+- Tapping "Close" in the ⋮ menu or a dedicated close button calls `resetGame()` and navigates to the Home screen.
+
+`npx tsc --noEmit` must pass clean.
+
+**Verification:**
+- Open a finished game as the winner: see your planets in your faction color, your troops, factories, and in-flight fleets. No interaction possible. Close returns to home.
+- Open a finished game as a defeated player: all winner's planets are red, winner's home is blue, your original home planet is green even though the winner owns it. No interaction possible. Close returns to home.
+- Opening a finished game does not show the lock screen, battle report, or skull overlays.
+- In-flight fleets (if any were in transit at game end) are shown as map arrows.
 
 ---

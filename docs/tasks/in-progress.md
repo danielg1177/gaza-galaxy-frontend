@@ -482,6 +482,39 @@ One backend-only task to fix the "Could not save your progress" error when tappi
 
 ---
 
+## Phase 61 — Feature: Chat Auto-Refresh While ConversationModal is Open
+
+**Status:** Complete (2026-06-11).
+
+One task to make the conversation modal poll for new messages every 5 seconds while it is open, so incoming messages appear without closing and reopening:
+
+- ~~**Task 242**~~ — Frontend: Poll for new messages every 5 seconds while ConversationModal is open *(complete 2026-06-11)*
+
+---
+
+## Phase 62 — Bug Fix: Multiplayer Knockout Farewell Turn (Definitive Flow)
+
+**Status:** Complete (2026-06-11). See `docs/tasks/backlog.md` Phase 62 for full task specifications.
+
+No backend prerequisites — the backend already routes to any non-AI `currentPlayerId` the frontend submits. All fixes are frontend-only.
+
+Two tasks to produce a correct, regression-free knockout farewell turn flow across all multiplayer scenarios:
+
+- ~~**Task 243**~~ — Frontend: Fix `endTurn` to redirect the async submitted state to the eliminated player's farewell turn slot *(complete 2026-06-11)*
+- ~~**Task 244**~~ — Frontend: Fix `acknowledgeKnockout` to submit `status: 'finished'` when the winner is the only alive player remaining *(complete 2026-06-11)*
+
+---
+
+## Phase 63 — Feature: Finished Game State Viewer
+
+**Status:** Complete (2026-06-11). See `docs/tasks/backlog.md` Phase 63 for full task specifications.
+
+- ~~**Backend Task 14.1**~~ — Backend: Return `final_state_json` (winner's last submitted `resulting_state_json`) in `GET /api/games/{id}` for finished games *(complete 2026-06-11)*
+- ~~**Task 246a**~~ — Frontend: Wire `finalStateJson` into service types and `loadAsyncGame`; remove early-return when no events *(complete 2026-06-11)*
+- ~~**Task 246b**~~ — Frontend: Planet color overrides for non-winner finished-game viewers (winner's planets red, winner's home blue, viewer's original home green) *(complete 2026-06-11)*
+
+---
+
 ## Changelog
 - 2026-06-08: Phase 60 added (Task 241) — Exit Game mid-turn fails in complex games; root cause: `turns.in_progress_actions_json` TEXT column (64KB) overflows for large game states; fix is backend migration to LONGTEXT.
 - 2026-06-05: Phase 56 reverted (Tasks 226–227, 229) — routing `endTurn()` through `acknowledgeKnockout` broke normal turns; engine-based AI-advance inside `acknowledgeKnockout` corrupted round state. Tasks 226/227/229 reverted. Task 228 kept (End Turn disabled during submit). `acknowledgeKnockout` async path restored to pre-Phase-56 manual loop + console logging.

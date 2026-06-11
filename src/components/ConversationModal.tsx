@@ -110,6 +110,14 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
     prevVisibleRef.current = visible;
   }, [visible, gameId, fetchMessages]);
 
+  useEffect(() => {
+    if (!visible) return;
+    const intervalId = setInterval(() => {
+      void fetchMessages(gameId);
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [visible, gameId, fetchMessages]);
+
   const scrollToEnd = useCallback((animated = true) => {
     listRef.current?.scrollToEnd({ animated });
   }, []);

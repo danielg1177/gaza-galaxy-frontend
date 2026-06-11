@@ -61,6 +61,7 @@ export interface ApiGameDetail extends ApiGame {
   stateJson: string;
   inProgressActions: InProgressTurnPayload | null;
   latestEvents: TurnEvent[];
+  finalStateJson?: unknown | null;
 }
 
 export interface SubmitTurnPayload {
@@ -159,6 +160,7 @@ interface GameDetailResponse {
   alert_state: ApiGameRaw['alert_state'];
   in_progress_actions: InProgressActionsRaw | null;
   latest_events?: TurnEvent[];
+  final_state_json?: unknown | null;
 }
 
 interface CreateGameResponseRaw {
@@ -306,6 +308,7 @@ function mapGameDetail(data: GameDetailResponse): ApiGameDetail {
       ? mapInProgressActions(data.in_progress_actions)
       : null,
     latestEvents: data.latest_events ?? [],
+    finalStateJson: data.final_state_json ?? null,
   };
 }
 

@@ -952,6 +952,27 @@ function getPlanetColor(
   return NEUTRAL_COLOR;
 }
 
+function getFinishedViewerPlanetColor(
+  planet: Planet,
+  winnerId: string,
+  winnerHomePlanetId: string | undefined,
+  viewerOriginalHomePlanetId: string | undefined,
+): string {
+  // Viewer's original home planet — always show green even if captured
+  if (viewerOriginalHomePlanetId !== undefined && planet.id === viewerOriginalHomePlanetId) {
+    return '#2e8a50';
+  }
+  if (planet.owner === winnerId) {
+    // Winner's home planet — blue
+    if (winnerHomePlanetId !== undefined && planet.id === winnerHomePlanetId) {
+      return HUMAN_COLOR;
+    }
+    // Winner's other planets — red
+    return COLORS.defeat;
+  }
+  return NEUTRAL_COLOR;
+}
+
 function getOwnerName(ownerId: OwnerId, players: Player[]): string {
   if (ownerId === 'neutral') {
     return 'Neutral';
@@ -3542,18 +3563,27 @@ export default function GameScreen() {
   const humanWon = status === 'finished' && winnerId === humanPlayer.id;
   const winnerPlayer =
     winnerId !== null ? players.find((p) => p.id === winnerId) : undefined;
+  const viewerIsWinner =
+    !isViewingFinishedGame || winnerId === null || winnerId === localHumanPlayerId;
 
   const effectiveViewingPlayerId = viewingPlayerId ?? humanPlayer.id;
 
   const selectedPlanetFillColor =
     selectedPlanet !== undefined
-      ? getPlanetColor(
-          selectedPlanet,
-          effectiveViewingPlayerId,
-          showingAiObserver
-            ? (pendingAiPlayer?.homePlanetId ?? humanPlayer.homePlanetId)
-            : humanPlayer.homePlanetId,
-        )
+      ? isViewingFinishedGame && !viewerIsWinner && winnerId !== null
+        ? getFinishedViewerPlanetColor(
+            selectedPlanet,
+            winnerId,
+            winnerPlayer?.homePlanetId,
+            humanPlayer.homePlanetId,
+          )
+        : getPlanetColor(
+            selectedPlanet,
+            effectiveViewingPlayerId,
+            showingAiObserver
+              ? (pendingAiPlayer?.homePlanetId ?? humanPlayer.homePlanetId)
+              : humanPlayer.homePlanetId,
+          )
       : '#2e8a50';
 
   const dragOriginPlanet =
@@ -3583,15 +3613,22 @@ export default function GameScreen() {
     <View style={styles.root}>
       <View style={[styles.statusBar, { paddingTop: insets.top + 8 }]}>
         <Text style={styles.statusMain}>
-          Turn {roundNumber} ·{' '}
-          {showingAiObserver
-            ? `Watching: ${pendingAiPlayer?.name ?? 'AI'}'s Turn`
-            : isHumanTurn
-              ? 'Your turn'
-              : "AI's turn"}
+          {isViewingFinishedGame
+            ? 'Final State'
+            : `Turn ${roundNumber} · ${
+                showingAiObserver
+                  ? `Watching: ${pendingAiPlayer?.name ?? 'AI'}'s Turn`
+                  : isHumanTurn
+                    ? 'Your turn'
+                    : "AI's turn"
+              }`}
         </Text>
         <Text style={styles.statusSub}>
-          Gold {humanPlayer.gold} · Tech Level {humanPlayer.techLevel}
+          {isViewingFinishedGame
+            ? humanWon
+              ? 'You won!'
+              : `${winnerPlayer?.name ?? 'Your opponent'} won`
+            : `Gold ${humanPlayer.gold} · Tech Level ${humanPlayer.techLevel}`}
         </Text>
       </View>
 
@@ -3798,13 +3835,22 @@ export default function GameScreen() {
                 <PlanetNode
                   key={planet.id}
                   planet={planet}
-                  color={getPlanetColor(
-                    planet,
-                    effectiveViewingPlayerId,
-                    showingAiObserver
-                      ? (pendingAiPlayer?.homePlanetId ?? humanPlayer.homePlanetId)
-                      : humanPlayer.homePlanetId,
-                  )}
+                  color={
+                    isViewingFinishedGame && !viewerIsWinner && winnerId !== null
+                      ? getFinishedViewerPlanetColor(
+                          planet,
+                          winnerId,
+                          winnerPlayer?.homePlanetId,
+                          humanPlayer.homePlanetId,
+                        )
+                      : getPlanetColor(
+                          planet,
+                          effectiveViewingPlayerId,
+                          showingAiObserver
+                            ? (pendingAiPlayer?.homePlanetId ?? humanPlayer.homePlanetId)
+                            : humanPlayer.homePlanetId,
+                        )
+                  }
                   isOwned={planet.owner === effectiveViewingPlayerId}
                   isSelected={planet.id === selectedPlanetId}
                   isDragOrigin={planet.id === dragOriginPlanetId}
@@ -4709,6 +4755,17 @@ export default function GameScreen() {
             <Text style={{ fontSize: 200, opacity: 0.32, lineHeight: 240 }}>💀</Text>
           </View>
         )}
+      {isViewingFinishedGame && (
+        <Pressable
+          style={[styles.endTurnButton, { bottom: insets.bottom + 16 }]}
+          onPress={() => {
+            resetGame();
+            navigation.navigate('Rules');
+          }}
+        >
+          <Text style={styles.endTurnButtonText}>Close</Text>
+        </Pressable>
+      )}
     </View>
   );
 }

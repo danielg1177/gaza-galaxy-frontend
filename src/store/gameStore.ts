@@ -611,17 +611,15 @@ export const useGameStore = create<GameStore>()(
 
   loadAsyncGame: (detail) => {
     if (detail.status === 'finished') {
-      if (!detail.latestEvents?.length) {
-        return;
-      }
-
+      // Use the winner's final state if the backend provided it; fall back to
+      // the initial state_json only when final_state_json is absent (old games).
+      const rawState = detail.finalStateJson ?? JSON.parse(detail.stateJson);
       const state = drainStaleFleets({
-        ...(JSON.parse(detail.stateJson) as GameState),
+        ...(rawState as GameState),
         playMode: 'asyncMultiplayer',
         turnNumber: detail.turnNumber,
         roundNumber: detail.roundNumber,
       });
-
       const recordId = String(detail.id);
       const localPlayerId = resolveAsyncLocalPlayerId(detail.players, state);
       const record: GameRecord = {
@@ -642,7 +640,7 @@ export const useGameStore = create<GameStore>()(
           mapHeight: state.map.height,
           planetCount: state.map.planets.length,
         },
-        pendingTurnReport: detail.latestEvents,
+        pendingTurnReport: detail.latestEvents?.length ? detail.latestEvents : undefined,
         pendingTurnReportAcknowledged: false,
       };
       const { games } = get();
@@ -651,23 +649,20 @@ export const useGameStore = create<GameStore>()(
         existingIndex >= 0
           ? games.map((g, i) => (i === existingIndex ? record : g))
           : [...games, record];
-
-      const asyncReports = buildPlayerReports(
-        detail.latestEvents,
-        state.players,
-        state.map.planets,
-      );
-
+      const hasEvents = (detail.latestEvents?.length ?? 0) > 0;
+      const asyncReports = hasEvents
+        ? buildPlayerReports(detail.latestEvents!, state.players, state.map.planets)
+        : null;
       set({
         games: nextGames,
         activeGameId: recordId,
         selectedPlanetId: null,
         pendingFleet: null,
         queuedOrders: [],
-        showingLockScreen: true,
-        turnReport: detail.latestEvents,
-        playerBattleArchiveByPlayerId: asyncReports.archive,
-        playerTurnReportByPlayerId: asyncReports.turnReport,
+        showingLockScreen: hasEvents,   // only show lock screen if there are events to review
+        turnReport: detail.latestEvents ?? [],
+        playerBattleArchiveByPlayerId: asyncReports?.archive ?? {},
+        playerTurnReportByPlayerId: asyncReports?.turnReport ?? {},
         eliminatedPlayerPendingKnockout: false,
         pendingFarewellPlayerIds: [],
         isViewingFinishedGame: true,
@@ -1178,6 +1173,14 @@ export const useGameStore = create<GameStore>()(
         finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
         pendingKnockout = true;
       }
+    } else if (immediateKnockouts.length > 0 && nextState.status === 'active') {
+      // For async multiplayer (and any other non-passAndPlay mode): redirect the
+      // submitted state to the first eliminated player so the backend sets
+      // current_user_id to them and they receive a normal "your turn" notification.
+      // pendingKnockout stays false — the outgoing player (attacker) is not eliminated.
+      // The eliminated player's own session sets eliminatedPlayerPendingKnockout
+      // in loadAsyncGame when it detects isMyTurn && isEliminated.
+      finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
     }
 
     const showLock =
@@ -1410,30 +1413,36 @@ export const useGameStore = create<GameStore>()(
     if (record.asyncGameId != null) {
       const asyncGameId = record.asyncGameId;
       const farewellPlayers = stateAfterForfeit.players;
-      const farewellCurrentIdx = farewellPlayers.findIndex(
-        (p) => p.id === stateAfterForfeit.currentPlayerId,
-      );
-      let nextHumanPlayerId = stateAfterForfeit.currentPlayerId;
-      for (let offset = 1; offset <= farewellPlayers.length; offset++) {
-        const candidate = farewellPlayers[(farewellCurrentIdx + offset) % farewellPlayers.length];
-        if (!candidate.isEliminated && !candidate.isAI) {
-          nextHumanPlayerId = candidate.id;
-          break;
+      const aliveHumans = farewellPlayers.filter((p) => !p.isEliminated && !p.isAI);
+      let nextState: typeof stateAfterForfeit;
+      if (aliveHumans.length <= 1) {
+        // Only the winner remains — submit status: 'finished' so the backend ends the game
+        const winner = aliveHumans[0];
+        nextState = {
+          ...stateAfterForfeit,
+          status: 'finished',
+          currentPlayerId: winner?.id ?? stateAfterForfeit.currentPlayerId,
+          turnNumber: record.state.turnNumber + 1,
+        };
+      } else {
+        // Multiple alive players — find the next non-eliminated non-AI in turn order
+        const farewellCurrentIdx = farewellPlayers.findIndex(
+          (p) => p.id === stateAfterForfeit.currentPlayerId,
+        );
+        let nextHumanPlayerId = stateAfterForfeit.currentPlayerId;
+        for (let offset = 1; offset <= farewellPlayers.length; offset++) {
+          const candidate = farewellPlayers[(farewellCurrentIdx + offset) % farewellPlayers.length];
+          if (!candidate.isEliminated && !candidate.isAI) {
+            nextHumanPlayerId = candidate.id;
+            break;
+          }
         }
+        nextState = {
+          ...stateAfterForfeit,
+          currentPlayerId: nextHumanPlayerId,
+          turnNumber: record.state.turnNumber + 1,
+        };
       }
-
-      console.log('[acknowledgeKnockout] farewellPlayerId:', farewellPlayerId);
-      console.log('[acknowledgeKnockout] players:', JSON.stringify(farewellPlayers.map(p => ({
-        id: p.id, isEliminated: p.isEliminated, isAI: p.isAI,
-      }))));
-      console.log('[acknowledgeKnockout] nextHumanPlayerId:', nextHumanPlayerId);
-      console.log('[acknowledgeKnockout] preTurnNumber:', record.state.turnNumber);
-
-      const nextState = {
-        ...stateAfterForfeit,
-        currentPlayerId: nextHumanPlayerId,
-        turnNumber: record.state.turnNumber + 1,
-      };
 
       void (async () => {
         try {
