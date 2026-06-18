@@ -1,7 +1,7 @@
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -903,7 +903,7 @@ const DEFAULT_MAP_SCALE =
   ) / 10;
 const HOME_PLANET_SNAP_SCALE = 0.85;
 const MAP_VIEWPORT_PADDING = 150;
-const STAR_OVERFLOW_PADDING = 2500;
+const STAR_OVERFLOW_PADDING = 350;
 const STAR_PARALLAX_FACTOR = 0.8;
 const BG_COLOR = '#080820';
 const KNOCKOUT_MAP_BG_COLOR = '#4a1515';
@@ -938,7 +938,7 @@ function generateStars(seed: number, mapWidth: number, mapHeight: number): Star[
   const pixelWidth = mapWidth * CELL_SIZE + 2 * STAR_OVERFLOW_PADDING;
   const pixelHeight = mapHeight * CELL_SIZE + 2 * STAR_OVERFLOW_PADDING;
   const area = pixelWidth * pixelHeight;
-  const count = Math.floor(area / 1800);
+  const count = Math.floor(area / 4000);
   const stars: Star[] = [];
   for (let i = 0; i < count; i++) {
     const roll = rng();
@@ -1386,7 +1386,7 @@ function PlanetSphereOverlays({ size }: { size: number }) {
   );
 }
 
-function PlanetNode({
+const PlanetNode = React.memo(function PlanetNode({
   planet,
   color,
   isOwned,
@@ -1556,7 +1556,7 @@ function PlanetNode({
       {planetBody}
     </View>
   );
-}
+});
 
 const PENDING_DEPARTURE_OFFSET_PX = CELL_SIZE;
 
