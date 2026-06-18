@@ -96,7 +96,12 @@ export function runProduction(
     }
 
     const owner = playerById.get(planet.owner);
-    if (owner === undefined) {
+    // Defensive guard: skip production for planets whose owner is no longer in
+    // the player list or has already been eliminated. Normally, eliminated
+    // players' planets are forfeited (set to neutral) by applyHomePlanetElimination
+    // before production runs, so this branch should never fire in practice —
+    // but it prevents any stale state from silently accumulating troops.
+    if (owner === undefined || owner.isEliminated) {
       return planet;
     }
 

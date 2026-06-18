@@ -515,7 +515,36 @@ Two tasks to produce a correct, regression-free knockout farewell turn flow acro
 
 ---
 
+## Phase 64 — Bug Fix: Knocked-Out Player's Planets Retain Troops and Keep Producing After Elimination
+
+**Status:** Complete (2026-06-17).
+
+**Regression introduced by:** Phase 50 (Task 219).
+
+**Root cause:** Phase 50 changed `applyHomePlanetElimination` in `combatEngine.ts` to skip calling `forfeitEliminatedPlayerPlanets` for human players (only called it for AI). The intent was to preserve the eliminated player's faction-color planet display during their farewell turn. The side effects were severe:
+
+1. **Troops stay on dead planets.** The eliminated human's planets remained owned by them with all their troops in the game state. Every other player (human and AI alike) saw those planets as still belonging to the knocked-out player, with full troop counts visible in fog-of-war-aware rendering.
+
+2. **Factories keep producing.** `runProduction` iterates all non-neutral planets without checking `player.isEliminated`. Because the knocked-out player's planets were still `owner: <their id>`, every round-wrap triggered production runs that piled even more troops on those dead planets.
+
+3. **AI decisions corrupt.** AI players running between the elimination event and the farewell lock screen made decisions against a map where the knocked-out player still held a live empire. Fleet routing, threat assessment, and target selection were all wrong.
+
+4. **Async multiplayer state wrong.** In async games, the state submitted to the backend had the eliminated player's planets still owned. Any surviving player who loaded the game before the farewell turn was processed saw a live, troop-filled empire belonging to a player who was already eliminated.
+
+**Fix (two files):**
+
+- `frontend/src/game/combatEngine.ts` — `applyHomePlanetElimination`: removed the `defenderPlayer.isAI` branch; now always calls `forfeitEliminatedPlayerPlanets` for every eliminated player (AI or human). Planets are set to neutral with 0 troops immediately at the moment of knockout, so the rest of `resolveTurn`, all subsequent AI turns, and the submitted state are all consistent.
+
+- `frontend/src/game/productionEngine.ts` — `runProduction`: added `|| owner.isEliminated` defensive guard. The primary fix makes this dead code in practice (forfeited planets are `owner: 'neutral'` and skip the first guard), but it protects against any future inconsistency.
+
+**Trade-off:** The eliminated player's farewell turn no longer shows their planets in faction color — the map displays them as neutral immediately. This reverts the Phase 50 display improvement, but game correctness takes priority over the cosmetic farewell.
+
+- ~~**Task 247**~~ — Frontend: Always forfeit eliminated player's planets in `applyHomePlanetElimination`; guard `runProduction` against eliminated-owned planets *(complete 2026-06-17)*
+
+---
+
 ## Changelog
+- 2026-06-17: Phase 64 complete (Task 247) — regression from Phase 50: knocked-out human player's planets retained troops and continued producing; fix: `applyHomePlanetElimination` now always calls `forfeitEliminatedPlayerPlanets`; `runProduction` defensive `isEliminated` guard added.
 - 2026-06-08: Phase 60 added (Task 241) — Exit Game mid-turn fails in complex games; root cause: `turns.in_progress_actions_json` TEXT column (64KB) overflows for large game states; fix is backend migration to LONGTEXT.
 - 2026-06-05: Phase 56 reverted (Tasks 226–227, 229) — routing `endTurn()` through `acknowledgeKnockout` broke normal turns; engine-based AI-advance inside `acknowledgeKnockout` corrupted round state. Tasks 226/227/229 reverted. Task 228 kept (End Turn disabled during submit). `acknowledgeKnockout` async path restored to pre-Phase-56 manual loop + console logging.
 - 2026-06-05: Phase 55 complete (Tasks 224–225) — `acknowledgeKnockout` now clears `eliminatedPlayerPendingKnockout` synchronously before the async submit, preventing double-invocation; restored on error for retry; `handleCloseBattleReport` no longer calls `acknowledgeKnockout` so End Turn is the single trigger.

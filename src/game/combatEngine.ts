@@ -59,9 +59,11 @@ function applyHomePlanetElimination(
     player.id === defenderPlayer.id ? { ...player, isEliminated: true } : player,
   );
   const updatedFleets = fleets.filter((fleet) => fleet.ownerId !== defenderPlayer.id);
-  const resultMap = defenderPlayer.isAI
-    ? forfeitEliminatedPlayerPlanets(map, defenderPlayer.id)
-    : map;
+  // Always forfeit planets immediately for both AI and human players so that
+  // (a) production does not continue running for a knocked-out player's factories,
+  // (b) other players see correct neutral planets rather than a zombie empire, and
+  // (c) the state submitted to the backend is immediately consistent.
+  const resultMap = forfeitEliminatedPlayerPlanets(map, defenderPlayer.id);
   return { map: resultMap, players: updatedPlayers, fleets: updatedFleets };
 }
 
