@@ -1867,6 +1867,7 @@ export default function GameScreen() {
   const pendingGameOverAlertRef = useRef(false);
   const lastOpenedTurnKeyRef = useRef('');
   const showBattleReportModalRef = useRef(false);
+  const modalOpenedAtRef = useRef<number>(0);
   // Track the activeGameId we last reset lastOpenedTurnKeyRef for, so we only
   // reset the ref when the game actually changes (not on every events update).
   const lastResetGameIdRef = useRef<string | null>(null);
@@ -1978,6 +1979,14 @@ export default function GameScreen() {
         ? gameState?.players.find((p) => p.id === localHumanPlayerId)
         : undefined,
     [gameState?.players, localHumanPlayerId],
+  );
+
+  const stars = useMemo(
+    () =>
+      gameState !== null
+        ? generateStars(gameState.seed, gameState.map.width, gameState.map.height)
+        : [],
+    [gameState?.seed, gameState?.map.width, gameState?.map.height],
   );
 
   const humanCombatEvents = useMemo((): HumanCombatTurnEvent[] => {
@@ -2174,6 +2183,9 @@ export default function GameScreen() {
   }, []);
 
   const dismissPlanetDetail = useCallback(() => {
+    if (Date.now() - modalOpenedAtRef.current < 400) {
+      return; // absorb phantom web click that arrives shortly after the tap that opened the modal
+    }
     selectPlanet(null);
     setPlanetBattleReportName(null);
   }, [selectPlanet]);
@@ -2613,6 +2625,12 @@ export default function GameScreen() {
   useEffect(() => {
     if (selectedPlanetId === null) {
       setBuildError(null);
+    }
+  }, [selectedPlanetId]);
+
+  useEffect(() => {
+    if (selectedPlanetId !== null) {
+      modalOpenedAtRef.current = Date.now();
     }
   }, [selectedPlanetId]);
 
@@ -3632,6 +3650,9 @@ export default function GameScreen() {
   };
 
   const handleFilledBuildingSlotPress = (slotIndex: number) => {
+    if (Date.now() - modalOpenedAtRef.current < 400) {
+      return; // absorb phantom web click
+    }
     if (selectedPlanet === undefined) {
       return;
     }
@@ -3653,7 +3674,16 @@ export default function GameScreen() {
   };
 
   if (gameState === null || humanPlayer === undefined || localHumanPlayerId === undefined) {
-    return <View style={styles.root} />;
+    return (
+      <View style={styles.root}>
+        {(isSubmittingTurn || shouldReturnHome) && (
+          <View style={styles.submittingOverlay}>
+            <ActivityIndicator size="large" color={COLORS.accent} />
+            <Text style={styles.submittingOverlayText}>Submitting turn…</Text>
+          </View>
+        )}
+      </View>
+    );
   }
 
   const {
@@ -3667,10 +3697,6 @@ export default function GameScreen() {
   } = gameState;
   const mapPixelWidth = map.width * CELL_SIZE;
   const mapPixelHeight = map.height * CELL_SIZE;
-  const stars = useMemo(
-    () => generateStars(gameState.seed, gameState.map.width, gameState.map.height),
-    [gameState.seed, gameState.map.width, gameState.map.height],
-  );
   const isHumanTurn = status === 'active' && currentPlayerId === humanPlayer.id;
   const isKnockoutTurn = eliminatedPlayerPendingKnockout && isHumanTurn;
   const playerIsKnockedOut =
@@ -6007,14 +6033,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 100,
+    zIndex: 999,
     backgroundColor: BG_COLOR,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
   },
   submittingOverlayText: {
-    color: COLORS.text,
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
   },
