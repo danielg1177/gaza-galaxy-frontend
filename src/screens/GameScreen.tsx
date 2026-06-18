@@ -41,6 +41,7 @@ import {
   effectiveSpeed,
   isInRange,
 } from '../game/movementEngine';
+import { mulberry32 } from '../game/mapGenerator';
 import type { BuildingType, Fleet, OwnerId, Planet, Player, TurnEvent } from '../game/types';
 import { getFriendRequests } from '../services/friendsService';
 import { getGame, saveTurnProgress } from '../services/gamesService';
@@ -902,7 +903,9 @@ const DEFAULT_MAP_SCALE =
   ) / 10;
 const HOME_PLANET_SNAP_SCALE = 0.85;
 const MAP_VIEWPORT_PADDING = 150;
-const BG_COLOR = '#f5f0eb';
+const STAR_OVERFLOW_PADDING = 2500;
+const STAR_PARALLAX_FACTOR = 0.8;
+const BG_COLOR = '#080820';
 const KNOCKOUT_MAP_BG_COLOR = '#4a1515';
 const HUMAN_COLOR = '#2e5bcc';
 const HOME_PLANET_COLOR = '#c8a26b';
@@ -910,7 +913,7 @@ const NEUTRAL_COLOR = '#7a7a96';
 const AI_COLORS = ['#cc3333', '#2a9048', '#d06820', '#8030c0'] as const;
 
 const COLORS = {
-  background: '#f5f0eb',
+  background: '#080820',
   text: '#1c1c2e',
   textMuted: '#6a6880',
   accent: '#4060c8',
@@ -920,6 +923,32 @@ const COLORS = {
   victory: '#276b40',
   defeat: '#b83030',
 };
+
+interface Star {
+  x: number;
+  y: number;
+  r: number;
+  opacity: number;
+}
+function generateStars(seed: number, mapWidth: number, mapHeight: number): Star[] {
+  const rng = mulberry32(seed ^ 0xdeadbeef);
+  const pixelWidth = mapWidth * CELL_SIZE + 2 * STAR_OVERFLOW_PADDING;
+  const pixelHeight = mapHeight * CELL_SIZE + 2 * STAR_OVERFLOW_PADDING;
+  const area = pixelWidth * pixelHeight;
+  const count = Math.floor(area / 1800);
+  const stars: Star[] = [];
+  for (let i = 0; i < count; i++) {
+    const roll = rng();
+    const r = roll < 0.7 ? 0.8 : roll < 0.93 ? 1.2 : 1.8;
+    stars.push({
+      x: rng() * pixelWidth - STAR_OVERFLOW_PADDING,
+      y: rng() * pixelHeight - STAR_OVERFLOW_PADDING,
+      r,
+      opacity: 0.35 + rng() * 0.55,
+    });
+  }
+  return stars;
+}
 
 function formatPlanetId(id: string): string {
   return `Planet ${id.replace('planet-', '')}`;
@@ -1323,6 +1352,37 @@ function mapPlanetClassLabelStyle(
   ];
 }
 
+function PlanetSphereOverlays({ size }: { size: number }) {
+  return (
+    <>
+      {/* Specular highlight — upper-left bright spot */}
+      <View
+        style={{
+          position: 'absolute',
+          width: size * 0.55,
+          height: size * 0.5,
+          borderRadius: size * 0.275,
+          top: size * 0.05,
+          left: size * 0.08,
+          backgroundColor: 'rgba(255,255,255,0.28)',
+        }}
+      />
+      {/* Shadow terminator — lower-right dark arc */}
+      <View
+        style={{
+          position: 'absolute',
+          width: size * 1.2,
+          height: size * 1.2,
+          borderRadius: size * 0.6,
+          bottom: -(size * 0.35),
+          right: -(size * 0.35),
+          backgroundColor: 'rgba(0,0,0,0.22)',
+        }}
+      />
+    </>
+  );
+}
+
 function PlanetNode({
   planet,
   color,
@@ -1392,6 +1452,7 @@ function PlanetNode({
     height: size,
     borderRadius: size / 2,
     backgroundColor: color,
+    overflow: 'hidden' as const,
   };
   const circleBorderWidth = highlighted ? PLANET_HIGHLIGHT_BORDER_WIDTH : 0;
   const classLabelStyle = mapPlanetClassLabelStyle(size, circleBorderWidth, isOwned, planet.class);
@@ -1433,11 +1494,13 @@ function PlanetNode({
               },
             ]}
           >
+            <PlanetSphereOverlays size={size} />
             <Text style={classLabelStyle}>{displayPlanetClass(planet.class)}</Text>
           </RNAnimated.View>
         </>
       ) : (
         <View style={[styles.planetCircle, circleFrame]}>
+          <PlanetSphereOverlays size={size} />
           <Text style={classLabelStyle}>{displayPlanetClass(planet.class)}</Text>
         </View>
       )}
@@ -1532,6 +1595,40 @@ function FleetShipMarker({
         preserveAspectRatio="xMidYMid meet"
       />
     </G>
+  );
+}
+
+function StarfieldLayer({
+  stars,
+  mapPixelWidth,
+  mapPixelHeight,
+}: {
+  stars: Star[];
+  mapPixelWidth: number;
+  mapPixelHeight: number;
+}) {
+  return (
+    <Svg
+      width={mapPixelWidth + 2 * STAR_OVERFLOW_PADDING}
+      height={mapPixelHeight + 2 * STAR_OVERFLOW_PADDING}
+      style={{
+        position: 'absolute',
+        top: -STAR_OVERFLOW_PADDING,
+        left: -STAR_OVERFLOW_PADDING,
+      }}
+      pointerEvents="none"
+    >
+      {stars.map((star, i) => (
+        <Circle
+          key={i}
+          cx={star.x + STAR_OVERFLOW_PADDING}
+          cy={star.y + STAR_OVERFLOW_PADDING}
+          r={star.r}
+          fill="white"
+          opacity={star.opacity}
+        />
+      ))}
+    </Svg>
   );
 }
 
@@ -2735,6 +2832,22 @@ export default function GameScreen() {
     ],
   }), [translateX, translateY, mapWidthSV, mapHeightSV, scale]);
 
+  const starfieldAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateX:
+          translateX.value * STAR_PARALLAX_FACTOR +
+          (mapWidthSV.value * (scale.value - 1)) / 2,
+      },
+      {
+        translateY:
+          translateY.value * STAR_PARALLAX_FACTOR +
+          (mapHeightSV.value * (scale.value - 1)) / 2,
+      },
+      { scale: scale.value },
+    ],
+  }), [translateX, translateY, mapWidthSV, mapHeightSV, scale]);
+
   const cancelDrag = useCallback(() => {
     fleetDragActivatedRef.current = false;
     fleetDragOriginPlanetRef.current = null;
@@ -3548,6 +3661,10 @@ export default function GameScreen() {
   } = gameState;
   const mapPixelWidth = map.width * CELL_SIZE;
   const mapPixelHeight = map.height * CELL_SIZE;
+  const stars = useMemo(
+    () => generateStars(gameState.seed, gameState.map.width, gameState.map.height),
+    [gameState.seed, gameState.map.width, gameState.map.height],
+  );
   const isHumanTurn = status === 'active' && currentPlayerId === humanPlayer.id;
   const isKnockoutTurn = eliminatedPlayerPendingKnockout && isHumanTurn;
   const playerIsKnockedOut =
@@ -3820,6 +3937,24 @@ export default function GameScreen() {
             <Text style={styles.boxSelectHintText}>Tap destination planet</Text>
           </View>
         )}
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              width: mapPixelWidth,
+              height: mapPixelHeight,
+              overflow: 'visible',
+            },
+            starfieldAnimatedStyle,
+          ]}
+          pointerEvents="none"
+        >
+          <StarfieldLayer
+            stars={stars}
+            mapPixelWidth={mapPixelWidth}
+            mapPixelHeight={mapPixelHeight}
+          />
+        </Animated.View>
         <GestureDetector gesture={mapGesture}>
           <View style={styles.mapGestureHost}>
             <Animated.View
@@ -4855,13 +4990,13 @@ const styles = StyleSheet.create({
     left: '50%',
     marginLeft: -PLANET_NAME_LABEL_WIDTH / 2,
     textAlign: 'center',
-    color: COLORS.text,
+    color: '#ffffff',
     fontSize: PLANET_LABEL_FONT_SIZE,
     lineHeight: PLANET_LABEL_FONT_SIZE + 1,
     fontWeight: '600',
   },
   planetNameLabelFogged: {
-    color: COLORS.textMuted,
+    color: '#ffffff',
   },
   planetClassLabel: {
     color: 'rgba(255,255,255,0.85)',
@@ -4871,11 +5006,11 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   planetClassLabelFogged: {
-    color: COLORS.background,
+    color: '#ffffff',
   },
   shipCountLabel: {
     position: 'absolute',
-    color: COLORS.text,
+    color: '#ffffff',
     fontSize: SHIP_COUNT_FONT_SIZE,
     lineHeight: SHIP_COUNT_FONT_SIZE + 1,
     fontWeight: '600',
@@ -5276,7 +5411,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   endTurnButtonText: {
-    color: COLORS.background,
+    color: '#ffffff',
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 1.5,

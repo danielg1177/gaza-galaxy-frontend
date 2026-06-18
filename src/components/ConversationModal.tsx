@@ -89,6 +89,7 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
   const [inputText, setInputText] = useState('');
   const listRef = useRef<FlatList<GameMessage>>(null);
   const prevVisibleRef = useRef(visible);
+  const initialLoadDoneRef = useRef(false);
 
   const handleClose = useCallback(() => {
     clearMessages();
@@ -105,7 +106,12 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
 
   useEffect(() => {
     if (visible && !prevVisibleRef.current) {
-      void fetchMessages(gameId);
+      void fetchMessages(gameId).then(() => {
+        initialLoadDoneRef.current = true;
+      });
+    }
+    if (!visible) {
+      initialLoadDoneRef.current = false;
     }
     prevVisibleRef.current = visible;
   }, [visible, gameId, fetchMessages]);
@@ -211,7 +217,7 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
             </View>
 
             <View style={styles.messageArea}>
-              {isFetchingMessages ? (
+              {isFetchingMessages && !initialLoadDoneRef.current ? (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator size="large" color={COLORS.sendActive} />
                 </View>

@@ -543,7 +543,33 @@ Two tasks to produce a correct, regression-free knockout farewell turn flow acro
 
 ---
 
+## Phase 65 — Bug Fix: Chat Poll Shows Full-Screen Loading Indicator Every 5 Seconds
+
+**Status:** Not started.
+
+**Root cause:** `ConversationModal.tsx` uses `isFetchingMessages` to swap between a full-screen `ActivityIndicator` and the `FlatList`. Because every 5-second background poll sets `isFetchingMessages: true`, the entire message area blanks out and shows a spinner on every poll cycle.
+
+**Required behaviour:** The loading spinner should only appear during the **initial open** (when the message list is empty and the user has no content to look at). All subsequent background polls must be completely silent — the list stays visible with existing messages, and new messages are simply appended when they arrive.
+
+- ~~**Task 248**~~ — Frontend: Show loading spinner only on initial open; silence all background poll fetches in `ConversationModal.tsx` *(complete 2026-06-18)*
+
+---
+
+## Phase 66 — Feature: Space Starfield Background on the Game Map
+
+**Status:** Not started.
+
+Replace the current flat `#f5f0eb` background behind the planet map with a dark space canvas and a seeded procedural starfield. Stars are part of the map coordinate system (they pan and zoom with the map), are deterministic from `state.seed`, and are rendered as a single SVG layer beneath the planet dots. The map background color changes to deep space black/navy (`#080820`).
+
+- ~~**Task 249**~~ — Frontend: Add seeded procedural SVG starfield as the game map background layer in `GameScreen.tsx` *(complete 2026-06-18)*
+
+---
+
 ## Changelog
+- 2026-06-18: Phase 66 complete (Task 249) — seeded SVG starfield added to game map; background color changed to `#080820`.
+- 2026-06-18: Phase 66 added (Task 249) — space starfield background on the game map.
+- 2026-06-18: Phase 65 complete (Task 248) — chat poll blanks the message list every 5 seconds with a full-screen spinner; fixed with `initialLoadDoneRef` so spinner only shows on first open.
+- 2026-06-18: Phase 65 added (Task 248) — chat poll blanks the message list every 5 seconds with a full-screen spinner; fix to silence background polls.
 - 2026-06-17: Phase 64 complete (Task 247) — regression from Phase 50: knocked-out human player's planets retained troops and continued producing; fix: `applyHomePlanetElimination` now always calls `forfeitEliminatedPlayerPlanets`; `runProduction` defensive `isEliminated` guard added.
 - 2026-06-08: Phase 60 added (Task 241) — Exit Game mid-turn fails in complex games; root cause: `turns.in_progress_actions_json` TEXT column (64KB) overflows for large game states; fix is backend migration to LONGTEXT.
 - 2026-06-05: Phase 56 reverted (Tasks 226–227, 229) — routing `endTurn()` through `acknowledgeKnockout` broke normal turns; engine-based AI-advance inside `acknowledgeKnockout` corrupted round state. Tasks 226/227/229 reverted. Task 228 kept (End Turn disabled during submit). `acknowledgeKnockout` async path restored to pre-Phase-56 manual loop + console logging.
