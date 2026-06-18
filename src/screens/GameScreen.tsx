@@ -908,8 +908,11 @@ const STAR_PARALLAX_FACTOR = 0.8;
 const BG_COLOR = '#080820';
 const KNOCKOUT_MAP_BG_COLOR = '#4a1515';
 const HUMAN_COLOR = '#2e5bcc';
+const FLEET_MOTION_COLOR = '#5a90e8';
 const HOME_PLANET_COLOR = '#c8a26b';
 const NEUTRAL_COLOR = '#7a7a96';
+const MODAL_BUTTON_BG = '#6e6c7c';
+const MODAL_BUTTON_BG_ACTIVE = '#5a5866';
 const AI_COLORS = ['#cc3333', '#2a9048', '#d06820', '#8030c0'] as const;
 
 const COLORS = {
@@ -1662,7 +1665,8 @@ function FleetLayer({
         if (originPlanet === undefined || destPlanet === undefined) {
           return null;
         }
-        const color = getPlayerColor(fleet.ownerId, humanPlayerId, players);
+        const baseColor = getPlayerColor(fleet.ownerId, humanPlayerId, players);
+        const color = fleet.ownerId === humanPlayerId ? FLEET_MOTION_COLOR : baseColor;
         const totalTurns = fleet.totalTurns;
         const progress = totalTurns > 0 ? 1 - fleet.turnsRemaining / totalTurns : 1;
         const x =
@@ -1694,6 +1698,7 @@ function FleetLayer({
               y={y - FLEET_MARKER_TEXT_OFFSET_Y}
               fill={color}
               fontSize={FLEET_IN_TRANSIT_FONT_SIZE}
+              fontWeight="700"
             >
               {fleet.shipCount}
             </SvgText>
@@ -1727,7 +1732,7 @@ function FleetLayer({
                 y1={originCenter.y}
                 x2={dotX}
                 y2={dotY}
-                stroke={HUMAN_COLOR}
+                stroke={FLEET_MOTION_COLOR}
                 strokeWidth={1}
                 strokeDasharray="3 3"
                 opacity={0.5}
@@ -1743,8 +1748,9 @@ function FleetLayer({
               <SvgText
                 x={dotX + FLEET_MARKER_TEXT_OFFSET_X}
                 y={dotY - FLEET_MARKER_TEXT_OFFSET_Y}
-                fill={HUMAN_COLOR}
+                fill={FLEET_MOTION_COLOR}
                 fontSize={FLEET_MARKER_FONT_SIZE}
+                fontWeight="700"
               >
                 {order.shipCount}
               </SvgText>
@@ -5013,7 +5019,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: SHIP_COUNT_FONT_SIZE,
     lineHeight: SHIP_COUNT_FONT_SIZE + 1,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   fleetLayer: {
     position: 'absolute',
@@ -5578,14 +5584,14 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 6,
-    backgroundColor: COLORS.background,
+    backgroundColor: MODAL_BUTTON_BG,
     borderWidth: 1,
     borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepperBtnText: {
-    color: COLORS.accent,
+    color: '#ffffff',
     fontSize: 20,
   },
   stepperValue: {
@@ -5612,7 +5618,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: COLORS.accent,
-    backgroundColor: COLORS.background,
+    backgroundColor: MODAL_BUTTON_BG,
   },
   stepperMax: {
     color: COLORS.textMuted,
@@ -5622,7 +5628,7 @@ const styles = StyleSheet.create({
     height: 36,
     paddingHorizontal: 12,
     borderRadius: 6,
-    backgroundColor: COLORS.background,
+    backgroundColor: MODAL_BUTTON_BG,
     borderWidth: 1,
     borderColor: COLORS.accent,
     alignItems: 'center',
@@ -5633,12 +5639,12 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   stepperAllBtnText: {
-    color: COLORS.accent,
+    color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
   },
   stepperAllBtnTextDisabled: {
-    color: COLORS.textMuted,
+    color: 'rgba(255,255,255,0.45)',
   },
   primaryButton: {
     backgroundColor: COLORS.accent,
@@ -5648,7 +5654,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryButtonText: {
-    color: COLORS.background,
+    color: '#ffffff',
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 2,
@@ -5765,12 +5771,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accent,
   },
   modalBtnSecondary: {
-    backgroundColor: COLORS.background,
+    backgroundColor: MODAL_BUTTON_BG,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   modalBtnSecondaryText: {
-    color: COLORS.text,
+    color: '#ffffff',
     fontSize: 15,
     fontWeight: '600',
   },
@@ -5825,7 +5831,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   planetClassTileText: {
-    color: COLORS.background,
+    color: '#ffffff',
     fontSize: 24,
     fontWeight: '700',
     width: 48,
@@ -5861,25 +5867,25 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingVertical: 8,
     alignItems: 'center',
-    backgroundColor: COLORS.background,
+    backgroundColor: MODAL_BUTTON_BG,
   },
   buildChipDisabled: {
     opacity: 0.45,
   },
   buildChipActive: {
     borderColor: COLORS.accent,
-    backgroundColor: '#1a2a44',
+    backgroundColor: MODAL_BUTTON_BG_ACTIVE,
   },
   buildChipText: {
-    color: COLORS.textMuted,
+    color: '#ffffff',
     fontSize: 13,
     fontWeight: '600',
   },
   buildChipTextDisabled: {
-    color: '#5c5c7c',
+    color: 'rgba(255,255,255,0.45)',
   },
   buildChipTextActive: {
-    color: COLORS.text,
+    color: '#ffffff',
   },
   buildErrorLabel: {
     color: COLORS.defeat,
@@ -5975,7 +5981,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   lockExitButtonText: {
-    color: COLORS.textMuted,
+    color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
     letterSpacing: 1,
@@ -5989,7 +5995,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lockStartButtonText: {
-    color: COLORS.background,
+    color: '#ffffff',
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 2,
