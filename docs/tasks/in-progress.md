@@ -565,7 +565,22 @@ Replace the current flat `#f5f0eb` background behind the planet map with a dark 
 
 ---
 
+## Phase 67 — Bug Fix: Losing Player Cannot See Final Elimination Battle
+
+**Status:** Complete (2026-06-23).
+
+**Root cause:** When the losing player (Player B) is eliminated on the winner's (Player A's) turn before Player B ever gets to act in that round, Player B never submits a turn record for the final round. `GameController::show` computed `latestEvents` using the requesting user's own last submitted round, so Player B's `latestEvents` came from round N-1 (the round before the elimination). The elimination combat events live in Player A's round N turn record and were never returned to Player B. Player B saw either no lock screen or the wrong (stale) events — never the final battle.
+
+**Fix:** In `GameController::show`, when `$game->status === 'finished'`, use the global `max(round_number)` across all submitted turns instead of the requesting user's own last submitted round. For finished games the "active-game round-advance" concern (which motivated the per-user query) cannot occur — there is no next round to advance to.
+
+**File:** `backend/app/Http/Controllers/GameController.php`
+
+- ~~**Backend Task 15.1**~~ — Backend: Use global max round_number for `latestEvents` on finished games *(complete 2026-06-23)*
+
+---
+
 ## Changelog
+- 2026-06-23: Phase 67 complete (Backend Task 15.1) — losing player who was eliminated on the opponent's turn now receives the final round's events (`latestEvents`) and sees the elimination battle when opening the finished game.
 - 2026-06-18: Phase 66 complete (Task 249) — seeded SVG starfield added to game map; background color changed to `#080820`.
 - 2026-06-18: Phase 66 added (Task 249) — space starfield background on the game map.
 - 2026-06-18: Phase 65 complete (Task 248) — chat poll blanks the message list every 5 seconds with a full-screen spinner; fixed with `initialLoadDoneRef` so spinner only shows on first open.
