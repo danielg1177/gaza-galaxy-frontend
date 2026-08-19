@@ -404,6 +404,10 @@ export async function rejoinGame(id: number): Promise<void> {
   await apiClient.post(`/games/${id}/rejoin`);
 }
 
+export async function endGame(id: number): Promise<void> {
+  await apiClient.post(`/games/${id}/end`);
+}
+
 export async function listInvites(): Promise<ApiInvite[]> {
   const data = await apiClient.get<InvitesListResponse>('/invites');
   return data.invites.map(mapInvite);

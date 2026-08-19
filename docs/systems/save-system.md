@@ -57,7 +57,7 @@ The Zustand `gameStore` currently supports multiple simultaneous local campaigns
 
 ### Save (when player exits mid-turn)
 
-The player taps "Exit Game" from the ⋮ menu. The client:
+The player taps "Exit Game" from the ⋮ menu (first item). The client:
 1. Reads the current Zustand `GameState` (with all mutations from this turn: builds, slider changes, and queued orders already applied to local state)
 2. Reads the current `queuedOrders` array (fleet dispatches not yet committed)
 3. Calls `POST /api/games/{id}/turn/save` with:

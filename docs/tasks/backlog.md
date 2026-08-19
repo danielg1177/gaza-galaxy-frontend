@@ -4,6 +4,15 @@ Tasks not yet started, in priority order.
 
 ---
 
+## Phase 74 — Feature: End game for all players
+
+**Status:** Complete (2026-08-19).
+
+- ~~**Task 259**~~ — Backend: `POST /games/{id}/end` *(complete 2026-08-19)*
+- ~~**Task 260**~~ — Frontend: ⋮ End Game + Exit first *(complete 2026-08-19)*
+
+---
+
 ## Phase 71 — Feature: Forfeit without ending (async multiplayer)
 
 Pass-and-play sit-out is live (Phase 70). Wire the same `isForfeited` flag through the Laravel API so a sitting-out human is skipped for `current_user_id` / "Your Turn!" pushes, and the Command Center shows **Rejoin**.

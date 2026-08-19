@@ -394,6 +394,22 @@ Auth required. Caller must be in `game_players` for the game (else 403 `{ "messa
 
 ---
 
+#### `POST /api/games/{id}/end`
+Auth required. Any human member of an in-progress game (not creator-only). Distinct from **Forfeit** (sit-out; game continues) and **Delete** (creator-only row removal).
+
+**Logic:**
+1. Verify caller is a human `game_players` member. 403 if not.
+2. Verify `games.status = 'in_progress'`. 422 if not.
+3. Set `status = 'finished'`, `current_user_id = null`, `winner_user_id = null`.
+4. Patch `state_json.status` to `"finished"` and `state_json.winnerId` to `null`.
+5. Notify all other human players (`event: game_ended`).
+
+**Response (200):** `{ "ended": true }`
+
+**Client:** `gamesService.endGame(id)`; GameScreen ⋮ **End Game** (bottom of menu, under Forfeit) confirms then calls this and returns home. Pass-and-play skips the API and `resetGame()`s the local record.
+
+---
+
 ### Turns
 
 #### `POST /api/games/{id}/turn/save`
@@ -571,6 +587,7 @@ All API responses should use a consistent envelope. Errors:
 - The Sanctum token is stored in the client's AsyncStorage and persists across app sessions (no need to re-login)
 
 ## Changelog
+- 2026-08-19: Task 259 — `POST /api/games/{id}/end` lets any human member finish an in-progress match for everyone; client `gamesService.endGame`.
 - 2026-05-29: Task 137 complete — `src/services/gamesService.ts` implements client-side games/turns/invites API layer (snake_case ↔ camelCase mapping; all endpoints via `apiClient`).
 - 2026-05-29: Task 132 complete — `App.tsx` startup auth gate; conditional main/auth stacks; `setOnUnauthorized` → `logout()` on 401. Phase 12 complete.
 - 2026-05-29: Task 131 complete — `src/screens/RegisterScreen.tsx` created; field-level API error display; client-side password validation; `App.tsx` Register route wired.

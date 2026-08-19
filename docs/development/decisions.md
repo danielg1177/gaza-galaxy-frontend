@@ -4,6 +4,13 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
+## 2026-08-19 — Any player can end the match; forfeit stays sit-out
+**Decision:** ⋮ **End Game** calls `POST /games/{id}/end` (any human member of an in-progress game). That sets `games.status = finished` with `winner_user_id` null and patches `state_json` so `status` is finished and `winnerId` is null. Pass-and-play / solo skip the API and `resetGame()` the local record. **Forfeit** remains AI sit-out. **Delete** remains creator-only row removal. The ⋮ menu lists **Exit Game** first and **End Game** last (under Forfeit). Confirmation copy: this will fully end the game for all players.
+**Rationale:** Players asked to stop a match for everyone without sitting out or waiting for the creator to delete it. A null winner keeps Command Center cards as neutral **FINISHED** instead of victory/defeat.
+**Alternatives considered:** Reusing creator **Delete** (rejected — removes history and is creator-only); treating end as forfeit (rejected — the game would continue); requiring all players to agree (rejected — user asked for any player to fully end it).
+
+---
+
 ## 2026-08-19 — Async knockout farewells are not deferred
 **Decision:** When an async submit eliminates a human (including a self-knockout on round wrap), `resulting_state.currentPlayerId` must be that human so they receive a farewell turn. Persist `pendingFarewellPlayerIds` and `knockoutResumePlayerId` on `GameState`. `acknowledgeKnockout` marks `knockoutFarewellComplete` and ends the game only when one non-eliminated player remains (AIs count). Wrap-back recovery: if the engine's next living human is the submitter, insert any eliminated human who has not completed farewell.
 **Rationale:** Pass-and-play defers a self-knockout until that slot comes around on the same device. Async wipes Zustand on submit, so deferral skips the victim forever and `runAiTurnsUntilHuman` returns the turn to the attacker. Finishing when one *human* remains would abort a 1-human vs AI match after the other human's farewell.

@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Phase 74 — End game for all players
+**Completed:** 2026-08-19
+**Files modified:** `src/services/gamesService.ts`, `src/screens/GameScreen.tsx`, `src/store/gameStore.ts`, `docs/systems/multiplayer.md`, `docs/systems/backend-api.md`, `docs/systems/save-system.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`
+**Notes:** ⋮ **Exit Game** / **Exit to Home** is the first menu item. **End Game** is last, under **Forfeit**. Confirming states that this fully ends the game for all players. Async: `POST /games/{id}/end` then home. Pass-and-play: `resetGame()`. Finished games with no winner show **Game ended** instead of a fake opponent win.
+
+---
 ## Phase 73 — Async knockout farewell after wrap-kill
 **Completed:** 2026-08-19
 **Files modified:** `src/game/types.ts`, `src/game/turnEngine.ts`, `src/store/gameStore.ts`, `docs/systems/turn-engine.md`, `docs/systems/multiplayer.md`, `docs/development/current-state.md`, `docs/development/known-issues.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`

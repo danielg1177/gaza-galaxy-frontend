@@ -45,7 +45,8 @@ import { mulberry32 } from '../game/mapGenerator';
 import type { BuildingType, Fleet, OwnerId, Planet, Player, TurnEvent } from '../game/types';
 import { needsForfeitPrompt, nextCommanderStatusNoticeFor } from '../game/playerControl';
 import { getFriendRequests } from '../services/friendsService';
-import { getGame, saveTurnProgress } from '../services/gamesService';
+import { ApiError } from '../services/apiClient';
+import { endGame, getGame, saveTurnProgress } from '../services/gamesService';
 import { useAuthStore } from '../store/authStore';
 import {
   battleReportTurnKey,
@@ -1856,6 +1857,7 @@ export default function GameScreen() {
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [isSavingExit, setIsSavingExit] = useState(false);
+  const [isEndingGame, setIsEndingGame] = useState(false);
   const [dontAskAgainForfeit, setDontAskAgainForfeit] = useState(false);
   const [fleetTooltip, setFleetTooltip] = useState<{
     fleet: Fleet;
@@ -3575,6 +3577,46 @@ export default function GameScreen() {
     );
   }, [forfeitCurrentPlayer, isAsyncGame]);
 
+  const handleEndGame = useCallback(() => {
+    setShowHeaderMenu(false);
+    showConfirm(
+      'End this game?',
+      'This will fully end the game for all players.',
+      () => {
+        void (async () => {
+          const { getActiveRecord, resetGame: resetActiveGame } =
+            useGameStore.getState();
+          const record = getActiveRecord();
+          if (record === null) {
+            return;
+          }
+
+          const asyncId = record.asyncGameId;
+          if (asyncId == null) {
+            resetActiveGame();
+            navigation.navigate('Home');
+            return;
+          }
+
+          setIsEndingGame(true);
+          try {
+            await endGame(asyncId);
+            resetActiveGame();
+            navigation.navigate('Home');
+          } catch (err) {
+            const message =
+              err instanceof ApiError
+                ? err.message
+                : 'Could not end the game. Check your connection.';
+            showAlert('Failed to end game', message);
+          } finally {
+            setIsEndingGame(false);
+          }
+        })();
+      },
+    );
+  }, [navigation]);
+
   const handleExitGame = useCallback(async () => {
     setShowHeaderMenu(false);
     setIsSavingExit(true);
@@ -3678,10 +3720,12 @@ export default function GameScreen() {
   if (gameState === null || humanPlayer === undefined || localHumanPlayerId === undefined) {
     return (
       <View style={styles.root}>
-        {(isSubmittingTurn || shouldReturnHome) && (
+        {(isSubmittingTurn || shouldReturnHome || isEndingGame) && (
           <View style={styles.submittingOverlay}>
             <ActivityIndicator size="large" color={COLORS.accent} />
-            <Text style={styles.submittingOverlayText}>Submitting turn…</Text>
+            <Text style={styles.submittingOverlayText}>
+              {isEndingGame ? 'Ending game…' : 'Submitting turn…'}
+            </Text>
           </View>
         )}
       </View>
@@ -3778,7 +3822,9 @@ export default function GameScreen() {
           {isViewingFinishedGame
             ? humanWon
               ? 'You won!'
-              : `${winnerPlayer?.name ?? 'Your opponent'} won`
+              : winnerId === null
+                ? 'Game ended'
+                : `${winnerPlayer?.name ?? 'Your opponent'} won`
             : `Gold ${humanPlayer.gold} · Tech Level ${humanPlayer.techLevel}`}
         </Text>
       </View>
@@ -3820,6 +3866,22 @@ export default function GameScreen() {
                 onPress={() => setShowHeaderMenu(false)}
               />
               <View style={[styles.headerMenuPanel, { top: insets.top + 8 + 36 }]}>
+                {isAsyncGame ? (
+                  <Pressable
+                    style={styles.headerMenuRow}
+                    disabled={isSavingExit}
+                    onPress={handleExitGame}
+                  >
+                    <Text style={styles.headerMenuRowText}>Exit Game</Text>
+                    {isSavingExit && (
+                      <ActivityIndicator size="small" color={COLORS.accent} />
+                    )}
+                  </Pressable>
+                ) : (
+                  <Pressable style={styles.headerMenuRow} onPress={handleExitToHome}>
+                    <Text style={styles.headerMenuRowText}>Exit to Home</Text>
+                  </Pressable>
+                )}
                 {asyncGameId != null && (
                   <Pressable
                     style={styles.headerMenuRow}
@@ -3900,29 +3962,25 @@ export default function GameScreen() {
                 </Pressable>
                 <Pressable
                   style={styles.headerMenuRow}
-                  disabled={isSubmittingTurn || isResolvingAiTurns}
+                  disabled={isSubmittingTurn || isResolvingAiTurns || isEndingGame}
                   onPress={handleForfeit}
                 >
                   <Text style={[styles.headerMenuRowText, styles.headerMenuRowDanger]}>
                     Forfeit
                   </Text>
                 </Pressable>
-                {isAsyncGame ? (
-                  <Pressable
-                    style={styles.headerMenuRow}
-                    disabled={isSavingExit}
-                    onPress={handleExitGame}
-                  >
-                    <Text style={styles.headerMenuRowText}>Exit Game</Text>
-                    {isSavingExit && (
-                      <ActivityIndicator size="small" color={COLORS.accent} />
-                    )}
-                  </Pressable>
-                ) : (
-                  <Pressable style={styles.headerMenuRow} onPress={handleExitToHome}>
-                    <Text style={styles.headerMenuRowText}>Exit to Home</Text>
-                  </Pressable>
-                )}
+                <Pressable
+                  style={styles.headerMenuRow}
+                  disabled={isSubmittingTurn || isResolvingAiTurns || isEndingGame}
+                  onPress={handleEndGame}
+                >
+                  <Text style={[styles.headerMenuRowText, styles.headerMenuRowDanger]}>
+                    End Game
+                  </Text>
+                  {isEndingGame && (
+                    <ActivityIndicator size="small" color={COLORS.defeat} />
+                  )}
+                </Pressable>
               </View>
             </>
           )}
@@ -4677,7 +4735,7 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={status === 'finished' && !humanWon && !showingLockScreen && !showingForfeitPrompt && !showingCommanderNotice && !isViewingFinishedGame}
+        visible={status === 'finished' && !humanWon && winnerId !== null && !showingLockScreen && !showingForfeitPrompt && !showingCommanderNotice && !isViewingFinishedGame}
         transparent
         animationType="fade"
         onRequestClose={handleNewGame}
@@ -4978,6 +5036,13 @@ export default function GameScreen() {
         <View style={styles.submittingOverlay} pointerEvents="auto">
           <ActivityIndicator size="large" color={COLORS.accent} />
           <Text style={styles.submittingOverlayText}>Submitting turn…</Text>
+        </View>
+      )}
+
+      {isEndingGame && (
+        <View style={styles.submittingOverlay} pointerEvents="auto">
+          <ActivityIndicator size="large" color={COLORS.accent} />
+          <Text style={styles.submittingOverlayText}>Ending game…</Text>
         </View>
       )}
 

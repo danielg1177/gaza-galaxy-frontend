@@ -194,6 +194,15 @@ On your turn, ⋮ **Forfeit** discards queued fleets, runs the hard AI for your 
 
 Command Center cards for a sitting-out member stay non-enterable. Subtitle is **AI commanding**. **Rejoin** calls `POST /games/{id}/rejoin` and takes effect the next time the turn order reaches that slot. Sitters do not receive "Your Turn!" pushes. `loadAsyncGame` overlays `detail.players[i].isForfeited` onto `state.players[i]` so the next acting human's `endTurn` treats sitters as AI-controlled.
 
+## End Game for all players (Task 259–260)
+
+⋮ **End Game** is the last item in the header menu (under **Forfeit**). **Exit Game** / **Exit to Home** is the first item. Confirming End Game fully finishes the match for everyone — it is not sit-out and does not delete the row.
+
+- **Async:** confirmation → `POST /games/{id}/end` → `resetGame()` → Home. Backend sets `status = finished` with no winner and notifies other humans (`event: game_ended`). Command Center shows the existing **FINISHED** card (unknown outcome). Opening it is `isViewingFinishedGame` with status-bar copy **Game ended**.
+- **Pass-and-play / solo:** confirmation → `resetGame()` (local record removed) → Home. No API call.
+
+**Delete** remains creator-only on the Command Center. **Forfeit** remains sit-out with AI control.
+
 ## Commander forfeit/rejoin briefing (Task 257)
 
 `GameState.commanderStatusNotices` records when a human forfeits or rejoins. Each other living human who still takes their own turns sees one in-tree **Commander update** overlay per notice on their next turn (after pass-and-play lock screen, before the battle report). Forfeit copy: the AI is taking their turns. Rejoin copy: they have taken command again. Async Command Center **Rejoin** is detected when the next player loads and the API flag disagrees with `state_json`. `resolveTurn` copies the queue through so AI play-out does not drop it.
@@ -201,6 +210,7 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 ---
 
 ## Changelog
+- 2026-08-19: Tasks 259–260 — ⋮ **End Game** (bottom, under Forfeit) fully ends the match for all players after confirmation; **Exit Game** moved to the first menu item; async uses `POST /games/{id}/end`.
 - 2026-08-19: Task 258 — async wrap-kill farewells: deferred knockouts and wrap-back recovery redirect `currentPlayerId` to the eliminated human; `acknowledgeKnockout` does not finish while AIs remain.
 - 2026-08-19: Task 257 — commander forfeit/rejoin briefing overlay; notices stored on `GameState` and shown on each other human's next turn.
 - 2026-08-19: Task 256 — async forfeit/rejoin: submit AI-resolved turn then `POST /forfeit`; Command Center **Rejoin**; overlay `is_forfeited` in `loadAsyncGame`.

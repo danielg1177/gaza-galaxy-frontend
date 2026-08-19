@@ -2,6 +2,15 @@
 
 Tasks currently being worked on.
 
+## Phase 74 — Feature: End game for all players
+
+**Status:** Complete (2026-08-19).
+
+- ~~**Task 259**~~ — Backend: `POST /games/{id}/end` for any human member; finish with no winner; notify others *(complete 2026-08-19)*
+- ~~**Task 260**~~ — Frontend: ⋮ **End Game** last (under Forfeit) with confirmation; **Exit Game** first in the menu *(complete 2026-08-19)*
+
+---
+
 ## Phase 73 — Bug Fix: Async knockout skips the eliminated human's farewell
 
 **Status:** Complete (2026-08-19).
@@ -636,6 +645,7 @@ Phase 46 (Task 213) did not stop stacked battle reports. The copies were `react-
 ---
 
 ## Changelog
+- 2026-08-19: Phase 74 complete (Tasks 259–260) — any player can fully end a game from ⋮ **End Game** (bottom, under Forfeit) after confirmation; **Exit Game** is the first menu item.
 - 2026-08-19: Phase 73 complete (Task 258) — async wrap-kill knockout skipped the eliminated human's farewell and looped the attacker; deferred redirect + wrap-back recovery; farewell queue on `GameState`; `acknowledgeKnockout` continues vs remaining AIs.
 - 2026-08-19: Phase 72 complete (Task 257) — commander forfeit/rejoin briefing overlay on each other human's next turn.
 - 2026-08-19: Phase 71 complete (Tasks 255–256) — async forfeit: AI plays the slot then submit-then-forfeit API; Command Center **Rejoin**; `loadAsyncGame` overlays `is_forfeited`.

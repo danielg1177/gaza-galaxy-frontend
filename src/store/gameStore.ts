@@ -1208,6 +1208,7 @@ export const useGameStore = create<GameStore>()(
           playMode: 'asyncMultiplayer',
           turnNumber: detail.turnNumber,
           roundNumber: detail.roundNumber,
+          status: 'finished',
         }),
         detail.players,
       );
