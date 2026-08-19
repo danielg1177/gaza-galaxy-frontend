@@ -170,7 +170,7 @@ The captured home planet keeps the attacker's garrison (`owner = fleet.ownerId`,
 When `resolveArrival` emits a combat event with `isHomePlanetConquest: true`, the **Battle Report** modal in `GameScreen` sorts those cards to the top. If the local human player was the winning attacker, the card shows a bold blue banner **"You took their home planet!"** (`#2255cc`) and a blue-tinted card (`#e8eeff` background, `#2255cc` left border) instead of the standard victory green.
 
 ### Knockout UI (Task 126)
-In pass-and-play, when a human player is eliminated during another player's turn cycle, `gameStore.endTurn` sets `currentPlayerId` to the eliminated player and `eliminatedPlayerPendingKnockout: true`. After the lock screen, the **Battle Report** modal auto-opens with a bold red/orange banner **"You have been knocked out of the game!"** (`#cc3300`) above the cards. No **End Turn** button is shown. Closing the modal calls `acknowledgeKnockout()`, which advances turn order to the next non-eliminated player.
+In pass-and-play, when a human player is eliminated during another player's turn cycle, `gameStore.endTurn` sets `currentPlayerId` to the eliminated player and `eliminatedPlayerPendingKnockout: true`, and saves the living player the engine already selected as `knockoutResumePlayerId`. After the lock screen, the **Battle Report** overlay auto-opens with a bold red/orange banner **"You have been knocked out of the game!"** (`#cc3300`) above the cards. Closing the report and tapping **End Turn** calls `acknowledgeKnockout()`, which restores `knockoutResumePlayerId` (it does not walk forward from the eliminated player). Pass-and-play knockout does not call the backend and does not set `isSubmittingTurn`.
 
 ## Planet Ownership
 
@@ -179,6 +179,8 @@ In pass-and-play, when a human player is eliminated during another player's turn
 - A fleet arriving at a 0-garrison owned planet wins immediately (loop does not run; attacker wins with full fleet)
 
 ## Changelog
+- 2026-08-19: Task 252 — pass-and-play knockout restores `knockoutResumePlayerId` after the farewell; local knockout does not set `isSubmittingTurn`.
+- 2026-08-19: Task 251 — Battle Report is an in-tree overlay derived from acknowledgement state (no RN `Modal`, no auto-open `useEffect`).
 - 2026-06-01: Task 198 — `multiway_combat` TurnEvent and `resolveMultiwayCombat` added to combatEngine.
 - 2026-06-01: Task 193 — `resolveArrival` takes `roundNumber`; `combat` and `fleet_arrived` events include optional `roundNumber`; Battle Report cards show **Round N** when set.
 - 2026-06-01: Task 192 — `troopAccumulator` reset to 0 on neutral capture and enemy-combat victory ownership change.

@@ -2,7 +2,17 @@
 
 Tasks currently being worked on.
 
-## Phase 19 — Bug Fix: End Turn and Exit Save Failure
+## Phase 69 — Bug Fix: Pass-and-Play Knockout Skips the First Player's Next Turn
+
+**Status:** Complete (2026-08-19).
+
+Offline pass-and-play: player 1 eliminates player 2; when the phone comes back, player 1's next turn is skipped. Knockout End Turn also shows a fake backend submit overlay.
+
+- ~~**Task 252**~~ — Frontend: Restore the engine's next living player after a pass-and-play knockout farewell; do not set `isSubmittingTurn` on the local path *(complete 2026-08-19)*
+
+---
+
+## Phase 68 — Bug Fix: Stacked Battle Report Overlays at Turn Start
 
 **Status:** Complete (2026-05-31).
 
@@ -579,8 +589,19 @@ Replace the current flat `#f5f0eb` background behind the planet map with a dark 
 
 ---
 
+## Phase 68 — Bug Fix: Stacked Battle Report Overlays at Turn Start
+
+**Status:** Complete (2026-08-19).
+
+Phase 46 (Task 213) did not stop stacked battle reports. The copies were `react-native-web` `Modal` body portals, not extra React state updates.
+
+- ~~**Task 251**~~ — Frontend: Replace battle-report `Modal` with an in-tree overlay; derive visibility from events + acknowledgement; copy archive arrays instead of `.push()`; stable turn key; single Game route identity *(complete 2026-08-19)*
+
+---
+
 ## Changelog
-- 2026-06-23: Phase 67 complete (Backend Task 15.1) — losing player who was eliminated on the opponent's turn now receives the final round's events (`latestEvents`) and sees the elimination battle when opening the finished game.
+- 2026-08-19: Phase 69 complete (Task 252) — pass-and-play knockout skipped the first player after a round-wrap elimination; `knockoutResumePlayerId` restore; local knockout no longer sets `isSubmittingTurn`.
+- 2026-08-19: Phase 68 complete (Task 251) — stacked battle report overlays: in-tree overlay, derived visibility, immutable archive merge, `getId` on Game route.
 - 2026-06-18: Phase 66 complete (Task 249) — seeded SVG starfield added to game map; background color changed to `#080820`.
 - 2026-06-18: Phase 66 added (Task 249) — space starfield background on the game map.
 - 2026-06-18: Phase 65 complete (Task 248) — chat poll blanks the message list every 5 seconds with a full-screen spinner; fixed with `initialLoadDoneRef` so spinner only shows on first open.

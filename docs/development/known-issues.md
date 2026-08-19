@@ -2,6 +2,26 @@
 
 ## Open Issues
 
+### ~~Pass-and-play: first player's turn skipped after eliminating another player~~ (2026-08-19, resolved 2026-08-19)
+
+**Symptom:** In a 5-player offline pass-and-play game, the first player eliminated the second player. When the phone came back around, player 1's next turn was skipped. The remaining players took that round, then player 1 could play again. Ending the knockout farewell also showed a "Submitting turn…" overlay / connection timeout even though the game is local-only. Reopening the app continued from the already-advanced state.
+
+**Root cause:** Home-planet kills from a fleet dispatched last round resolve on **round wrap**, which runs during the **last** player's `endTurn` — not during player 1's turn. `endTurn` then overwrites `currentPlayerId` from player 1 (the engine's next player) to the eliminated player so they can see a knockout farewell. `acknowledgeKnockout` called `advanceToNextNonEliminatedPlayer` from that eliminated slot, which walks P2 → P3 and skips P1. The same function always set `isSubmittingTurn: true`, which is the async submit overlay and a 45s "server took too long" alert.
+
+**Fix (Phase 69, Task 252):** Persist `knockoutResumePlayerId` on the local `GameRecord` (the living player `resolveTurn` already selected). After the farewell, restore that player instead of scanning forward from the eliminated one. Pass-and-play knockout never sets `isSubmittingTurn`. `loadGame` restores the knockout flag when the saved `currentPlayerId` is an eliminated human.
+
+---
+
+### ~~Stacked battle report overlays at turn start (pass-and-play and multiplayer)~~ (2026-08-19, resolved 2026-08-19)
+
+**Symptom:** At the start of a turn the battle report sometimes opened several times. More players usually meant more copies. Each copy had to be closed separately. Once it started for one player it continued for everyone for the rest of the game, and sometimes another layer appeared.
+
+**Root cause:** Phase 46 (Task 213) treated this as two `useEffect`s both calling `setShowBattleReportModal(true)`. That cannot stack windows — React state is a boolean. The stacked copies were `react-native-web` `Modal` portals: each `Modal` does `document.body.appendChild` during render, and `animationType="fade"` plus a flickering `visible` compound expression left leftover overlays on `document.body`. Component refs used as "open once" guards reset on remount. `battleReportTurnKey` used raw `turnNumber` (increments per AI as well as human). `endTurn` mutated other players' archive arrays in place with `.push()`.
+
+**Fix (Phase 68, Task 251):** Battle report is an in-tree overlay (same pattern as the lock screen), not a `Modal`. Visibility is derived from events + lock screen + acknowledgement key. Archive merges copy arrays instead of mutating. Turn key is `gameId-r{round}-t{turn}-{playerId}`. Game route uses `getId={() => 'game'}`.
+
+---
+
 ### ~~Exit Game mid-turn fails in complex / late-game sessions~~ (2026-06-08, resolved 2026-06-08)
 
 **Symptom:** In an async multiplayer game, tapping **⋮ → Exit Game** early in a session (few turns, few buildings) succeeds and the player is returned to the home screen. In a complex deep-game session (many planets captured, many buildings built, multiple fleets in transit) the same button shows "Failed to save — Could not save your progress. Please try again." and the player cannot exit mid-turn. Ending their turn and then navigating home still works.
@@ -309,6 +329,8 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-08-19: Resolved pass-and-play knockout skip of the first player after a round-wrap elimination, plus local knockout flipping the async submit overlay (Phase 69, Task 252).
+- 2026-08-19: Resolved stacked battle report overlays — in-tree overlay + derived visibility (Phase 68, Task 251). Phase 46's `lastOpenedTurnKeyRef` effect was not sufficient.
 - 2026-06-08: Resolved finished-game outcome bugs — `localPlayerId` on `GameRecord`; victory/defeat modals gated; `handleCloseBattleReport` navigates home; `getFinishedOutcome` covers eliminated players in active games; card styling replaced pills with background colors.
 - 2026-06-04: Resolved multiple battle report modals on turn start — unified single-fire effect with `lastOpenedTurnKeyRef` (Phase 46, Task 213).
 - 2026-06-04: Added open issue — multiple battle report modals on turn start (Phase 46, Task 213).

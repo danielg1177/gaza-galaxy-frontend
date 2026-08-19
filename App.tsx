@@ -39,7 +39,7 @@ export type RootStackParamList = {
   Register: undefined;
   Home: undefined;
   Friends: undefined;
-  Game: { isReadOnly?: boolean };
+  Game: { isReadOnly?: boolean } | undefined;
   Rules: undefined;
 };
 
@@ -89,7 +89,7 @@ export default function App() {
         return;
       }
       useGameStore.getState().loadAsyncGame(detail);
-      navigationRef.current?.navigate('Game', {});
+      navigationRef.current?.navigate('Game');
     } catch {
       // Silently ignore deep-link failures.
     }
@@ -228,7 +228,7 @@ export default function App() {
               <Stack.Navigator initialRouteName="Home" screenOptions={screenOptions}>
                 <Stack.Screen name="Home" component={HomeScreen} />
                 <Stack.Screen name="Friends" component={FriendsScreen} />
-                <Stack.Screen name="Game" component={GameScreen} />
+                <Stack.Screen name="Game" component={GameScreen} getId={() => 'game'} />
                 <Stack.Screen name="Rules" component={RulesScreen} />
               </Stack.Navigator>
             ) : (

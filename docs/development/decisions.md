@@ -4,6 +4,20 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
+## 2026-08-19 — Pass-and-play knockout restores the engine's next player
+**Decision:** When a knockout farewell temporarily overwrites `currentPlayerId`, store the living player `resolveTurn` already selected as `GameRecord.knockoutResumePlayerId` and restore it in `acknowledgeKnockout`. Do not compute the next player by walking forward from the eliminated slot. Pass-and-play knockout must not set `isSubmittingTurn`.
+**Rationale:** Round-wrap combat (the usual home-planet kill from a fleet sent last round) runs on the last player's `endTurn`. The engine's next player is the first living player in the new round. Walking forward from the eliminated player skips everyone whose turn order is before that slot. `isSubmittingTurn` is the async submit overlay; setting it locally produced a fake backend timeout while offline.
+**Alternatives considered:** Showing knockout only when the eliminated player's natural slot arrives (rejected for mid-cycle knockouts — they should see the farewell immediately); running `advanceToNextNonEliminatedPlayer` twice with wrap-aware skip (rejected — the engine already computed the correct resume player).
+
+---
+
+## 2026-08-19 — Battle report is an in-tree overlay, not a React Native Modal
+**Decision:** The turn-start Battle Report renders as an absolutely positioned `View` inside `GameScreen` (same pattern as the lock screen and submit overlay). Visibility is derived from store data (events, lock screen, acknowledgement key) rather than a `useEffect` that calls `setShowBattleReportModal(true)`.
+**Rationale:** `react-native-web` `Modal` creates a `document.body` portal during render. Fade animations and remounts left stacked overlays that had to be closed one by one and persisted for the rest of the session. An in-tree overlay cannot leak a second layer. Derived visibility cannot open twice for the same turn key.
+**Alternatives considered:** More `useRef` guards around the existing `Modal` (rejected — Phase 46 already did this and the stacking continued); `animationType="none"` only (rejected — does not fix leaked portals or remounts).
+
+---
+
 ## 2026-06-01 — Worklets/Reanimated Babel Plugin Disabled for Web-Only PWA
 **Decision:** Set `worklets: false, reanimated: false` in `babel-preset-expo` options and removed the manually-added `react-native-reanimated/plugin`. No worklet babel transformation runs.
 **Rationale:** `react-native-worklets` 0.5.1 throws `WorkletsError: createSerializableObject should never be called in JSWorklets` on web at module load time because the worklets babel plugin serializes `'worklet'`-annotated functions into descriptors that the runtime tries to register on a UI thread — a concept that doesn't exist on web. Since the app is a web-only PWA, the worklets system is entirely unnecessary: Reanimated's web polyfill runs all animations as CSS/JS on the single JS thread. `runOnUI`, `runOnJS`, and `'worklet'` directives become no-ops. `useSharedValue` / `useAnimatedStyle` continue working via Reanimated's web implementation.
@@ -142,6 +156,7 @@ This file records significant design decisions with rationale. Never delete entr
 ---
 
 ## Changelog
+- 2026-08-19: Battle report is an in-tree overlay with derived visibility (Phase 68, Task 251).
 - 2026-05-29: Added Phase 12 backend integration architectural decisions (client-trust model, pass-and-play local-only, mid-turn save format, username-only auth, game init via Node.js CLI).
 - 2026-05-29: Added AI memory storage and human/AI build-flow decisions.
 - 2026-05-29: Added zone-based starting planet placement decision (Task 127).

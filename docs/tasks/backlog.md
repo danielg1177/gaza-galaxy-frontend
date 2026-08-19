@@ -2487,6 +2487,7 @@ Persist game state to the Laravel backend so players on different devices share 
 ---
 
 ## Changelog
+- 2026-08-19: Phase 69 complete (Task 252) — pass-and-play knockout skipped the first player after a round-wrap elimination; `knockoutResumePlayerId` restore; local knockout does not set `isSubmittingTurn`.
 - 2026-06-01: Phase 38 expanded — Task 201 added (async multiplayer: restore `playerBattleArchiveByPlayerId` in `loadAsyncGame`); phase renamed to cover all modes.
 - 2026-06-01: Phase 40 complete (Tasks 198–200) — true multi-way combat for 3+ players at the same planet: melee algorithm and event type (`combatEngine`), engine wiring (`turnEngine`), and `MultiwayBattleReportCard` UI.
 - 2026-05-29: ~~Task 127 complete~~ — zone-based starting planet placement in `spawnPlacer`: edge bands for humans (min separation 30/40/50 by map size), interior+edge pool for AIs; `PlaceSpawnsOptions` API; `MapSize` on `GameConfig`; scored-random search removed; `npx tsc --noEmit` passes clean.

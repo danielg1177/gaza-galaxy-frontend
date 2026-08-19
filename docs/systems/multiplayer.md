@@ -184,10 +184,12 @@ Pass-and-play games remain entirely local:
 - Game cards in HomeScreen show local pass-and-play games separately from async games
 - Lock screen after End Turn displays `roundNumber` (shared round) for all players — same as the in-game HUD
 - **Auto-handoff:** When a player ends their turn, the lock screen automatically dismisses after 1.5 seconds, immediately showing the next human player's turn without requiring manual interaction. The "Start Turn" button remains visible for manual override if desired.
+- **Knockout farewell:** Home-planet kills often resolve on round wrap (the last player's End Turn). The eliminated player sees a knockout report, then play returns to the living player the engine already selected — including the first player of the new round. Knockout End Turn is local-only; it does not submit to the backend.
 
 ---
 
 ## Changelog
+- 2026-08-19: Task 252 — pass-and-play knockout restores the engine's next living player after the farewell; local knockout does not call the backend.
 - 2026-06-08: Fixed win/loss outcome correctness and finished-game UI.
   - `GameRecord` now stores `localPlayerId` (e.g. `"player-1"`) — the authenticated user's player-slot ID in an async game. `loadAsyncGame` resolves it via `resolveAsyncLocalPlayerId`, which matches `detail.players[i].userId` against the current user's ID from the auth store. This replaces the broken `getLocalHumanPlayerId` fallback which always returned the winner's player-ID for finished games (causing every player to see the victory modal).
   - `GameScreen` now prefers `activeRecord.localPlayerId` over `getLocalHumanPlayerId(gameState)` when computing `localHumanPlayerId`.

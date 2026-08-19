@@ -1,5 +1,17 @@
 # Completed Tasks
 
+## Phase 69 — Pass-and-play knockout skipped the first player's next turn
+**Completed:** 2026-08-19
+**Files modified:** `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `docs/development/known-issues.md`, `docs/development/decisions.md`, `docs/systems/turn-engine.md`, `docs/systems/combat.md`, `docs/systems/multiplayer.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`
+**Notes:** Round-wrap home-planet kills run on the last player's `endTurn`. The store hijacked `currentPlayerId` for the knockout farewell, then `acknowledgeKnockout` walked forward from the eliminated player (P2 → P3), skipping P1. Fix stores `knockoutResumePlayerId` on the local `GameRecord` and restores it. Local knockout no longer sets `isSubmittingTurn` (that was the "Submitting turn…" overlay and 45s server-timeout alert while offline). `loadGame` restores the knockout flag when the saved current player is an eliminated human.
+
+---
+## Phase 68 — Stacked battle report overlays at turn start
+**Completed:** 2026-08-19
+**Files modified:** `src/screens/GameScreen.tsx`, `src/store/gameStore.ts`, `src/screens/HomeScreen.tsx`, `App.tsx`, `docs/development/known-issues.md`, `docs/development/decisions.md`, `docs/systems/combat.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`
+**Notes:** Battle report is no longer a RN `Modal` (web portals were stacking). Visibility is derived from combat events, lock screen, submit flag, and `acknowledgedBattleReportTurnKeyByGameId`. `endTurn` copies archive/report arrays instead of mutating with `.push()`. `battleReportTurnKey` is `gameId-r{round}-t{turn}-{playerId}`. Game screen `getId={() => 'game'}`. ⋮ Battles still re-opens via `battleReportForcedOpen`.
+
+---
 ## Chat modal viewport zoom lock (header + input chrome)
 **Completed:** 2026-06-07
 **Files modified:** `src/components/ConversationModal.tsx`, `src/utils/viewportZoom.ts` (new), `docs/development/current-state.md`, `docs/tasks/completed.md`

@@ -766,7 +766,7 @@ export default function HomeScreen() {
         planetCount,
         playMode,
       });
-      navigation.navigate('Game', {});
+      navigation.navigate('Game');
       return;
     }
 
@@ -782,7 +782,7 @@ export default function HomeScreen() {
         planetCount,
         playMode: 'passAndPlay',
       });
-      navigation.navigate('Game', {});
+      navigation.navigate('Game');
       return;
     }
 
@@ -823,7 +823,7 @@ export default function HomeScreen() {
           latestEvents: [],
         });
         setIsLaunching(false);
-        navigation.navigate('Game', {});
+        navigation.navigate('Game');
       } catch {
         setIsLaunching(false);
         showAlert('Error', 'Could not create game. Check your connection and try again.');
@@ -833,7 +833,7 @@ export default function HomeScreen() {
 
   const handleResume = (id: string) => {
     loadGame(id);
-    navigation.navigate('Game', {});
+    navigation.navigate('Game');
   };
 
   const handleDeleteLocalGame = (record: GameRecord) => {
@@ -878,7 +878,7 @@ export default function HomeScreen() {
         }
         loadAsyncGame(detail);
         setLoadingGameId(null);
-        navigation.navigate('Game', {});
+        navigation.navigate('Game');
       } catch {
         setLoadingGameId(null);
         showAlert('Load Failed', 'Could not load game. Check your connection.');

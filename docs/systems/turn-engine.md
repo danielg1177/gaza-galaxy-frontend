@@ -70,7 +70,7 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
 - Players are ordered by their index in `state.players`.
 - After each resolved turn, the engine scans forward from the current player's index (wrapping) and selects the first player with `isEliminated === false`.
 - Eliminated players are skipped for normal gameplay turns.
-- **Pass-and-play knockout (Task 126):** when a human is eliminated mid-cycle, `gameStore.endTurn` temporarily sets `currentPlayerId` to that player so they see the knockout battle report; `acknowledgeKnockout()` then calls `advanceToNextNonEliminatedPlayer` and runs AI turns until the next human.
+- **Pass-and-play knockout (Task 126, Task 252):** when a human is eliminated mid-cycle, `gameStore.endTurn` temporarily sets `currentPlayerId` to that player so they see the knockout battle report, and stores the engine's next living player as `knockoutResumePlayerId`. `acknowledgeKnockout()` restores that player (then runs AI turns until the next human). Walking forward from the eliminated slot is wrong after round-wrap combat: the kill often resolves on the last player's `endTurn`, when the engine's next player is already the first living player of the new round.
 
 ## Victory
 When exactly one player has `isEliminated !== true`, `status` becomes `'finished'` and `winnerId` is set. `GameScreen` shows a **Victory** modal for the winning local human ("You are the last commander standing!") or a **Game Over** modal naming the winner otherwise; both dismiss to Home via `resetGame`.
@@ -95,6 +95,7 @@ The Zustand store (`src/store/gameStore.ts`) keeps human fleet dispatches in **`
 `loadGame` and `loadAsyncGame` call **`drainStaleFleets`**, which removes any fleet with `turnsRemaining <= 0` from `GameState.fleets` before the match resumes. Under normal play, round-wrap resolution leaves only `turnsRemaining > 0` fleets in state; persisted saves from before that invariant (or corrupted state) could otherwise re-enter the early-arrivals block at the next turn start and produce a phantom second combat on the same planet.
 
 ## Changelog
+- 2026-08-19: **Task 252** — pass-and-play knockout stores `knockoutResumePlayerId` (the living player `resolveTurn` already selected) and restores it in `acknowledgeKnockout`; local knockout no longer sets `isSubmittingTurn`.
 - 2026-06-01: **Task 211** — production pre-runs before step 2 early-arrivals combat on round-wrap turns (`willRoundWrap` pre-computed from `state.players`; `productionAlreadyRan` guard prevents double-run in step 8).
 - 2026-06-01: **Task 199** — multi-way combat wired into both arrival loops; `groupArrivalsByDestination`, `countTotalCombatants`, `buildCombatantList` helpers added to turnEngine.
 - 2026-06-01: **Task 193** — `roundNumber` on `combat` / `fleet_arrived` events via `resolveArrival(..., state.roundNumber, ...)`; `drainStaleFleets` on `loadGame` / `loadAsyncGame`.

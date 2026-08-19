@@ -1,7 +1,9 @@
 # Current State
 
 ## Last Updated
-2026-06-07 (Chat modal viewport zoom lock)
+2026-08-19 (Phase 69 — pass-and-play knockout skipped the first player's next turn)
+
+## Overall Status
 
 ## Overall Status
 **UI/UX complete through Task 127. Phase 12 (Auth Layer) complete — Tasks 128–132 done. Phase 13 (Friends System) complete — Tasks 133–136. Phase 14 (Async Game Setup) complete — Tasks 137–142. Phase 15 (In-Game Async Integration) complete — Tasks 143–146. Phase 16 (Push Notifications) complete — Tasks 147–148. Phase 37 (Two fights same planet) complete — Task 193. Backend not yet built.**
@@ -222,6 +224,8 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-08-19: Phase 69 (Task 252) — pass-and-play knockout after a round-wrap elimination no longer skips the first living player. `GameRecord.knockoutResumePlayerId` stores the engine's next player while the farewell hijacks `currentPlayerId`; `acknowledgeKnockout` restores it instead of walking forward from the eliminated slot. Local knockout no longer sets `isSubmittingTurn` (that overlay + 45s timeout was a fake backend submit while offline).
+- 2026-08-19: Phase 68 (Task 251) — stacked battle report overlays fixed: in-tree overlay (not RN `Modal`), derived visibility from acknowledgement key, immutable archive merge, Game route `getId`.
 - 2026-06-08: Chat input focus zoom fix — `preventInputZoomOnFocus` / `resetScrollOnBlur` in `viewportZoom.ts`; TextInput `onFocus`/`onBlur` (web only) toggle viewport briefly to force browser to recompute scale at 1× and scroll back to origin; prevents iOS Safari visual-viewport zoom on input tap and stuck-zoomed state after dismiss.
 - 2026-06-07: Chat modal viewport zoom lock — `ConversationModal` calls `lockViewportZoom()` while open (web: `maximum-scale=1`, resets scroll) so header, input bar, and send button render at 1×; `SafeAreaView` + dynamic bottom inset; 16px input/message text; full-screen presentation.
 - 2026-06-07: In-game chat resets map zoom — opening `ConversationModal` from GameScreen snaps map to `DEFAULT_MAP_SCALE` (fully zoomed out, centered); returning from chat shows the wider view instead of home-planet snap zoom; chat `TextInput` font size 16px to avoid mobile-browser focus zoom.

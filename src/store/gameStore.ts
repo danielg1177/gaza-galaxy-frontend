@@ -93,6 +93,15 @@ export interface GameRecord {
    * the game is finished.
    */
   localPlayerId?: string;
+  /**
+   * Pass-and-play: the living player who should take the next real turn after a
+   * knockout farewell. `resolveTurn` already advanced to this player; the store
+   * temporarily overwrites `currentPlayerId` so the eliminated player can see
+   * their battle report. Must be restored on `acknowledgeKnockout` — walking
+   * forward from the eliminated player skips anyone whose slot is before theirs
+   * (the first player, after a round-wrap elimination).
+   */
+  knockoutResumePlayerId?: string;
 }
 
 export interface PendingFleet {
@@ -249,7 +258,13 @@ function buildPlayers(
   });
 }
 
-/** Stable key for battle-report auto-open / dismiss deduplication for one human turn. */
+/**
+ * Stable key for one human sitting (their turn, a knockout farewell, or a
+ * finished-game review). Uses roundNumber + turnNumber so it stays unique for a
+ * farewell in the same round, but does not change while that human is acting.
+ * skipActivePlayerCheck is only for finished-game viewing, when currentPlayerId
+ * may be the winner rather than the local viewer.
+ */
 export function battleReportTurnKey(
   gameId: string | null,
   state: GameState | null | undefined,
@@ -265,7 +280,7 @@ export function battleReportTurnKey(
   ) {
     return null;
   }
-  return `${gameId}-${state.turnNumber}-${localHumanPlayerId}`;
+  return `${gameId}-r${state.roundNumber}-t${state.turnNumber}-${localHumanPlayerId}`;
 }
 
 /** Fog/UI ownership: current human on their turn, otherwise the first human (e.g. during AI turns). */
@@ -394,6 +409,67 @@ function findFarewellInPath(
     if (farewellIds.includes(candidate.id)) return candidate.id;
   }
   return null;
+}
+
+/**
+ * Temporarily point `currentPlayerId` at a knockout farewell without losing the
+ * living player `resolveTurn` already selected.
+ */
+function applyPassAndPlayKnockoutHandoff(
+  engineState: GameState,
+  outgoingPlayerId: string,
+  pendingFarewellIds: string[],
+  immediateKnockouts: string[],
+): {
+  state: GameState;
+  pendingKnockout: boolean;
+  pendingFarewellIds: string[];
+  knockoutResumePlayerId?: string;
+} {
+  if (engineState.playMode !== 'passAndPlay' || engineState.status !== 'active') {
+    return { state: engineState, pendingKnockout: false, pendingFarewellIds };
+  }
+  const resumePlayerId = engineState.currentPlayerId;
+  const farewellInPath = findFarewellInPath(
+    outgoingPlayerId,
+    resumePlayerId,
+    engineState.players,
+    pendingFarewellIds,
+  );
+  if (farewellInPath !== null) {
+    return {
+      state: { ...engineState, currentPlayerId: farewellInPath },
+      pendingKnockout: true,
+      pendingFarewellIds: pendingFarewellIds.filter((id) => id !== farewellInPath),
+      knockoutResumePlayerId: resumePlayerId,
+    };
+  }
+  if (immediateKnockouts.length > 0) {
+    return {
+      state: { ...engineState, currentPlayerId: immediateKnockouts[0] },
+      pendingKnockout: true,
+      pendingFarewellIds,
+      knockoutResumePlayerId: resumePlayerId,
+    };
+  }
+  return { state: engineState, pendingKnockout: false, pendingFarewellIds };
+}
+
+function stateWithKnockoutResume(
+  state: GameState,
+  resumePlayerId: string | undefined,
+): GameState {
+  if (resumePlayerId !== undefined) {
+    const resume = state.players.find((player) => player.id === resumePlayerId);
+    if (resume !== undefined && !resume.isEliminated) {
+      return { ...state, currentPlayerId: resumePlayerId };
+    }
+    return advanceToNextNonEliminatedPlayer({
+      ...state,
+      currentPlayerId: resume?.id ?? state.currentPlayerId,
+    });
+  }
+  return advanceToNextNonEliminatedPlayer(state);
 }
 
 /**
@@ -579,12 +655,22 @@ export const useGameStore = create<GameStore>()(
       restoredArchive = archive;
       restoredTurnReport = turnReport;
     }
+    const currentPlayer = record?.state.players.find(
+      (player) => player.id === record.state.currentPlayerId,
+    );
+    const restoreKnockout =
+      record !== undefined &&
+      record.state.status === 'active' &&
+      currentPlayer !== undefined &&
+      !currentPlayer.isAI &&
+      currentPlayer.isEliminated === true;
     set({
       activeGameId: id,
       selectedPlanetId: null,
       pendingFleet: null,
       queuedOrders: [],
-      showingLockScreen: hasPending && !record?.pendingTurnReportAcknowledged,
+      showingLockScreen:
+        (hasPending && !record?.pendingTurnReportAcknowledged) || restoreKnockout,
       turnReport: pending ?? [],
       games: get().games.map((g) => {
         if (g.id !== id) return g;
@@ -592,16 +678,15 @@ export const useGameStore = create<GameStore>()(
       }),
       playerBattleArchiveByPlayerId: restoredArchive,
       playerTurnReportByPlayerId: restoredTurnReport,
-      eliminatedPlayerPendingKnockout: false,
+      eliminatedPlayerPendingKnockout: restoreKnockout,
       pendingFarewellPlayerIds: [],
       isSubmittingTurn: false,
       shouldReturnHome: false,
       // Always clear finished-game flag and AI observer state when loading a
       // local game so stale flags from a previous async finished-game session
-      // never bleed in. Without this, isViewingFinishedGame = true causes
-      // battleReportTurnKey to use skipActivePlayerCheck = true, which gives
-      // every AI observer turn a unique turnKey and fires the auto-open once
-      // per AI turn instead of once per human turn.
+      // never bleed in. skipActivePlayerCheck is only valid while viewing a
+      // finished game; if left true during live play, battleReportTurnKey would
+      // be non-null during AI turns.
       isViewingFinishedGame: false,
       showingAiObserver: false,
       pendingAiTurnInput: null,
@@ -1153,27 +1238,24 @@ export const useGameStore = create<GameStore>()(
     // they end their own turn, before any other player goes.
     const deferredKnockouts = knockoutHumanIds.filter((id) => id === outgoingPlayerId);
     const immediateKnockouts = knockoutHumanIds.filter((id) => id !== outgoingPlayerId);
-    let newPendingFarewellIds = [...get().pendingFarewellPlayerIds, ...deferredKnockouts];
-    let finalState = nextState;
-    let pendingKnockout = false;
-    if (nextState.playMode === 'passAndPlay' && nextState.status === 'active') {
-      // Check if any deferred farewell player's position falls between the outgoing
-      // player and the next active player in the turn order
-      const farewellInPath = findFarewellInPath(
-        outgoingPlayerId,
-        nextState.currentPlayerId,
-        nextState.players,
-        newPendingFarewellIds,
-      );
-      if (farewellInPath !== null) {
-        finalState = { ...nextState, currentPlayerId: farewellInPath };
-        pendingKnockout = true;
-        newPendingFarewellIds = newPendingFarewellIds.filter((id) => id !== farewellInPath);
-      } else if (immediateKnockouts.length > 0) {
-        finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
-        pendingKnockout = true;
-      }
-    } else if (immediateKnockouts.length > 0 && nextState.status === 'active') {
+    const pendingFarewellWithDeferred = [
+      ...get().pendingFarewellPlayerIds,
+      ...deferredKnockouts,
+    ];
+    const passAndPlayHandoff = applyPassAndPlayKnockoutHandoff(
+      nextState,
+      outgoingPlayerId,
+      pendingFarewellWithDeferred,
+      immediateKnockouts,
+    );
+    let newPendingFarewellIds = passAndPlayHandoff.pendingFarewellIds;
+    let finalState = passAndPlayHandoff.state;
+    let pendingKnockout = passAndPlayHandoff.pendingKnockout;
+    if (
+      !pendingKnockout &&
+      immediateKnockouts.length > 0 &&
+      nextState.status === 'active'
+    ) {
       // For async multiplayer (and any other non-passAndPlay mode): redirect the
       // submitted state to the first eliminated player so the backend sets
       // current_user_id to them and they receive a normal "your turn" notification.
@@ -1193,19 +1275,13 @@ export const useGameStore = create<GameStore>()(
       buildPlayerReports(events, finalState.players, finalState.map.planets);
     for (const [playerId, playerEvents] of Object.entries(builtArchive)) {
       const existing = newArchive[playerId];
-      if (existing === undefined) {
-        newArchive[playerId] = playerEvents;
-      } else {
-        existing.push(...playerEvents);
-      }
+      newArchive[playerId] =
+        existing === undefined ? playerEvents : [...existing, ...playerEvents];
     }
     for (const [playerId, playerEvents] of Object.entries(builtTurnReport)) {
       const existing = newTurnReport[playerId];
-      if (existing === undefined) {
-        newTurnReport[playerId] = playerEvents;
-      } else {
-        existing.push(...playerEvents);
-      }
+      newTurnReport[playerId] =
+        existing === undefined ? playerEvents : [...existing, ...playerEvents];
     }
     if (isAsync) {
       delete newArchive[humanPlayer.id];
@@ -1219,6 +1295,9 @@ export const useGameStore = create<GameStore>()(
               state: finalState,
               pendingTurnReport: events,
               pendingTurnReportAcknowledged: false,
+              knockoutResumePlayerId: pendingKnockout
+                ? passAndPlayHandoff.knockoutResumePlayerId
+                : undefined,
             }
           : g,
       ),
@@ -1360,36 +1439,29 @@ export const useGameStore = create<GameStore>()(
     const immediateKnockouts = knockoutHumanIds.filter(
       (id) => id !== outgoingPlayerId,
     );
-    let newPendingFarewellIds = [
-      ...get().pendingFarewellPlayerIds,
-      ...deferredKnockouts,
-    ];
-    let finalState = nextState;
-    let pendingKnockout = false;
-    if (nextState.playMode === 'passAndPlay' && nextState.status === 'active') {
-      const farewellInPath = findFarewellInPath(
-        outgoingPlayerId,
-        nextState.currentPlayerId,
-        nextState.players,
-        newPendingFarewellIds,
-      );
-      if (farewellInPath !== null) {
-        finalState = { ...nextState, currentPlayerId: farewellInPath };
-        pendingKnockout = true;
-        newPendingFarewellIds = newPendingFarewellIds.filter(
-          (id) => id !== farewellInPath,
-        );
-      } else if (immediateKnockouts.length > 0) {
-        finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
-        pendingKnockout = true;
-      }
-    }
+    const passAndPlayHandoff = applyPassAndPlayKnockoutHandoff(
+      nextState,
+      outgoingPlayerId,
+      [...get().pendingFarewellPlayerIds, ...deferredKnockouts],
+      immediateKnockouts,
+    );
+    const finalState = passAndPlayHandoff.state;
+    const pendingKnockout = passAndPlayHandoff.pendingKnockout;
+    const newPendingFarewellIds = passAndPlayHandoff.pendingFarewellIds;
 
     const showLock =
       finalState.playMode === 'passAndPlay' && finalState.status === 'active';
     set({
       games: get().games.map((g) =>
-        g.id === record.id ? { ...g, state: finalState } : g,
+        g.id === record.id
+          ? {
+              ...g,
+              state: finalState,
+              knockoutResumePlayerId: pendingKnockout
+                ? passAndPlayHandoff.knockoutResumePlayerId
+                : undefined,
+            }
+          : g,
       ),
       showingLockScreen: showLock,
       eliminatedPlayerPendingKnockout: pendingKnockout,
@@ -1403,9 +1475,15 @@ export const useGameStore = create<GameStore>()(
       return;
     }
     // Clear synchronously to prevent double-invocation from concurrent UI events.
-    set({ eliminatedPlayerPendingKnockout: false, isSubmittingTurn: true });
+    // Pass-and-play must not set isSubmittingTurn — that flag drives the async
+    // "Submitting turn…" overlay and a 45s server-timeout alert.
+    set({
+      eliminatedPlayerPendingKnockout: false,
+      ...(record.asyncGameId != null ? { isSubmittingTurn: true } : {}),
+    });
 
     const farewellPlayerId = record.state.currentPlayerId;
+    const knockoutResumePlayerId = record.knockoutResumePlayerId;
     const stateAfterForfeit = {
       ...record.state,
       map: forfeitEliminatedPlayerPlanets(record.state.map, farewellPlayerId),
@@ -1474,35 +1552,38 @@ export const useGameStore = create<GameStore>()(
       })();
       return;
     }
-    let nextState = advanceToNextNonEliminatedPlayer(stateAfterForfeit);
+    const resumedState = stateWithKnockoutResume(
+      stateAfterForfeit,
+      knockoutResumePlayerId,
+    );
     const { state: afterAi } = runAiTurnsUntilHuman({
-      ...nextState,
+      ...resumedState,
       events: [],
     });
-    nextState = afterAi;
-    let newPendingFarewellIds = [...get().pendingFarewellPlayerIds];
-    const farewellInPath = findFarewellInPath(
+    const remainingFarewells = [...get().pendingFarewellPlayerIds];
+    const passAndPlayHandoff = applyPassAndPlayKnockoutHandoff(
+      afterAi,
       farewellPlayerId,
-      nextState.currentPlayerId,
-      nextState.players,
-      newPendingFarewellIds,
+      remainingFarewells,
+      [],
     );
-    let pendingKnockout = false;
-    if (
-      farewellInPath !== null &&
-      nextState.playMode === 'passAndPlay' &&
-      nextState.status === 'active'
-    ) {
-      nextState = { ...nextState, currentPlayerId: farewellInPath };
-      pendingKnockout = true;
-      newPendingFarewellIds = newPendingFarewellIds.filter((id) => id !== farewellInPath);
-    }
+    const nextState = passAndPlayHandoff.state;
+    const pendingKnockout = passAndPlayHandoff.pendingKnockout;
+    const newPendingFarewellIds = passAndPlayHandoff.pendingFarewellIds;
     const showLock =
       nextState.playMode === 'passAndPlay' && nextState.status === 'active';
 
     set({
       games: get().games.map((g) =>
-        g.id === record.id ? { ...g, state: nextState } : g,
+        g.id === record.id
+          ? {
+              ...g,
+              state: nextState,
+              knockoutResumePlayerId: pendingKnockout
+                ? (passAndPlayHandoff.knockoutResumePlayerId ?? knockoutResumePlayerId)
+                : undefined,
+            }
+          : g,
       ),
       eliminatedPlayerPendingKnockout: pendingKnockout,
       pendingFarewellPlayerIds: newPendingFarewellIds,

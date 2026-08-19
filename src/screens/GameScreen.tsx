@@ -1842,7 +1842,7 @@ export default function GameScreen() {
   const [showResearchModal, setShowResearchModal] = useState(false);
   const [showQueuedModal, setShowQueuedModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
-  const [showBattleReportModal, setShowBattleReportModal] = useState(false);
+  const [battleReportForcedOpen, setBattleReportForcedOpen] = useState(false);
   const [planetBattleReportName, setPlanetBattleReportName] = useState<string | null>(null);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showStrategicMapModal, setShowStrategicMapModal] = useState(false);
@@ -1865,15 +1865,7 @@ export default function GameScreen() {
   const initialSnapGameIdRef = useRef<string | null>(null);
   const prevShowingLockScreenRef = useRef(showingLockScreen);
   const pendingGameOverAlertRef = useRef(false);
-  const lastOpenedTurnKeyRef = useRef('');
-  const showBattleReportModalRef = useRef(false);
   const modalOpenedAtRef = useRef<number>(0);
-  // Track the activeGameId we last reset lastOpenedTurnKeyRef for, so we only
-  // reset the ref when the game actually changes (not on every events update).
-  const lastResetGameIdRef = useRef<string | null>(null);
-  // Session-level set: once a turnKey has been auto-shown this mount, never
-  // auto-show it again regardless of other guard state. Cleared on unmount.
-  const sessionShownTurnKeysRef = useRef<Set<string>>(new Set());
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
 
@@ -1921,7 +1913,7 @@ export default function GameScreen() {
   }, [shouldReturnHome, clearReturnHome, navigation]);
 
   useEffect(() => {
-    if (!isSubmittingTurn) {
+    if (!isSubmittingTurn || !isAsyncGame) {
       return;
     }
     const timeoutId = setTimeout(() => {
@@ -1934,7 +1926,7 @@ export default function GameScreen() {
       }
     }, 45_000);
     return () => clearTimeout(timeoutId);
-  }, [isSubmittingTurn]);
+  }, [isSubmittingTurn, isAsyncGame]);
 
   const localHumanPlayerId = useMemo(() => {
     if (gameState === null) return undefined;
@@ -2066,71 +2058,29 @@ export default function GameScreen() {
     reportBuiltEvents,
   ]);
 
-  showBattleReportModalRef.current = showBattleReportModal;
-
-  useEffect(() => {
-    if (humanCombatEvents.length === 0) {
-      setShowBattleReportModal(false);
-      // Only clear the opened-key ref when the game itself changes, not merely
-      // when events temporarily become empty (e.g. between store updates). This
-      // prevents the auto-open from re-firing for the same turn after the ref
-      // is spuriously cleared.
-      if (lastResetGameIdRef.current !== activeGameId) {
-        lastOpenedTurnKeyRef.current = '';
-        lastResetGameIdRef.current = activeGameId;
-      }
-    }
-  }, [humanCombatEvents, activeGameId]);
-
-  useEffect(() => {
-    const turnKey = battleReportTurnKey(activeGameId, gameState, localHumanPlayerId, {
-      skipActivePlayerCheck: isViewingFinishedGame,
-    });
-    if (turnKey === null) {
-      return;
-    }
-    const guardAck = acknowledgedBattleReportTurnKeyByGameId[activeGameId ?? ''];
-    const guardSession = sessionShownTurnKeysRef.current.has(turnKey);
-    const guardRef = turnKey === lastOpenedTurnKeyRef.current;
-    const guardModal = showBattleReportModalRef.current;
-    const lockScreenBlocksAutoOpen =
-      showingLockScreen && !(isAsyncGame && eliminatedPlayerPendingKnockout);
-    // eslint-disable-next-line no-console
-    console.log('[BattleReport] auto-open check', {
-      turnKey,
-      guardModal,
-      guardRef,
-      guardAck,
-      guardSession,
-      eventsLen: humanCombatEvents.length,
-      showingLockScreen,
-      lockScreenBlocksAutoOpen,
-    });
-    if (
-      humanCombatEvents.length > 0 &&
-      !lockScreenBlocksAutoOpen &&
-      !guardModal &&
-      !guardRef &&
-      guardAck !== turnKey &&
-      !guardSession
-    ) {
-      // eslint-disable-next-line no-console
-      console.log('[BattleReport] OPENING modal for', turnKey);
-      setShowBattleReportModal(true);
-      lastOpenedTurnKeyRef.current = turnKey;
-      sessionShownTurnKeysRef.current.add(turnKey);
-    }
-  }, [
+  const currentBattleReportTurnKey = battleReportTurnKey(
     activeGameId,
-    acknowledgedBattleReportTurnKeyByGameId,
-    eliminatedPlayerPendingKnockout,
     gameState,
-    humanCombatEvents.length,
-    isAsyncGame,
-    isViewingFinishedGame,
     localHumanPlayerId,
-    showingLockScreen,
-  ]);
+    { skipActivePlayerCheck: isViewingFinishedGame },
+  );
+  const lockScreenBlocksBattleReport =
+    showingLockScreen && !(isAsyncGame && eliminatedPlayerPendingKnockout);
+  const shouldAutoShowBattleReport =
+    sortedBattleReportEvents.length > 0 &&
+    !isSubmittingTurn &&
+    !lockScreenBlocksBattleReport &&
+    currentBattleReportTurnKey !== null &&
+    acknowledgedBattleReportTurnKeyByGameId[activeGameId ?? ''] !==
+      currentBattleReportTurnKey;
+  const showBattleReportOverlay =
+    !isSubmittingTurn &&
+    sortedBattleReportEvents.length > 0 &&
+    (shouldAutoShowBattleReport || battleReportForcedOpen);
+
+  useEffect(() => {
+    setBattleReportForcedOpen(false);
+  }, [currentBattleReportTurnKey]);
 
   useEffect(() => {
     if (
@@ -3538,13 +3488,11 @@ export default function GameScreen() {
   };
 
   const handleCloseBattleReport = useCallback(() => {
-    // eslint-disable-next-line no-console
-    console.log('[BattleReport] CLOSING modal, isViewingFinishedGame=', isViewingFinishedGame);
+    setBattleReportForcedOpen(false);
     if (isViewingFinishedGame) {
       const asyncGameId = useGameStore.getState().getActiveRecord()?.asyncGameId;
       if (asyncGameId != null) {
         markFinalBattleViewed(String(asyncGameId));
-        setShowBattleReportModal(false);
         acknowledgeBattleReport();
         // Navigate home after viewing the final battle report. Show a brief
         // "Game Over" notice so the player knows why they're being sent back.
@@ -3554,7 +3502,6 @@ export default function GameScreen() {
         return;
       }
     }
-    setShowBattleReportModal(false);
     acknowledgeBattleReport();
   }, [
     isViewingFinishedGame,
@@ -3703,7 +3650,7 @@ export default function GameScreen() {
     players.find((p) => p.id === currentPlayerId)?.isEliminated === true;
   const showMapKnockoutOverlay =
     playerIsKnockedOut &&
-    !showBattleReportModal &&
+    !showBattleReportOverlay &&
     pendingFleet === null &&
     selectedPlanet === undefined;
   const pendingAiPlayer = players.find((p) => p.id === pendingAiPlayerId) ?? null;
@@ -3869,7 +3816,7 @@ export default function GameScreen() {
                     style={styles.headerMenuRow}
                     onPress={() => {
                       setShowHeaderMenu(false);
-                      setShowBattleReportModal(true);
+                      setBattleReportForcedOpen(true);
                     }}
                   >
                     <Text style={styles.headerMenuRowText}>Battles</Text>
@@ -4645,99 +4592,6 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={
-          showBattleReportModal &&
-          !isSubmittingTurn &&
-          sortedBattleReportEvents.length > 0
-        }
-        transparent
-        animationType="fade"
-        onRequestClose={handleCloseBattleReport}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Battle Report</Text>
-            {isKnockoutTurn && (
-              <Text style={styles.knockoutBanner}>You have been knocked out of the game!</Text>
-            )}
-            {localHumanPlayerId !== undefined && sortedBattleReportEvents.length > 0 && (
-              <BattleReportSummaryBar
-                wins={battleReportOutcomeCounts.wins}
-                losses={battleReportOutcomeCounts.losses}
-              />
-            )}
-            <BattleReportScrollArea visible={showBattleReportModal}>
-              <View style={{ position: 'relative' }}>
-                {playerIsKnockedOut && (
-                  <View
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      pointerEvents: 'none',
-                      zIndex: 0,
-                    }}
-                    pointerEvents="none"
-                  >
-                    <Text style={{ fontSize: 220, opacity: 0.2, lineHeight: 260 }}>💀</Text>
-                  </View>
-                )}
-                {sortedBattleReportEvents.map((event, index) => {
-                  const planetClass =
-                    gameState?.map.planets.find((p) => p.name === event.planetName)?.class ?? '';
-                  const homePlanetCaptureDanger = isHumanHomePlanetCapturedByEnemy(
-                    event,
-                    localHumanPlayerId,
-                    players,
-                  );
-
-                  if (event.kind === 'combat') {
-                    return (
-                      <BattleReportCard
-                        key={`combat-${event.planetName}-${index}`}
-                        event={event}
-                        localHumanPlayerId={localHumanPlayerId}
-                        players={players}
-                        turnEvents={turnReport}
-                        homePlanetCaptureDanger={homePlanetCaptureDanger}
-                        homePlanetConquestHighlight={isHumanHomePlanetConquestVictory(
-                          event,
-                          localHumanPlayerId,
-                          players,
-                        )}
-                        planetClass={planetClass}
-                      />
-                    );
-                  }
-
-                  return (
-                    <MultiwayBattleReportCard
-                      key={`multiway-${event.planetName}-${index}`}
-                      event={event}
-                      localHumanPlayerId={localHumanPlayerId}
-                      players={players}
-                      homePlanetCaptureDanger={homePlanetCaptureDanger}
-                      planetClass={planetClass}
-                    />
-                  );
-                })}
-              </View>
-            </BattleReportScrollArea>
-            <Pressable
-              style={[styles.primaryButton, styles.battleReportCloseButton]}
-              onPress={handleCloseBattleReport}
-            >
-              <Text style={styles.primaryButtonText}>Close</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
         visible={status === 'finished' && humanWon && !showingLockScreen && !isViewingFinishedGame}
         transparent
         animationType="fade"
@@ -4895,6 +4749,90 @@ export default function GameScreen() {
               {isViewingFinishedGame ? 'View Final Battle' : 'Start Turn'}
             </Text>
           </Pressable>
+        </View>
+      )}
+
+      {showBattleReportOverlay && (
+        <View style={styles.battleReportOverlay} pointerEvents="auto">
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Battle Report</Text>
+            {isKnockoutTurn && (
+              <Text style={styles.knockoutBanner}>You have been knocked out of the game!</Text>
+            )}
+            {localHumanPlayerId !== undefined && sortedBattleReportEvents.length > 0 && (
+              <BattleReportSummaryBar
+                wins={battleReportOutcomeCounts.wins}
+                losses={battleReportOutcomeCounts.losses}
+              />
+            )}
+            <BattleReportScrollArea visible>
+              <View style={{ position: 'relative' }}>
+                {playerIsKnockedOut && (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      pointerEvents: 'none',
+                      zIndex: 0,
+                    }}
+                    pointerEvents="none"
+                  >
+                    <Text style={{ fontSize: 220, opacity: 0.2, lineHeight: 260 }}>💀</Text>
+                  </View>
+                )}
+                {sortedBattleReportEvents.map((event, index) => {
+                  const planetClass =
+                    gameState.map.planets.find((p) => p.name === event.planetName)?.class ?? '';
+                  const homePlanetCaptureDanger = isHumanHomePlanetCapturedByEnemy(
+                    event,
+                    localHumanPlayerId,
+                    players,
+                  );
+
+                  if (event.kind === 'combat') {
+                    return (
+                      <BattleReportCard
+                        key={`combat-${event.planetName}-${index}`}
+                        event={event}
+                        localHumanPlayerId={localHumanPlayerId}
+                        players={players}
+                        turnEvents={turnReport}
+                        homePlanetCaptureDanger={homePlanetCaptureDanger}
+                        homePlanetConquestHighlight={isHumanHomePlanetConquestVictory(
+                          event,
+                          localHumanPlayerId,
+                          players,
+                        )}
+                        planetClass={planetClass}
+                      />
+                    );
+                  }
+
+                  return (
+                    <MultiwayBattleReportCard
+                      key={`multiway-${event.planetName}-${index}`}
+                      event={event}
+                      localHumanPlayerId={localHumanPlayerId}
+                      players={players}
+                      homePlanetCaptureDanger={homePlanetCaptureDanger}
+                      planetClass={planetClass}
+                    />
+                  );
+                })}
+              </View>
+            </BattleReportScrollArea>
+            <Pressable
+              style={[styles.primaryButton, styles.battleReportCloseButton]}
+              onPress={handleCloseBattleReport}
+            >
+              <Text style={styles.primaryButtonText}>Close</Text>
+            </Pressable>
+          </View>
         </View>
       )}
 
@@ -5975,24 +5913,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  battleReportOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 200,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
   lockTitle: {
     fontSize: 28,
     fontWeight: '700',
-    color: COLORS.text,
+    color: '#ffffff',
     letterSpacing: 2,
     marginBottom: 16,
   },
   lockTurnNumber: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: '#d4d7e6',
     letterSpacing: 1,
     marginBottom: 8,
   },
   lockPlayerName: {
     fontSize: 22,
     fontWeight: '700',
-    color: COLORS.text,
+    color: '#ffffff',
     letterSpacing: 0.5,
     marginBottom: 32,
   },
