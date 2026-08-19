@@ -4,6 +4,18 @@ Tasks not yet started, in priority order.
 
 ---
 
+## Phase 71 — Feature: Forfeit without ending (async multiplayer)
+
+Pass-and-play sit-out is live (Phase 70). Wire the same `isForfeited` flag through the Laravel API so a sitting-out human is skipped for `current_user_id` / "Your Turn!" pushes, and the Command Center shows **Rejoin**.
+
+### ~~Task 255 — Backend: `game_players.is_forfeited` + forfeit/rejoin endpoints~~ *(complete 2026-08-19)*
+Add `is_forfeited` on `game_players`. `POST /api/games/{id}/forfeit` and `POST /api/games/{id}/rejoin`. Include `is_forfeited` on list/detail players. `TurnController::submit` must not advance to a forfeited human. Skip `your_turn` push while forfeited.
+
+### ~~Task 256 — Frontend: async forfeit + Command Center Rejoin~~ *(complete 2026-08-19)*
+On your turn, ⋮ Forfeit runs the AI for your slot then `runAiTurnsUntilHuman`, submits, calls forfeit API, navigates home. Waiting cards stay non-enterable with a Rejoin button. Overlay server flags in `loadAsyncGame`.
+
+---
+
 ## Phase 2 — Core Rules & Engine Redesign
 
 These tasks overhaul the game engine to match the intended design. They must be completed before any UI work that depends on them.

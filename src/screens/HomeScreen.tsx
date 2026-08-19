@@ -32,6 +32,7 @@ import {
   isCurrentUserGameCreator,
   listGames,
   listInvites,
+  rejoinGame,
   updateGameName,
   type ApiGame,
   type ApiInvite,
@@ -158,41 +159,79 @@ function getFinishedOutcome(game: ApiGame, username: string | undefined): Finish
   return 'unknown';
 }
 
+function isLocalPlayerForfeited(
+  game: ApiGame,
+  userId: number | undefined,
+  username: string | undefined,
+): boolean {
+  if (game.status !== 'in_progress') {
+    return false;
+  }
+  if (userId != null) {
+    const byId = game.players.find((player) => !player.isAi && player.userId === userId);
+    if (byId != null) {
+      return byId.isForfeited === true;
+    }
+  }
+  if (username != null && username !== '') {
+    const byName = game.players.find(
+      (player) => !player.isAi && player.inGameName === username,
+    );
+    if (byName != null) {
+      return byName.isForfeited === true;
+    }
+  }
+  return false;
+}
+
 function AsyncGameCard({
   game,
   isLoading,
   anyCardLoading,
+  currentUserId,
   currentUsername,
   canDelete,
   isDeleting,
+  isRejoining,
   finalBattleViewedByGameId,
   onPress,
   onDelete,
   onEdit,
   onChat,
+  onRejoin,
 }: {
   game: ApiGame;
   isLoading: boolean;
   anyCardLoading: boolean;
+  currentUserId: number | undefined;
   currentUsername: string | undefined;
   canDelete: boolean;
   isDeleting: boolean;
+  isRejoining: boolean;
   finalBattleViewedByGameId: Record<string, boolean>;
   onPress: () => void;
   onDelete: () => void;
   onEdit: () => void;
   onChat: () => void;
+  onRejoin: () => void;
 }) {
   const playerNames = game.players.map((player) => player.inGameName).join(', ');
+  const localPlayerForfeited = isLocalPlayerForfeited(
+    game,
+    currentUserId,
+    currentUsername,
+  );
   const isTappable =
     game.status === 'in_progress' &&
+    !localPlayerForfeited &&
     (!isAsyncMultiplayerApiGame(game) || game.isMyTurn);
   const isEnterable =
     isTappable ||
     (game.status === 'finished' &&
       finalBattleViewedByGameId[String(game.id)] !== true);
   const isProminent =
-    game.alertState === 'your_turn' || game.alertState === 'in_progress';
+    !localPlayerForfeited &&
+    (game.alertState === 'your_turn' || game.alertState === 'in_progress');
   const prominentAccentColor =
     game.alertState === 'in_progress' ? '#e07820' : COLORS.accent;
   const finishedOutcome = getFinishedOutcome(game, currentUsername);
@@ -202,6 +241,8 @@ function AsyncGameCard({
     subtitle = 'Waiting for players...';
   } else if (game.status === 'finished') {
     subtitle = 'Finished';
+  } else if (localPlayerForfeited) {
+    subtitle = `AI commanding · Round ${game.roundNumber}`;
   } else {
     subtitle = `Round ${game.roundNumber} · ${game.currentPlayerName}'s turn`;
   }
@@ -311,6 +352,27 @@ function AsyncGameCard({
     </Pressable>
   ) : null;
 
+  const rejoinControl = localPlayerForfeited ? (
+    <Pressable
+      style={({ pressed }) => [
+        styles.asyncGameEditButton,
+        pressed && styles.asyncGameEditButtonPressed,
+      ]}
+      onPress={(event) => {
+        event.stopPropagation();
+        onRejoin();
+      }}
+      disabled={isRejoining || anyCardLoading || isLoading}
+      hitSlop={8}
+    >
+      {isRejoining ? (
+        <ActivityIndicator size="small" color={COLORS.accent} />
+      ) : (
+        <Text style={styles.asyncGameEditButtonText}>Rejoin</Text>
+      )}
+    </Pressable>
+  ) : null;
+
   const content = (
     <View style={styles.asyncGameCardBody}>
       <View style={styles.asyncGameCardMain}>
@@ -328,11 +390,16 @@ function AsyncGameCard({
           <ActivityIndicator style={styles.asyncGameCardLoader} color={COLORS.accent} />
         )}
       </View>
-      {(badge != null || chatControl != null || editControl != null || deleteControl != null) && (
+      {(badge != null ||
+        chatControl != null ||
+        rejoinControl != null ||
+        editControl != null ||
+        deleteControl != null) && (
         <View style={styles.asyncGameCardActions}>
           <View style={styles.asyncGameCardActionsTop}>
             {badge}
             {chatControl}
+            {rejoinControl}
             {editControl}
           </View>
           {deleteControl != null && (
@@ -478,6 +545,7 @@ export default function HomeScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadingGameId, setLoadingGameId] = useState<number | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<number | null>(null);
+  const [rejoiningGameId, setRejoiningGameId] = useState<number | null>(null);
   /** Games created this session when the list API omits creator fields. */
   const [sessionCreatedGameIds, setSessionCreatedGameIds] = useState<Set<number>>(
     () => new Set(),
@@ -861,6 +929,12 @@ export default function HomeScreen() {
     ) {
       return;
     }
+    if (
+      summary !== undefined &&
+      isLocalPlayerForfeited(summary, currentUser?.id, currentUser?.username)
+    ) {
+      return;
+    }
     setLoadingGameId(gameId);
     void (async () => {
       try {
@@ -876,12 +950,38 @@ export default function HomeScreen() {
           setLoadingGameId(null);
           return;
         }
+        if (
+          isLocalPlayerForfeited(detail, currentUser?.id, currentUser?.username)
+        ) {
+          setLoadingGameId(null);
+          return;
+        }
         loadAsyncGame(detail);
         setLoadingGameId(null);
         navigation.navigate('Game');
       } catch {
         setLoadingGameId(null);
         showAlert('Load Failed', 'Could not load game. Check your connection.');
+      }
+    })();
+  };
+
+  const handleRejoinAsyncGame = (game: ApiGame) => {
+    if (rejoiningGameId !== null) {
+      return;
+    }
+    setRejoiningGameId(game.id);
+    void (async () => {
+      try {
+        await rejoinGame(game.id);
+        await refreshAsyncGames();
+      } catch (err) {
+        showAlert(
+          'Could not rejoin',
+          err instanceof ApiError ? err.message : 'Try again.',
+        );
+      } finally {
+        setRejoiningGameId(null);
       }
     })();
   };
@@ -1456,7 +1556,13 @@ export default function HomeScreen() {
                       key={game.id}
                       game={game}
                       isLoading={loadingGameId === game.id}
-                      anyCardLoading={loadingGameId !== null || deletingGameId !== null || editingGameId !== null}
+                      anyCardLoading={
+                        loadingGameId !== null ||
+                        deletingGameId !== null ||
+                        editingGameId !== null ||
+                        rejoiningGameId !== null
+                      }
+                      currentUserId={currentUser?.id}
                       currentUsername={currentUser?.username}
                       canDelete={isCurrentUserGameCreator(
                         game,
@@ -1464,11 +1570,13 @@ export default function HomeScreen() {
                         currentUser?.username,
                       )}
                       isDeleting={deletingGameId === game.id}
+                      isRejoining={rejoiningGameId === game.id}
                       finalBattleViewedByGameId={finalBattleViewedByGameId}
                       onPress={() => handleOpenAsyncGame(game.id)}
                       onEdit={() => handleEditAsyncGame(game)}
                       onDelete={() => handleDeleteAsyncGame(game)}
                       onChat={() => setSelectedChatGameId(game.id)}
+                      onRejoin={() => handleRejoinAsyncGame(game)}
                     />
                   ))}
                 </View>

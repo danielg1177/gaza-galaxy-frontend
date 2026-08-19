@@ -185,10 +185,19 @@ Pass-and-play games remain entirely local:
 - Lock screen after End Turn displays `roundNumber` (shared round) for all players — same as the in-game HUD
 - **Auto-handoff:** When a player ends their turn, the lock screen automatically dismisses after 1.5 seconds, immediately showing the next human player's turn without requiring manual interaction. The "Start Turn" button remains visible for manual override if desired.
 - **Knockout farewell:** Home-planet kills often resolve on round wrap (the last player's End Turn). The eliminated player sees a knockout report, then play returns to the living player the engine already selected — including the first player of the new round. Knockout End Turn is local-only; it does not submit to the backend.
+- **Forfeit (sit out):** ⋮ **Forfeit** on your turn marks `isForfeited` without ending the game or flipping `isAI`. The AI takes that turn immediately. When the slot comes around again, a **Sitting out** screen offers **Rejoin** or **Let the AI take this turn**, with a checkbox to stop asking (`autoAiUntilEnd`).
+
+## Async multiplayer forfeit (Task 256)
+
+On your turn, ⋮ **Forfeit** discards queued fleets, runs the hard AI for your slot, then `runAiTurnsUntilHuman` for remaining AI-controlled slots (created AI and other sitters). The client **submits that resolved turn first**, then `POST /games/{id}/forfeit`. Reversing the order can leave `current_user_id` on a sitter while `is_my_turn` is false (game stall). If the match finishes during that AI play-out, the forfeit API is skipped (`422` game not in progress).
+
+Command Center cards for a sitting-out member stay non-enterable. Subtitle is **AI commanding**. **Rejoin** calls `POST /games/{id}/rejoin` and takes effect the next time the turn order reaches that slot. Sitters do not receive "Your Turn!" pushes. `loadAsyncGame` overlays `detail.players[i].isForfeited` onto `state.players[i]` so the next acting human's `endTurn` treats sitters as AI-controlled.
 
 ---
 
 ## Changelog
+- 2026-08-19: Task 256 — async forfeit/rejoin: submit AI-resolved turn then `POST /forfeit`; Command Center **Rejoin**; overlay `is_forfeited` in `loadAsyncGame`.
+- 2026-08-19: Task 253–254 — pass-and-play forfeit (sit out): AI takes over without flipping `isAI`; rejoin prompt when the slot returns; async APIs not yet.
 - 2026-08-19: Task 252 — pass-and-play knockout restores the engine's next living player after the farewell; local knockout does not call the backend.
 - 2026-06-08: Fixed win/loss outcome correctness and finished-game UI.
   - `GameRecord` now stores `localPlayerId` (e.g. `"player-1"`) — the authenticated user's player-slot ID in an async game. `loadAsyncGame` resolves it via `resolveAsyncLocalPlayerId`, which matches `detail.players[i].userId` against the current user's ID from the auth store. This replaces the broken `getLocalHumanPlayerId` fallback which always returned the winner's player-ID for finished games (causing every player to see the victory modal).

@@ -249,6 +249,7 @@ Known enemy planets count as **full threat** (`1×`); unexplored territory count
 - Uses the same `PlayerAction` / `TurnInput` types as human players.
 - `BUILD` and `SET_PRODUCTION_SLIDER` actions added to `PlayerAction` and handled in `turnEngine.resolveTurn`; human store flow remains store-direct for UI feedback.
 - Designed to run identically client-side (pass-and-play today) and server-side (async multiplayer, future).
+- Forfeited humans stay `isAI: false`. The store plays their turns via `computeAiTurn` when `isAiControlled` is true (`src/game/playerControl.ts`). `resolveTurn` updates `aiStates` for any AI-controlled player.
 
 ---
 
@@ -267,6 +268,8 @@ Known enemy planets count as **full threat** (`1×`); unexplored territory count
 ---
 
 ## Changelog
+- 2026-08-19: **Task 256** — async forfeit runs `computeAiTurn` for the sitting-out human, then `runAiTurnsUntilHuman` for remaining AI-controlled slots, before submit.
+- 2026-08-19: **Task 253–254** — forfeited humans stay `isAI: false`; `isAiControlled` / `needsForfeitPrompt` in `playerControl.ts`; `resolveTurn` writes `aiStates` for any AI-controlled player; pass-and-play store runs `computeAiTurn` for sitters.
 - 2026-05-31: Setup simplification — removed HomeScreen AI difficulty selector chips; all AI slots now default to hard; `gameStore` enforces `player.difficulty = 'hard'` when building players, so legacy/non-hard slot input is ignored for new games.
 - 2026-05-31: Observation timing fix — `buildContext` now calls `updateAiObservation` inline (read-only, does not write `state.aiStates`) so every AI decision uses the current game state for visibility, eliminating the one-full-round staleness lag caused by the previous end-of-turn-only update cadence.
 - 2026-05-31: Factory threat response — any factory planet with a known non-stale enemy within `FACTORY_DEFENSE_RANGE_CLICKS` (20 clicks ≈ 1.8× base range) switches to 100 % troop output; overrides gold-emergency and factory-phase rules; reverts automatically when the threat leaves range or goes stale (`STALE_ROUNDS`).

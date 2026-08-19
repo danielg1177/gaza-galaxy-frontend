@@ -2,6 +2,14 @@
 
 ## Open Issues
 
+### Pass-and-play / async: playing out remaining turns after everyone sits out can freeze the UI (2026-08-19)
+
+**Symptom:** If every remaining human forfeits (pass-and-play **Don't ask again**, or async forfeit as the last playing human), one action may run many AI turns on the JS thread until the game finishes. The "The AI is taking over…" overlay is scheduled with `setTimeout(0)` so it can paint once, but the loop itself is synchronous.
+
+**Workaround:** Rare in normal play. Leave at least one human playing, or wait for the match to resolve.
+
+---
+
 ### ~~Pass-and-play: first player's turn skipped after eliminating another player~~ (2026-08-19, resolved 2026-08-19)
 
 **Symptom:** In a 5-player offline pass-and-play game, the first player eliminated the second player. When the phone came back around, player 1's next turn was skipped. The remaining players took that round, then player 1 could play again. Ending the knockout farewell also showed a "Submitting turn…" overlay / connection timeout even though the game is local-only. Reopening the app continued from the already-advanced state.

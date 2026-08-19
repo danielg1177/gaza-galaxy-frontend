@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-08-19 (Phase 69 — pass-and-play knockout skipped the first player's next turn)
+2026-08-19 (Phase 71 — async forfeit / Command Center Rejoin)
 
 ## Overall Status
 
@@ -219,11 +219,13 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/game/aiEngine.ts` | Implemented — `computeAiTurn`, `updateAiObservation`, `AiDifficulty` (easy/normal/hard), fog-of-war memory, multi-fleet, economy decisions |
 | `src/game/validationEngine.ts` | Stub only |
 | `src/game/index.ts` | Re-exports all modules |
-| `src/store/gameStore.ts` | Zustand store — `isAsyncGame()` keyed on `asyncGameId`; `loadAsyncGame` forces `playMode: 'asyncMultiplayer'` on API state; async turn submit after `endTurn` (`submitTurn`, `isSubmittingTurn`, `shouldReturnHome`); local pass-and-play unchanged |
-| `src/screens/HomeScreen.tsx` | Command Center lobby — async games with alert badges + priority sort; tappable only when `isMyTurn`; creator-only **Delete** per async card (`DELETE /api/games/{id}`); **Pass & Play** section lists all local `GameRecord`s (`asyncGameId == null`); per-card `getGame` loading; game invites; `AppTopBar` (Friends + Logout) |
-| `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit to Home** / **Exit Game** navigate without `resetGame()`; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
+| `src/store/gameStore.ts` | Zustand store — `isAsyncGame()` keyed on `asyncGameId`; `loadAsyncGame` forces `playMode: 'asyncMultiplayer'` and overlays `is_forfeited`; async `endTurn` / forfeit submit (`submitTurn`, `isSubmittingTurn`, `shouldReturnHome`); local pass-and-play unchanged |
+| `src/screens/HomeScreen.tsx` | Command Center lobby — async games with alert badges + priority sort; tappable only when `isMyTurn`; sitting-out cards show **Rejoin**; creator-only **Delete** per async card (`DELETE /api/games/{id}`); **Pass & Play** section lists all local `GameRecord`s (`asyncGameId == null`); per-card `getGame` loading; game invites; `AppTopBar` (Friends + Logout) |
+| `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Forfeit** / **Exit to Home** / **Exit Game**; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-08-19: Phase 71 (Task 256) — async ⋮ **Forfeit** runs AI for the slot, submits, then `POST /forfeit` and returns home. Command Center **Rejoin**. `loadAsyncGame` overlays server `is_forfeited` onto `GameState.players`.
+- 2026-08-19: Phase 70 (Tasks 253–254) — pass-and-play forfeit: `Player.isForfeited` / `autoAiUntilEnd`; `isAiControlled` + `needsForfeitPrompt`; ⋮ Forfeit; Sitting out overlay (Rejoin / Let AI / don't ask again). Async forfeit APIs not in this slice.
 - 2026-08-19: Phase 69 (Task 252) — pass-and-play knockout after a round-wrap elimination no longer skips the first living player. `GameRecord.knockoutResumePlayerId` stores the engine's next player while the farewell hijacks `currentPlayerId`; `acknowledgeKnockout` restores it instead of walking forward from the eliminated slot. Local knockout no longer sets `isSubmittingTurn` (that overlay + 45s timeout was a fake backend submit while offline).
 - 2026-08-19: Phase 68 (Task 251) — stacked battle report overlays fixed: in-tree overlay (not RN `Modal`), derived visibility from acknowledgement key, immutable archive merge, Game route `getId`.
 - 2026-06-08: Chat input focus zoom fix — `preventInputZoomOnFocus` / `resetScrollOnBlur` in `viewportZoom.ts`; TextInput `onFocus`/`onBlur` (web only) toggle viewport briefly to force browser to recompute scale at 1× and scroll back to origin; prevents iOS Safari visual-viewport zoom on input tap and stuck-zoomed state after dismiss.

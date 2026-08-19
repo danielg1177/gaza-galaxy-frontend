@@ -178,7 +178,18 @@ export interface Player {
   researchPoints: number;
   isEliminated: boolean;
   isAI: boolean;
-  /** Only set for AI players. */
+  /**
+   * Human commander is sitting out; the AI plays their turns until they rejoin.
+   * Does not change `isAI` (slot type / identity). Absent on created AI slots
+   * and on humans who have never forfeited.
+   */
+  isForfeited?: boolean;
+  /**
+   * Pass-and-play only. When true, skip the rejoin prompt and treat this
+   * forfeited human as AI-controlled until the game ends.
+   */
+  autoAiUntilEnd?: boolean;
+  /** Set for created AI players, and for humans the first time they forfeit. */
   difficulty?: AiDifficulty;
 }
 

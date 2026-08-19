@@ -11,6 +11,7 @@ import {
 } from './movementEngine';
 import { FACTORY_GOLD_COST, RESEARCH_LAB_GOLD_COST } from './productionEngine';
 import { runProduction } from './productionEngine';
+import { isAiControlled } from './playerControl';
 import type { BuildingType, Fleet, GameMap, GameState, Planet, Player, TurnEvent } from './types';
 
 export type ResolveTurnResult = GameState & { events: TurnEvent[] };
@@ -544,7 +545,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
   // results of its own actions before the next decision cycle.
   const currentPlayer = players.find((p) => p.id === input.playerId);
   let aiStates = state.aiStates ?? {};
-  if (currentPlayer?.isAI === true) {
+  if (currentPlayer !== undefined && isAiControlled(currentPlayer, state.playMode)) {
     const partialState: GameState = {
       map,
       players,

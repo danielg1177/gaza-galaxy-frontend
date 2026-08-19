@@ -5,6 +5,7 @@ export interface ApiGamePlayer {
   inGameName: string;
   isAi: boolean;
   isEliminated: boolean;
+  isForfeited: boolean;
   userId?: number;
 }
 
@@ -104,6 +105,7 @@ interface ApiGamePlayerRaw {
   in_game_name: string;
   is_ai: boolean;
   is_eliminated: boolean;
+  is_forfeited?: boolean;
   user_id?: number;
 }
 
@@ -246,6 +248,7 @@ function mapGamePlayer(api: ApiGamePlayerRaw): ApiGamePlayer {
     inGameName: api.in_game_name,
     isAi: api.is_ai,
     isEliminated: api.is_eliminated,
+    isForfeited: api.is_forfeited === true,
     userId: toOptionalUserId(api.user_id),
   };
 }
@@ -391,6 +394,14 @@ export async function submitTurn(
     round_number: payload.roundNumber,
     events: payload.events ?? [],
   });
+}
+
+export async function forfeitGame(id: number): Promise<void> {
+  await apiClient.post(`/games/${id}/forfeit`);
+}
+
+export async function rejoinGame(id: number): Promise<void> {
+  await apiClient.post(`/games/${id}/rejoin`);
 }
 
 export async function listInvites(): Promise<ApiInvite[]> {

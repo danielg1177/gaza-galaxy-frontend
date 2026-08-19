@@ -19,6 +19,7 @@ import {
   type ResolveTurnResult,
   type TurnInput,
 } from '../game/turnEngine';
+import { isAiControlled, needsForfeitPrompt } from '../game/playerControl';
 import type {
   AiPlayerState,
   BuildingType,
@@ -37,9 +38,10 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LOCAL_GAMES_STORAGE_KEY } from '../constants/app';
 import { ensureStorageMigrated } from '../utils/migrateStorage';
-import type { ApiGameDetail, GameMessage } from '../services/gamesService';
+import type { ApiGameDetail, ApiGamePlayer, GameMessage } from '../services/gamesService';
 import { ApiError } from '../services/apiClient';
 import {
+  forfeitGame,
   getGame,
   getMessages as fetchMessagesApi,
   sendMessage as sendMessageApi,
@@ -133,6 +135,8 @@ export interface GameStore {
   eliminatedPlayerPendingKnockout: boolean;
   /** Human players knocked out on their own round-wrap endTurn; farewell shown at next natural turn slot. */
   pendingFarewellPlayerIds: string[];
+  /** True while a forfeited player's AI turn (or a chain of them) is resolving. */
+  isResolvingAiTurns: boolean;
   /** True while async turn submission API call is in flight. */
   isSubmittingTurn: boolean;
   /** Set after successful async turn submit; GameScreen navigates home then clears. */
@@ -169,6 +173,9 @@ export interface GameStore {
   setProductionSlider: (planetId: string, value: number) => void;
   endTurn: () => void;
   advanceStagedAiTurn: () => void;
+  forfeitCurrentPlayer: () => void;
+  rejoinFromForfeit: () => void;
+  letAiTakeForfeitTurn: (dontAskAgain: boolean) => void;
   acknowledgeKnockout: () => void;
   dismissLockScreen: () => void;
   resetGame: () => void;
@@ -206,6 +213,57 @@ function drainStaleFleets(state: GameState): GameState {
     // drain stale turnsRemaining=0 fleets that may have persisted before the fix
     fleets: state.fleets.filter((fleet) => fleet.turnsRemaining > 0),
   };
+}
+
+/**
+ * Server `is_forfeited` is source of truth on load. Rejoin clears the flag even
+ * if `state_json` still has `isForfeited` from the last submit.
+ */
+function overlayForfeitFlagsFromApi(
+  state: GameState,
+  apiPlayers: ApiGamePlayer[],
+): GameState {
+  if (apiPlayers.length === 0) {
+    return state;
+  }
+  const players = state.players.map((player, index) => {
+    const api = apiPlayers[index];
+    if (api === undefined || player.isAI) {
+      return player;
+    }
+    const isForfeited = api.isForfeited === true;
+    if (!isForfeited) {
+      if (player.isForfeited !== true && player.autoAiUntilEnd !== true) {
+        return player;
+      }
+      return { ...player, isForfeited: false, autoAiUntilEnd: false };
+    }
+    if (player.isForfeited === true && player.difficulty !== undefined) {
+      return player;
+    }
+    return {
+      ...player,
+      isForfeited: true,
+      difficulty: player.difficulty ?? 'hard',
+    };
+  });
+  let next: GameState = { ...state, players };
+  const aiStates = { ...(next.aiStates ?? {}) };
+  let changedMemory = false;
+  for (const player of players) {
+    if (
+      player.isForfeited === true &&
+      !player.isAI &&
+      aiStates[player.id] === undefined
+    ) {
+      aiStates[player.id] = updateAiObservation(next, player.id, undefined);
+      changedMemory = true;
+    }
+  }
+  if (changedMemory) {
+    next = { ...next, aiStates };
+  }
+  return next;
 }
 
 function createPlayerIds(count: number): string[] {
@@ -299,7 +357,7 @@ export function getLocalHumanPlayerId(state: GameState): string | undefined {
  * getLocalHumanPlayerId when the match cannot be made (e.g. unauthenticated).
  */
 function resolveAsyncLocalPlayerId(
-  apiPlayers: import('../services/gamesService').ApiGamePlayer[],
+  apiPlayers: ApiGamePlayer[],
   gameState: GameState,
 ): string | undefined {
   const currentUser = useAuthStore.getState().currentUser;
@@ -365,7 +423,11 @@ function runAiTurnsUntilHuman(result: ResolveTurnResult): {
   let current = stripTurnEvents(result);
   while (current.status === 'active') {
     const currentPlayer = current.players.find((p) => p.id === current.currentPlayerId);
-    if (currentPlayer === undefined || !currentPlayer.isAI || currentPlayer.isEliminated) {
+    if (
+      currentPlayer === undefined ||
+      currentPlayer.isEliminated ||
+      !isAiControlled(currentPlayer, current.playMode)
+    ) {
       break;
     }
     const aiResult = resolveTurn(current, computeAiTurn(current, current.currentPlayerId));
@@ -385,7 +447,11 @@ function findNewlyEliminatedHumanIds(
       continue;
     }
     const defender = players.find(
-      (player) => !player.isAI && player.name === event.defenderName && player.isEliminated,
+      (player) =>
+        !player.isAI &&
+        player.isForfeited !== true &&
+        player.name === event.defenderName &&
+        player.isEliminated,
     );
     if (defender !== undefined && !ids.includes(defender.id)) {
       ids.push(defender.id);
@@ -470,6 +536,322 @@ function stateWithKnockoutResume(
     });
   }
   return advanceToNextNonEliminatedPlayer(state);
+}
+
+function markHumanSittingOut(state: GameState, playerId: string): GameState {
+  const players = state.players.map((player) =>
+    player.id === playerId
+      ? {
+          ...player,
+          isForfeited: true,
+          difficulty: player.difficulty ?? 'hard',
+        }
+      : player,
+  );
+  const next: GameState = { ...state, players };
+  return {
+    ...next,
+    aiStates: {
+      ...(next.aiStates ?? {}),
+      [playerId]: updateAiObservation(next, playerId, next.aiStates?.[playerId]),
+    },
+  };
+}
+
+function commitPassAndPlayResolvedTurn(
+  get: () => GameStore,
+  set: (partial: Partial<GameStore>) => void,
+  record: GameRecord,
+  outgoingPlayerId: string,
+  nextState: GameState,
+  events: TurnEvent[],
+): void {
+  const knockoutHumanIds = findNewlyEliminatedHumanIds(events, nextState.players);
+  const deferredKnockouts = knockoutHumanIds.filter((id) => id === outgoingPlayerId);
+  const immediateKnockouts = knockoutHumanIds.filter((id) => id !== outgoingPlayerId);
+  const passAndPlayHandoff = applyPassAndPlayKnockoutHandoff(
+    nextState,
+    outgoingPlayerId,
+    [...get().pendingFarewellPlayerIds, ...deferredKnockouts],
+    immediateKnockouts,
+  );
+  const finalState = passAndPlayHandoff.state;
+  const pendingKnockout = passAndPlayHandoff.pendingKnockout;
+  const showLock =
+    finalState.playMode === 'passAndPlay' && finalState.status === 'active';
+  const newArchive = { ...get().playerBattleArchiveByPlayerId };
+  delete newArchive[outgoingPlayerId];
+  const newTurnReport = { ...get().playerTurnReportByPlayerId };
+  delete newTurnReport[outgoingPlayerId];
+  const { archive: builtArchive, turnReport: builtTurnReport } = buildPlayerReports(
+    events,
+    finalState.players,
+    finalState.map.planets,
+  );
+  for (const [playerId, playerEvents] of Object.entries(builtArchive)) {
+    const existing = newArchive[playerId];
+    newArchive[playerId] =
+      existing === undefined ? playerEvents : [...existing, ...playerEvents];
+  }
+  for (const [playerId, playerEvents] of Object.entries(builtTurnReport)) {
+    const existing = newTurnReport[playerId];
+    newTurnReport[playerId] =
+      existing === undefined ? playerEvents : [...existing, ...playerEvents];
+  }
+  set({
+    games: get().games.map((g) =>
+      g.id === record.id
+        ? {
+            ...g,
+            state: finalState,
+            pendingTurnReport: events,
+            pendingTurnReportAcknowledged: false,
+            knockoutResumePlayerId: pendingKnockout
+              ? passAndPlayHandoff.knockoutResumePlayerId
+              : undefined,
+          }
+        : g,
+    ),
+    queuedOrders: [],
+    selectedPlanetId: null,
+    pendingFleet: null,
+    turnReport: events,
+    playerBattleArchiveByPlayerId: newArchive,
+    playerTurnReportByPlayerId: newTurnReport,
+    eliminatedPlayerPendingKnockout: pendingKnockout,
+    pendingFarewellPlayerIds: passAndPlayHandoff.pendingFarewellIds,
+    isResolvingAiTurns: false,
+    ...(showLock ? { showingLockScreen: true } : { showingLockScreen: false }),
+  });
+}
+
+function runSittingOutAiTurn(
+  get: () => GameStore,
+  set: (partial: Partial<GameStore>) => void,
+  record: GameRecord,
+  state: GameState,
+  playerId: string,
+): void {
+  let nextState: GameState;
+  let events: TurnEvent[];
+  try {
+    const aiResult = resolveTurn(state, computeAiTurn(state, playerId));
+    const continued = runAiTurnsUntilHuman(aiResult);
+    nextState = continued.state;
+    events = continued.events;
+  } catch (err) {
+    console.error('[forfeit] AI turn failed:', err);
+    set({ isResolvingAiTurns: false });
+    showAlert(
+      'Turn Failed',
+      err instanceof Error
+        ? err.message
+        : 'Could not let the AI take this turn. Try again.',
+    );
+    return;
+  }
+  commitPassAndPlayResolvedTurn(get, set, record, playerId, nextState, events);
+}
+
+function isIgnorableForfeitApiError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 422) {
+    return false;
+  }
+  const message = err.message.toLowerCase();
+  return (
+    message.includes('already sitting out') ||
+    message.includes('not in progress')
+  );
+}
+
+/** After a successful submit, mark the caller sitting out. Retry once; never undo the submit. */
+async function registerSitOutOnServer(
+  gameId: number,
+  gameFinished: boolean,
+): Promise<void> {
+  if (gameFinished) {
+    return;
+  }
+  try {
+    await forfeitGame(gameId);
+  } catch (err) {
+    if (isIgnorableForfeitApiError(err)) {
+      return;
+    }
+    try {
+      await forfeitGame(gameId);
+    } catch (retryErr) {
+      if (isIgnorableForfeitApiError(retryErr)) {
+        return;
+      }
+      showAlert(
+        'Sitting out not registered',
+        retryErr instanceof ApiError
+          ? retryErr.message
+          : 'Your turn was submitted, but sit-out may not have been saved. If you get another turn, forfeit again.',
+      );
+    }
+  }
+}
+
+function runAsyncForfeitTurn(
+  get: () => GameStore,
+  set: (partial: Partial<GameStore>) => void,
+  record: GameRecord,
+  playerId: string,
+): void {
+  const asyncGameId = record.asyncGameId;
+  if (asyncGameId == null) {
+    return;
+  }
+
+  const storeSnapshot = {
+    games: get().games,
+    queuedOrders: get().queuedOrders,
+    selectedPlanetId: get().selectedPlanetId,
+    pendingFleet: get().pendingFleet,
+    turnReport: get().turnReport,
+    playerBattleArchiveByPlayerId: get().playerBattleArchiveByPlayerId,
+    playerTurnReportByPlayerId: get().playerTurnReportByPlayerId,
+    eliminatedPlayerPendingKnockout: get().eliminatedPlayerPendingKnockout,
+    pendingFarewellPlayerIds: get().pendingFarewellPlayerIds,
+    showingLockScreen: get().showingLockScreen,
+  };
+  const preTurnNumber = record.serverTurnNumber ?? record.state.turnNumber;
+  const preRoundNumber = record.serverRoundNumber ?? record.state.roundNumber;
+
+  set({
+    isResolvingAiTurns: true,
+    queuedOrders: [],
+    selectedPlanetId: null,
+    pendingFleet: null,
+    showingLockScreen: false,
+    showingAiObserver: false,
+    pendingAiTurnInput: null,
+    pendingAiPlayerId: null,
+  });
+
+  const restorePreSubmitSnapshot = () => {
+    set({
+      games: storeSnapshot.games,
+      queuedOrders: storeSnapshot.queuedOrders,
+      selectedPlanetId: storeSnapshot.selectedPlanetId,
+      pendingFleet: storeSnapshot.pendingFleet,
+      turnReport: storeSnapshot.turnReport,
+      playerBattleArchiveByPlayerId: storeSnapshot.playerBattleArchiveByPlayerId,
+      playerTurnReportByPlayerId: storeSnapshot.playerTurnReportByPlayerId,
+      eliminatedPlayerPendingKnockout: storeSnapshot.eliminatedPlayerPendingKnockout,
+      pendingFarewellPlayerIds: storeSnapshot.pendingFarewellPlayerIds,
+      showingLockScreen: storeSnapshot.showingLockScreen,
+      isSubmittingTurn: false,
+      isResolvingAiTurns: false,
+    });
+  };
+
+  setTimeout(() => {
+    const latest = get().getActiveRecord();
+    if (latest === null || latest.id !== record.id || latest.asyncGameId == null) {
+      set({ isResolvingAiTurns: false });
+      return;
+    }
+
+    const sittingOut = markHumanSittingOut(latest.state, playerId);
+    const aiInput = computeAiTurn(sittingOut, playerId);
+
+    let nextState: GameState;
+    let events: TurnEvent[];
+    try {
+      const aiResult = resolveTurn(sittingOut, aiInput);
+      const continued = runAiTurnsUntilHuman(aiResult);
+      nextState = continued.state;
+      events = continued.events;
+    } catch (err) {
+      console.error('[forfeit] async AI turn failed:', err);
+      restorePreSubmitSnapshot();
+      showAlert(
+        'Turn Failed',
+        err instanceof Error
+          ? err.message
+          : 'Could not let the AI take this turn. Try again.',
+      );
+      return;
+    }
+
+    const knockoutHumanIds = findNewlyEliminatedHumanIds(
+      events,
+      nextState.players,
+    );
+    const immediateKnockouts = knockoutHumanIds.filter((id) => id !== playerId);
+    let finalState = nextState;
+    if (immediateKnockouts.length > 0 && nextState.status === 'active') {
+      finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
+    }
+
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id
+          ? {
+              ...g,
+              state: finalState,
+              pendingTurnReport: events,
+              pendingTurnReportAcknowledged: false,
+            }
+          : g,
+      ),
+      queuedOrders: [],
+      selectedPlanetId: null,
+      pendingFleet: null,
+      turnReport: events,
+      isResolvingAiTurns: false,
+      isSubmittingTurn: true,
+    });
+
+    void (async () => {
+      try {
+        await submitTurn(asyncGameId, {
+          actions: aiInput.actions,
+          resultingState: finalState,
+          turnNumber: preTurnNumber,
+          roundNumber: preRoundNumber,
+          events,
+        });
+        await registerSitOutOnServer(
+          asyncGameId,
+          finalState.status === 'finished',
+        );
+        get().resetGame();
+        set({ isSubmittingTurn: false, shouldReturnHome: true });
+      } catch (err) {
+        console.error('[forfeit] submitTurn failed:', err);
+        restorePreSubmitSnapshot();
+
+        const alertBody =
+          err instanceof ApiError
+            ? `Server returned ${err.status}: ${err.message}`
+            : 'Could not submit your turn. Your moves were not saved — try again.';
+
+        if (
+          err instanceof ApiError &&
+          (err.status === 409 || err.status === 403 || err.status === 422)
+        ) {
+          try {
+            const fresh = await getGame(asyncGameId);
+            get().loadAsyncGame(fresh);
+            if (!fresh.isMyTurn) {
+              set({ shouldReturnHome: true });
+            }
+          } catch (reloadErr) {
+            console.error(
+              '[forfeit] Failed to reload game after submit error:',
+              reloadErr,
+            );
+          }
+        }
+
+        showAlert('Submit Failed', alertBody);
+      }
+    })();
+  }, 0);
 }
 
 /**
@@ -597,6 +979,7 @@ export const useGameStore = create<GameStore>()(
   playerTurnReportByPlayerId: {},
   eliminatedPlayerPendingKnockout: false,
   pendingFarewellPlayerIds: [],
+  isResolvingAiTurns: false,
   isSubmittingTurn: false,
   shouldReturnHome: false,
   aiObserverMode: false,
@@ -631,6 +1014,7 @@ export const useGameStore = create<GameStore>()(
       playerTurnReportByPlayerId: {},
       eliminatedPlayerPendingKnockout: false,
       pendingFarewellPlayerIds: [],
+      isResolvingAiTurns: false,
       isSubmittingTurn: false,
       shouldReturnHome: false,
       isViewingFinishedGame: false,
@@ -663,6 +1047,7 @@ export const useGameStore = create<GameStore>()(
       record.state.status === 'active' &&
       currentPlayer !== undefined &&
       !currentPlayer.isAI &&
+      currentPlayer.isForfeited !== true &&
       currentPlayer.isEliminated === true;
     set({
       activeGameId: id,
@@ -680,6 +1065,7 @@ export const useGameStore = create<GameStore>()(
       playerTurnReportByPlayerId: restoredTurnReport,
       eliminatedPlayerPendingKnockout: restoreKnockout,
       pendingFarewellPlayerIds: [],
+      isResolvingAiTurns: false,
       isSubmittingTurn: false,
       shouldReturnHome: false,
       // Always clear finished-game flag and AI observer state when loading a
@@ -699,12 +1085,15 @@ export const useGameStore = create<GameStore>()(
       // Use the winner's final state if the backend provided it; fall back to
       // the initial state_json only when final_state_json is absent (old games).
       const rawState = detail.finalStateJson ?? JSON.parse(detail.stateJson);
-      const state = drainStaleFleets({
-        ...(rawState as GameState),
-        playMode: 'asyncMultiplayer',
-        turnNumber: detail.turnNumber,
-        roundNumber: detail.roundNumber,
-      });
+      const state = overlayForfeitFlagsFromApi(
+        drainStaleFleets({
+          ...(rawState as GameState),
+          playMode: 'asyncMultiplayer',
+          turnNumber: detail.turnNumber,
+          roundNumber: detail.roundNumber,
+        }),
+        detail.players,
+      );
       const recordId = String(detail.id);
       const localPlayerId = resolveAsyncLocalPlayerId(detail.players, state);
       const record: GameRecord = {
@@ -778,12 +1167,15 @@ export const useGameStore = create<GameStore>()(
       state = JSON.parse(detail.stateJson) as GameState;
       queuedOrders = [];
     }
-    state = drainStaleFleets({
-      ...state,
-      playMode: 'asyncMultiplayer',
-      turnNumber: detail.turnNumber,
-      roundNumber: detail.roundNumber,
-    });
+    state = overlayForfeitFlagsFromApi(
+      drainStaleFleets({
+        ...state,
+        playMode: 'asyncMultiplayer',
+        turnNumber: detail.turnNumber,
+        roundNumber: detail.roundNumber,
+      }),
+      detail.players,
+    );
 
     const recordId = String(detail.id);
     const localPlayerId = resolveAsyncLocalPlayerId(detail.players, state);
@@ -1109,7 +1501,9 @@ export const useGameStore = create<GameStore>()(
     const preTurnNumber = record.serverTurnNumber ?? gameState.turnNumber;
     const preRoundNumber = record.serverRoundNumber ?? gameState.roundNumber;
     const humanPlayer = gameState.players.find(
-      (p) => p.id === gameState.currentPlayerId && !p.isAI,
+      (p) =>
+        p.id === gameState.currentPlayerId &&
+        !isAiControlled(p, gameState.playMode),
     );
     if (humanPlayer === undefined) {
       console.error(
@@ -1120,6 +1514,9 @@ export const useGameStore = create<GameStore>()(
         'Cannot End Turn',
         'The active player could not be resolved. Exit and reopen the game from the lobby.',
       );
+      return;
+    }
+    if (needsForfeitPrompt(humanPlayer, gameState.playMode)) {
       return;
     }
     if (humanPlayer.isEliminated) {
@@ -1188,7 +1585,7 @@ export const useGameStore = create<GameStore>()(
       );
       if (
         nextPlayer !== undefined &&
-        nextPlayer.isAI &&
+        isAiControlled(nextPlayer, resolvedState.playMode) &&
         !nextPlayer.isEliminated
       ) {
         const aiInput = computeAiTurn(resolvedState, resolvedState.currentPlayerId);
@@ -1402,7 +1799,7 @@ export const useGameStore = create<GameStore>()(
     );
     if (
       currentPlayer !== undefined &&
-      currentPlayer.isAI &&
+      isAiControlled(currentPlayer, nextState.playMode) &&
       !currentPlayer.isEliminated &&
       get().aiObserverMode
     ) {
@@ -1591,6 +1988,138 @@ export const useGameStore = create<GameStore>()(
     });
   },
 
+  forfeitCurrentPlayer: () => {
+    const record = get().getActiveRecord();
+    if (record === null || record.state.status !== 'active') {
+      return;
+    }
+    if (get().isSubmittingTurn || get().isResolvingAiTurns) {
+      return;
+    }
+    const gameState = record.state;
+    const currentPlayer = gameState.players.find(
+      (player) => player.id === gameState.currentPlayerId,
+    );
+    if (
+      currentPlayer === undefined ||
+      currentPlayer.isAI ||
+      currentPlayer.isEliminated ||
+      currentPlayer.isForfeited === true
+    ) {
+      return;
+    }
+
+    if (record.asyncGameId != null) {
+      if (record.asyncIsMyTurn === false) {
+        showAlert(
+          'Not Your Turn',
+          'It is no longer your turn. Return to the lobby and reopen the game when it is your turn.',
+        );
+        return;
+      }
+      runAsyncForfeitTurn(get, set, record, currentPlayer.id);
+      return;
+    }
+
+    if (gameState.playMode !== 'passAndPlay') {
+      return;
+    }
+    set({
+      isResolvingAiTurns: true,
+      queuedOrders: [],
+      selectedPlanetId: null,
+      pendingFleet: null,
+      showingLockScreen: false,
+    });
+    setTimeout(() => {
+      const latest = get().getActiveRecord();
+      if (latest === null || latest.id !== record.id) {
+        set({ isResolvingAiTurns: false });
+        return;
+      }
+      const sittingOut = markHumanSittingOut(latest.state, currentPlayer.id);
+      runSittingOutAiTurn(get, set, latest, sittingOut, currentPlayer.id);
+    }, 0);
+  },
+
+  rejoinFromForfeit: () => {
+    const record = get().getActiveRecord();
+    if (record === null || record.state.status !== 'active') {
+      return;
+    }
+    const currentPlayer = record.state.players.find(
+      (player) => player.id === record.state.currentPlayerId,
+    );
+    if (
+      currentPlayer === undefined ||
+      !needsForfeitPrompt(currentPlayer, record.state.playMode)
+    ) {
+      return;
+    }
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id
+          ? {
+              ...g,
+              state: {
+                ...g.state,
+                players: g.state.players.map((player) =>
+                  player.id === currentPlayer.id
+                    ? { ...player, isForfeited: false, autoAiUntilEnd: false }
+                    : player,
+                ),
+              },
+            }
+          : g,
+      ),
+      showingLockScreen: false,
+      queuedOrders: [],
+      selectedPlanetId: null,
+      pendingFleet: null,
+    });
+  },
+
+  letAiTakeForfeitTurn: (dontAskAgain) => {
+    const record = get().getActiveRecord();
+    if (record === null || record.state.status !== 'active') {
+      return;
+    }
+    const currentPlayer = record.state.players.find(
+      (player) => player.id === record.state.currentPlayerId,
+    );
+    if (
+      currentPlayer === undefined ||
+      !needsForfeitPrompt(currentPlayer, record.state.playMode)
+    ) {
+      return;
+    }
+    set({
+      isResolvingAiTurns: true,
+      showingLockScreen: false,
+      queuedOrders: [],
+      selectedPlanetId: null,
+      pendingFleet: null,
+    });
+    setTimeout(() => {
+      const latest = get().getActiveRecord();
+      if (latest === null || latest.id !== record.id) {
+        set({ isResolvingAiTurns: false });
+        return;
+      }
+      const stateForAi = dontAskAgain
+        ? {
+            ...latest.state,
+            players: latest.state.players.map((player) =>
+              player.id === currentPlayer.id
+                ? { ...player, autoAiUntilEnd: true }
+                : player,
+            ),
+          }
+        : latest.state;
+      runSittingOutAiTurn(get, set, latest, stateForAi, currentPlayer.id);
+    }, 0);
+  },
+
   dismissLockScreen: () =>
     set({
       games: get().games.map((g) =>
@@ -1622,6 +2151,7 @@ export const useGameStore = create<GameStore>()(
       playerTurnReportByPlayerId: {},
       eliminatedPlayerPendingKnockout: false,
       pendingFarewellPlayerIds: [],
+      isResolvingAiTurns: false,
       isSubmittingTurn: false,
       shouldReturnHome: false,
       isViewingFinishedGame: false,

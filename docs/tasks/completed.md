@@ -1,5 +1,17 @@
 # Completed Tasks
 
+## Phase 71 — Async forfeit + Command Center Rejoin
+**Completed:** 2026-08-19
+**Files modified:** `src/services/gamesService.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `src/screens/HomeScreen.tsx`, `docs/systems/multiplayer.md`, `docs/systems/turn-engine.md`, `docs/development/decisions.md`, `docs/development/known-issues.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`
+**Notes:** ⋮ **Forfeit** on an async turn discards queued orders, runs hard AI for that slot plus remaining AI-controlled slots, submits with pre-resolution turn/round numbers, then `POST /games/{id}/forfeit`. Command Center cards for sitters stay non-enterable with **Rejoin** (`POST /games/{id}/rejoin` takes effect on their next turn). `loadAsyncGame` overlays `detail.players[i].isForfeited` onto `state.players[i]`. Submit first, then forfeit — reversing that order can stall `current_user_id` on a sitter.
+
+---
+## Phase 70 — Pass-and-play forfeit (AI sit-out)
+**Completed:** 2026-08-19
+**Files modified:** `src/game/types.ts`, `src/game/playerControl.ts` (new), `src/game/turnEngine.ts`, `src/game/index.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `docs/systems/turn-engine.md`, `docs/systems/ai-system.md`, `docs/systems/multiplayer.md`, `docs/development/decisions.md`, `docs/development/known-issues.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`
+**Notes:** Forfeit does not flip `isAI` or eliminate the player. Pass-and-play ⋮ **Forfeit** lets the hard AI take this turn; when the slot returns, **Sitting out** offers Rejoin / Let AI / don't-ask-again. `runAiTurnsUntilHuman` uses `isAiControlled`. Async Command Center rejoin is Phase 71.
+
+---
 ## Phase 69 — Pass-and-play knockout skipped the first player's next turn
 **Completed:** 2026-08-19
 **Files modified:** `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `docs/development/known-issues.md`, `docs/development/decisions.md`, `docs/systems/turn-engine.md`, `docs/systems/combat.md`, `docs/systems/multiplayer.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`

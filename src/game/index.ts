@@ -1,4 +1,5 @@
 export * from './types';
+export * from './playerControl';
 export * from './mapGenerator';
 export * from './spawnPlacer';
 export * from './turnEngine';

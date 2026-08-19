@@ -43,6 +43,7 @@ import {
 } from '../game/movementEngine';
 import { mulberry32 } from '../game/mapGenerator';
 import type { BuildingType, Fleet, OwnerId, Planet, Player, TurnEvent } from '../game/types';
+import { needsForfeitPrompt } from '../game/playerControl';
 import { getFriendRequests } from '../services/friendsService';
 import { getGame, saveTurnProgress } from '../services/gamesService';
 import { useAuthStore } from '../store/authStore';
@@ -1778,6 +1779,10 @@ export default function GameScreen() {
   const updateQueuedOrder = useGameStore((s) => s.updateQueuedOrder);
   const queueOrder = useGameStore((s) => s.queueOrder);
   const endTurn = useGameStore((s) => s.endTurn);
+  const forfeitCurrentPlayer = useGameStore((s) => s.forfeitCurrentPlayer);
+  const rejoinFromForfeit = useGameStore((s) => s.rejoinFromForfeit);
+  const letAiTakeForfeitTurn = useGameStore((s) => s.letAiTakeForfeitTurn);
+  const isResolvingAiTurns = useGameStore((s) => s.isResolvingAiTurns);
   const queueBuildOrder = useGameStore((s) => s.queueBuildOrder);
   const cancelBuildOrder = useGameStore((s) => s.cancelBuildOrder);
   const demolishBuilding = useGameStore((s) => s.demolishBuilding);
@@ -1850,6 +1855,7 @@ export default function GameScreen() {
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [isSavingExit, setIsSavingExit] = useState(false);
+  const [dontAskAgainForfeit, setDontAskAgainForfeit] = useState(false);
   const [fleetTooltip, setFleetTooltip] = useState<{
     fleet: Fleet;
     absX: number;
@@ -2064,8 +2070,23 @@ export default function GameScreen() {
     localHumanPlayerId,
     { skipActivePlayerCheck: isViewingFinishedGame },
   );
+  const currentTurnPlayerForPrompt =
+    gameState?.players.find((p) => p.id === gameState.currentPlayerId);
+  const showingForfeitPrompt =
+    !isAsyncGame &&
+    !isViewingFinishedGame &&
+    gameState !== null &&
+    gameState.status === 'active' &&
+    !eliminatedPlayerPendingKnockout &&
+    currentTurnPlayerForPrompt !== undefined &&
+    needsForfeitPrompt(currentTurnPlayerForPrompt, gameState.playMode);
   const lockScreenBlocksBattleReport =
-    showingLockScreen && !(isAsyncGame && eliminatedPlayerPendingKnockout);
+    (showingLockScreen || showingForfeitPrompt) &&
+    !(isAsyncGame && eliminatedPlayerPendingKnockout);
+
+  useEffect(() => {
+    setDontAskAgainForfeit(false);
+  }, [gameState?.currentPlayerId]);
   const shouldAutoShowBattleReport =
     sortedBattleReportEvents.length > 0 &&
     !isSubmittingTurn &&
@@ -3520,6 +3541,19 @@ export default function GameScreen() {
     navigation.navigate('Home');
   }, [navigation]);
 
+  const handleForfeit = useCallback(() => {
+    setShowHeaderMenu(false);
+    showConfirm(
+      'Forfeit this game?',
+      isAsyncGame
+        ? 'The AI will take over your empire. You leave this game until you tap Rejoin on the Command Center. You will not get turn alerts while sitting out.'
+        : 'The AI will take this turn for you. When your turn comes around again you can rejoin or let the AI keep playing.',
+      () => {
+        forfeitCurrentPlayer();
+      },
+    );
+  }, [forfeitCurrentPlayer, isAsyncGame]);
+
   const handleExitGame = useCallback(async () => {
     setShowHeaderMenu(false);
     setIsSavingExit(true);
@@ -3739,6 +3773,7 @@ export default function GameScreen() {
       {(isHumanTurn || showingAiObserver) &&
         status === 'active' &&
         !isKnockoutTurn &&
+        !showingForfeitPrompt &&
         !isReadOnly &&
         !isViewingFinishedGame && (
         <>
@@ -3840,6 +3875,15 @@ export default function GameScreen() {
                   {isSavingExit && (
                     <ActivityIndicator size="small" color={COLORS.accent} />
                   )}
+                </Pressable>
+                <Pressable
+                  style={styles.headerMenuRow}
+                  disabled={isSubmittingTurn || isResolvingAiTurns}
+                  onPress={handleForfeit}
+                >
+                  <Text style={[styles.headerMenuRowText, styles.headerMenuRowDanger]}>
+                    Forfeit
+                  </Text>
                 </Pressable>
                 {isAsyncGame ? (
                   <Pressable
@@ -4592,7 +4636,7 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={status === 'finished' && humanWon && !showingLockScreen && !isViewingFinishedGame}
+        visible={status === 'finished' && humanWon && !showingLockScreen && !showingForfeitPrompt && !isViewingFinishedGame}
         transparent
         animationType="fade"
         onRequestClose={handleNewGame}
@@ -4611,7 +4655,7 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={status === 'finished' && !humanWon && !showingLockScreen && !isViewingFinishedGame}
+        visible={status === 'finished' && !humanWon && !showingLockScreen && !showingForfeitPrompt && !isViewingFinishedGame}
         transparent
         animationType="fade"
         onRequestClose={handleNewGame}
@@ -4634,6 +4678,7 @@ export default function GameScreen() {
       {!isViewingFinishedGame &&
         isHumanTurn &&
         !showingAiObserver &&
+        !showingForfeitPrompt &&
         status === 'active' &&
         !isReadOnly && (
         <>
@@ -4732,7 +4777,57 @@ export default function GameScreen() {
         </View>
       )}
 
-      {showingLockScreen && (!isAsyncGame || isViewingFinishedGame) && (
+      {showingForfeitPrompt && (
+        <View
+          style={[styles.lockScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+        >
+          <Text style={styles.lockTitle}>Sitting out</Text>
+          <Text style={styles.lockTurnNumber}>Turn {roundNumber}</Text>
+          <Text style={styles.lockPlayerName}>{currentTurnPlayerName}'s turn</Text>
+          <Text style={styles.forfeitPromptBody}>
+            Rejoin to take command, or let the AI play this turn.
+          </Text>
+          <Pressable
+            style={styles.lockStartButton}
+            onPress={() => {
+              setDontAskAgainForfeit(false);
+              rejoinFromForfeit();
+            }}
+          >
+            <Text style={styles.lockStartButtonText}>Rejoin</Text>
+          </Pressable>
+          <Pressable
+            style={styles.forfeitAiButton}
+            onPress={() => {
+              letAiTakeForfeitTurn(dontAskAgainForfeit);
+            }}
+          >
+            <Text style={styles.forfeitAiButtonText}>Let the AI take this turn</Text>
+          </Pressable>
+          <Pressable
+            style={styles.forfeitCheckboxRow}
+            onPress={() => setDontAskAgainForfeit((prev) => !prev)}
+          >
+            <View
+              style={[
+                styles.forfeitCheckbox,
+                dontAskAgainForfeit && styles.forfeitCheckboxChecked,
+              ]}
+            >
+              {dontAskAgainForfeit && <Text style={styles.forfeitCheckboxMark}>✓</Text>}
+            </View>
+            <Text style={styles.forfeitCheckboxLabel}>
+              Don't ask again — AI takes my remaining turns
+            </Text>
+          </Pressable>
+          <Pressable style={styles.lockExitButton} onPress={handleExitToHome}>
+            <Text style={styles.lockExitButtonText}>Exit</Text>
+          </Pressable>
+        </View>
+      )}
+      {showingLockScreen &&
+        !showingForfeitPrompt &&
+        (!isAsyncGame || isViewingFinishedGame) && (
         <View style={[styles.lockScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
           <Text style={styles.lockTitle}>Pass the device</Text>
           <Text style={styles.lockTurnNumber}>Turn {roundNumber}</Text>
@@ -4840,6 +4935,13 @@ export default function GameScreen() {
         <View style={styles.submittingOverlay} pointerEvents="auto">
           <ActivityIndicator size="large" color={COLORS.accent} />
           <Text style={styles.submittingOverlayText}>Submitting turn…</Text>
+        </View>
+      )}
+
+      {isResolvingAiTurns && (
+        <View style={styles.submittingOverlay} pointerEvents="auto">
+          <ActivityIndicator size="large" color={COLORS.accent} />
+          <Text style={styles.submittingOverlayText}>The AI is taking over…</Text>
         </View>
       )}
 
@@ -5504,6 +5606,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  headerMenuRowDanger: {
+    color: COLORS.defeat,
+  },
   headerMenuBadge: {
     backgroundColor: COLORS.accent,
     borderRadius: 10,
@@ -5976,6 +6081,64 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 2,
     textTransform: 'uppercase',
+  },
+  forfeitPromptBody: {
+    fontSize: 15,
+    color: '#d4d7e6',
+    textAlign: 'center',
+    paddingHorizontal: 32,
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  forfeitAiButton: {
+    backgroundColor: '#3a3a58',
+    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    minWidth: 200,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  forfeitAiButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+  },
+  forfeitCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 24,
+    paddingHorizontal: 32,
+    gap: 10,
+    maxWidth: 320,
+  },
+  forfeitCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#d4d7e6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  forfeitCheckboxChecked: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  forfeitCheckboxMark: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  forfeitCheckboxLabel: {
+    flex: 1,
+    color: '#d4d7e6',
+    fontSize: 13,
+    lineHeight: 18,
   },
   submittingOverlay: {
     position: 'absolute',

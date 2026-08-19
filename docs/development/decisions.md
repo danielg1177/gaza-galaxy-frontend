@@ -4,6 +4,20 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
+## 2026-08-19 — Async forfeit submits the AI turn before the forfeit API
+**Decision:** On async ⋮ **Forfeit**, resolve the AI turn (and remaining AI-controlled slots), `submitTurn`, then `POST /games/{id}/forfeit`. If the game is already `finished` after submit, skip the forfeit call. Retry forfeit once if it fails after a successful submit; never restore the pre-submit snapshot in that case.
+**Rationale:** Forfeit does not advance `current_user_id`. Calling forfeit first makes `is_my_turn` false while the pointer still names the sitter; a failed submit then stalls the match. Sitters are skipped for "Your Turn!" pushes only after `is_forfeited` is set, so the API must run after the turn has actually advanced.
+**Alternatives considered:** Forfeit first then submit (rejected — stall if submit fails); treating forfeit as an empty human submit without AI (rejected — the user asked the AI to take the empire).
+
+---
+
+## 2026-08-19 — Forfeit is AI control, not `isAI` and not elimination
+**Decision:** Sitting out sets `Player.isForfeited` (and optional `autoAiUntilEnd` in pass-and-play). `isAI` remains the created slot type. `isAiControlled` in `playerControl.ts` decides who `computeAiTurn` plays. Pass-and-play humans without `autoAiUntilEnd` still stop `runAiTurnsUntilHuman` so the rejoin prompt can show.
+**Rationale:** `isAI` drives identity — local human, knockout farewells, Command Center victory/defeat, fog viewer. Flipping it would treat a sitting commander as a nameless AI. Forfeit is not home-planet elimination; their empire stays in the war.
+**Alternatives considered:** Setting `isAI: true` on forfeit (rejected — breaks identity and win/loss); eliminating the player (rejected — user asked to sit out without ending the game).
+
+---
+
 ## 2026-08-19 — Pass-and-play knockout restores the engine's next player
 **Decision:** When a knockout farewell temporarily overwrites `currentPlayerId`, store the living player `resolveTurn` already selected as `GameRecord.knockoutResumePlayerId` and restore it in `acknowledgeKnockout`. Do not compute the next player by walking forward from the eliminated slot. Pass-and-play knockout must not set `isSubmittingTurn`.
 **Rationale:** Round-wrap combat (the usual home-planet kill from a fleet sent last round) runs on the last player's `endTurn`. The engine's next player is the first living player in the new round. Walking forward from the eliminated player skips everyone whose turn order is before that slot. `isSubmittingTurn` is the async submit overlay; setting it locally produced a fake backend timeout while offline.

@@ -90,11 +90,25 @@ When exactly one player has `isEliminated !== true`, `status` becomes `'finished
 
 The Zustand store (`src/store/gameStore.ts`) keeps human fleet dispatches in **`queuedOrders`** (`PendingFleet[]`) until **`endTurn()`**. Each confirm in the ship-count modal calls **`queueOrder`** only (no `GameState` mutation). **`endTurn()`** builds one `TurnInput`: all queued orders as `SEND_FLEET` actions (in queue order), then `{ type: 'END_TURN' }`, calls **`resolveTurn`**, then **`runAiTurnsUntilHuman`**, saves state, sets **`turnReport`** from aggregated `events`, and clears **`queuedOrders`**. **`cancelQueuedOrder(index)`** removes a queued row without touching the engine.
 
+`runAiTurnsUntilHuman` continues while `isAiControlled(currentPlayer, playMode)` is true: created AI slots, forfeited humans in async multiplayer, and pass-and-play humans who checked **Don't ask again**. It stops for a living human, including a forfeited pass-and-play commander who still wants the rejoin prompt (`needsForfeitPrompt`).
+
+## Pass-and-play forfeit (Task 253–254)
+
+A human may **Forfeit** from the ⋮ menu on their turn without being eliminated. `Player.isAI` stays false (identity, fog, victory/defeat). `isForfeited` marks them sitting out; `autoAiUntilEnd` skips the per-turn prompt. The store discards queued orders, inits `aiStates` + `difficulty: 'hard'`, and runs `computeAiTurn` for that slot.
+
+When the turn order later reaches a forfeited human without `autoAiUntilEnd`, GameScreen shows a **Sitting out** overlay (not the map, not the lock screen): **Rejoin**, **Let the AI take this turn**, and a checkbox to stop asking. Rejoin clears the flags so they play the map. Let-AI runs one AI turn then `runAiTurnsUntilHuman`. Sitting-out humans skipped knockout farewells.
+
+## Async forfeit (Task 256)
+
+Async ⋮ **Forfeit** uses the same `isAiControlled` loop. The store discards queued human orders, marks the current player sitting out locally (so the last human forfeiting can play out to `finished`), submits the AI actions with **pre-resolution** `turnNumber`/`roundNumber`, then calls `POST /forfeit`. `loadAsyncGame` overlays server `is_forfeited` onto each human slot so the next submitter's `runAiTurnsUntilHuman` skips sitters.
+
 ## Stale fleet drain on load (Task 193)
 
 `loadGame` and `loadAsyncGame` call **`drainStaleFleets`**, which removes any fleet with `turnsRemaining <= 0` from `GameState.fleets` before the match resumes. Under normal play, round-wrap resolution leaves only `turnsRemaining > 0` fleets in state; persisted saves from before that invariant (or corrupted state) could otherwise re-enter the early-arrivals block at the next turn start and produce a phantom second combat on the same planet.
 
 ## Changelog
+- 2026-08-19: **Task 256** — async forfeit submits the AI-resolved turn then `POST /forfeit`; `loadAsyncGame` overlays `is_forfeited`.
+- 2026-08-19: **Task 253–254** — pass-and-play forfeit: `runAiTurnsUntilHuman` uses `isAiControlled`; sitting-out humans without `autoAiUntilEnd` stop the AI loop for the rejoin prompt; `resolveTurn` writes fog memory for any AI-controlled player (not only `isAI`).
 - 2026-08-19: **Task 252** — pass-and-play knockout stores `knockoutResumePlayerId` (the living player `resolveTurn` already selected) and restores it in `acknowledgeKnockout`; local knockout no longer sets `isSubmittingTurn`.
 - 2026-06-01: **Task 211** — production pre-runs before step 2 early-arrivals combat on round-wrap turns (`willRoundWrap` pre-computed from `state.players`; `productionAlreadyRan` guard prevents double-run in step 8).
 - 2026-06-01: **Task 199** — multi-way combat wired into both arrival loops; `groupArrivalsByDestination`, `countTotalCombatants`, `buildCombatantList` helpers added to turnEngine.

@@ -2,6 +2,24 @@
 
 Tasks currently being worked on.
 
+## Phase 71 — Feature: Forfeit without ending (async multiplayer)
+
+**Status:** Complete (2026-08-19).
+
+- ~~**Task 255**~~ — Backend: `game_players.is_forfeited` + `POST /games/{id}/forfeit` and `/rejoin`; submit rejects sitters; no `your_turn` push *(complete 2026-08-19)*
+- ~~**Task 256**~~ — Frontend: async forfeit + Command Center Rejoin *(complete 2026-08-19)*
+
+---
+
+## Phase 70 — Feature: Forfeit without ending (pass-and-play)
+
+**Status:** Complete (2026-08-19). Async multiplayer forfeit/rejoin is Phase 71.
+
+- ~~**Task 253**~~ — Data + helpers: `isForfeited` / `autoAiUntilEnd`, `isAiControlled`, AI memory for sitters *(complete 2026-08-19)*
+- ~~**Task 254**~~ — Pass-and-play Forfeit menu, Sitting out overlay, lock-screen gating *(complete 2026-08-19)*
+
+---
+
 ## Phase 69 — Bug Fix: Pass-and-Play Knockout Skips the First Player's Next Turn
 
 **Status:** Complete (2026-08-19).
@@ -600,6 +618,8 @@ Phase 46 (Task 213) did not stop stacked battle reports. The copies were `react-
 ---
 
 ## Changelog
+- 2026-08-19: Phase 71 complete (Tasks 255–256) — async forfeit: AI plays the slot then submit-then-forfeit API; Command Center **Rejoin**; `loadAsyncGame` overlays `is_forfeited`.
+- 2026-08-19: Phase 70 complete (Tasks 253–254) — pass-and-play forfeit / AI sit-out without flipping `isAI`.
 - 2026-08-19: Phase 69 complete (Task 252) — pass-and-play knockout skipped the first player after a round-wrap elimination; `knockoutResumePlayerId` restore; local knockout no longer sets `isSubmittingTurn`.
 - 2026-08-19: Phase 68 complete (Task 251) — stacked battle report overlays: in-tree overlay, derived visibility, immutable archive merge, `getId` on Game route.
 - 2026-06-18: Phase 66 complete (Task 249) — seeded SVG starfield added to game map; background color changed to `#080820`.
