@@ -185,6 +185,7 @@ Pass-and-play games remain entirely local:
 - Lock screen after End Turn displays `roundNumber` (shared round) for all players — same as the in-game HUD
 - **Auto-handoff:** When a player ends their turn, the lock screen automatically dismisses after 1.5 seconds, immediately showing the next human player's turn without requiring manual interaction. The "Start Turn" button remains visible for manual override if desired.
 - **Knockout farewell:** Home-planet kills often resolve on round wrap (the last player's End Turn). The eliminated player sees a knockout report, then play returns to the living player the engine already selected — including the first player of the new round. Knockout End Turn is local-only; it does not submit to the backend.
+- **Async knockout farewell (Task 258):** A wrap-kill during the victim's own submit is a deferred knockout. Async `endTurn` must set `currentPlayerId` to that eliminated human (not the next living human). Sitting-out humans still skip knockout farewells. After farewell, the match continues if any player (including AI) is still alive.
 - **Forfeit (sit out):** ⋮ **Forfeit** on your turn marks `isForfeited` without ending the game or flipping `isAI`. The AI takes that turn immediately. When the slot comes around again, a **Sitting out** screen offers **Rejoin** or **Let the AI take this turn**, with a checkbox to stop asking (`autoAiUntilEnd`). Other commanders see a **Commander update** overlay on their next turn.
 
 ## Async multiplayer forfeit (Task 256)
@@ -200,6 +201,7 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 ---
 
 ## Changelog
+- 2026-08-19: Task 258 — async wrap-kill farewells: deferred knockouts and wrap-back recovery redirect `currentPlayerId` to the eliminated human; `acknowledgeKnockout` does not finish while AIs remain.
 - 2026-08-19: Task 257 — commander forfeit/rejoin briefing overlay; notices stored on `GameState` and shown on each other human's next turn.
 - 2026-08-19: Task 256 — async forfeit/rejoin: submit AI-resolved turn then `POST /forfeit`; Command Center **Rejoin**; overlay `is_forfeited` in `loadAsyncGame`.
 - 2026-08-19: Task 253–254 — pass-and-play forfeit (sit out): AI takes over without flipping `isAI`; rejoin prompt when the slot returns; async APIs not yet.

@@ -4,6 +4,13 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
+## 2026-08-19 — Async knockout farewells are not deferred
+**Decision:** When an async submit eliminates a human (including a self-knockout on round wrap), `resulting_state.currentPlayerId` must be that human so they receive a farewell turn. Persist `pendingFarewellPlayerIds` and `knockoutResumePlayerId` on `GameState`. `acknowledgeKnockout` marks `knockoutFarewellComplete` and ends the game only when one non-eliminated player remains (AIs count). Wrap-back recovery: if the engine's next living human is the submitter, insert any eliminated human who has not completed farewell.
+**Rationale:** Pass-and-play defers a self-knockout until that slot comes around on the same device. Async wipes Zustand on submit, so deferral skips the victim forever and `runAiTurnsUntilHuman` returns the turn to the attacker. Finishing when one *human* remains would abort a 1-human vs AI match after the other human's farewell.
+**Alternatives considered:** Deferring async farewells in Zustand (rejected — not persisted); walking forward from the eliminated slot (rejected — Phase 69); finishing when one human remains (rejected — AIs are still playing).
+
+---
+
 ## 2026-08-19 — Async forfeit submits the AI turn before the forfeit API
 **Decision:** On async ⋮ **Forfeit**, resolve the AI turn (and remaining AI-controlled slots), `submitTurn`, then `POST /games/{id}/forfeit`. If the game is already `finished` after submit, skip the forfeit call. Retry forfeit once if it fails after a successful submit; never restore the pre-submit snapshot in that case.
 **Rationale:** Forfeit does not advance `current_user_id`. Calling forfeit first makes `is_my_turn` false while the pointer still names the sitter; a failed submit then stalls the match. Sitters are skipped for "Your Turn!" pushes only after `is_forfeited` is set, so the API must run after the turn has actually advanced.

@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Phase 73 — Async knockout farewell after wrap-kill
+**Completed:** 2026-08-19
+**Files modified:** `src/game/types.ts`, `src/game/turnEngine.ts`, `src/store/gameStore.ts`, `docs/systems/turn-engine.md`, `docs/systems/multiplayer.md`, `docs/development/current-state.md`, `docs/development/known-issues.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`
+**Notes:** Task 243 only redirected `immediateKnockouts`. A home-planet kill on round wrap during the victim's own `endTurn` is deferred; Zustand pending farewells are wiped on submit, so the victim was skipped and `runAiTurnsUntilHuman` returned the turn to the attacker. Async submit now redirects deferred knockouts (and wrap-back recovery for already-skipped victims). `Player.knockoutFarewellComplete` + `GameState.pendingFarewellPlayerIds` / `knockoutResumePlayerId` persist in `state_json`. `acknowledgeKnockout` finishes only when one player of any kind remains.
+
+---
 ## Phase 72 — Commander forfeit/rejoin briefing
 **Completed:** 2026-08-19
 **Files modified:** `src/game/types.ts`, `src/game/playerControl.ts`, `src/game/turnEngine.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `docs/systems/multiplayer.md`, `docs/systems/turn-engine.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`

@@ -10,6 +10,16 @@
 
 ---
 
+### ~~Async: knocking out the other human immediately returns the turn to the attacker~~ (2026-08-19, resolved 2026-08-19)
+
+**Symptom:** In a 2-human + AI async game, the attacker opens their turn and sees they captured the other human's home planet. Ending the turn immediately sends a "Your Turn!" push and shows Command Center as their turn again. The knocked-out human never gets a farewell turn.
+
+**Root cause:** Home-planet kills usually resolve on **round wrap**, which runs during the **victim's** `endTurn` (they act, then AIs play, then wrap). That knockout is classified as **deferred** (`id === outgoingPlayerId`). Task 243 only redirected `immediateKnockouts`. Zustand `pendingFarewellPlayerIds` is wiped on `resetGame` / `loadAsyncGame`, so the deferral never reaches the other device. `runAiTurnsUntilHuman` then skips the eliminated human and lands back on the attacker. A second bug: `acknowledgeKnockout` treated "one living human" as game over, which would have ended the match while AIs were still alive.
+
+**Fix (Phase 73, Task 258):** Async submit now redirects deferred knockouts (and wrap-back recovery for already-skipped victims) to the eliminated human. Farewell queue and resume player persist on `GameState`. `acknowledgeKnockout` finishes the game only when one player of any kind remains; otherwise it restores the living human.
+
+---
+
 ### ~~Pass-and-play: first player's turn skipped after eliminating another player~~ (2026-08-19, resolved 2026-08-19)
 
 **Symptom:** In a 5-player offline pass-and-play game, the first player eliminated the second player. When the phone came back around, player 1's next turn was skipped. The remaining players took that round, then player 1 could play again. Ending the knockout farewell also showed a "Submitting turn…" overlay / connection timeout even though the game is local-only. Reopening the app continued from the already-advanced state.
@@ -337,6 +347,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-08-19: Resolved async knockout skipping the eliminated human's farewell turn and looping the attacker (Phase 73, Task 258).
 - 2026-08-19: Resolved pass-and-play knockout skip of the first player after a round-wrap elimination, plus local knockout flipping the async submit overlay (Phase 69, Task 252).
 - 2026-08-19: Resolved stacked battle report overlays — in-tree overlay + derived visibility (Phase 68, Task 251). Phase 46's `lastOpenedTurnKeyRef` effect was not sufficient.
 - 2026-06-08: Resolved finished-game outcome bugs — `localPlayerId` on `GameRecord`; victory/defeat modals gated; `handleCloseBattleReport` navigates home; `getFinishedOutcome` covers eliminated players in active games; card styling replaced pills with background colors.

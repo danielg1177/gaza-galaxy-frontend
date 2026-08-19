@@ -455,27 +455,67 @@ function runAiTurnsUntilHuman(result: ResolveTurnResult): {
   return { state: current, events: allEvents };
 }
 
+function uniquePlayerIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      unique.push(id);
+    }
+  }
+  return unique;
+}
+
 function findNewlyEliminatedHumanIds(
   events: TurnEvent[],
   players: Player[],
 ): string[] {
   const ids: string[] = [];
-  for (const event of events) {
-    if (event.kind !== 'combat' || event.isHomePlanetConquest !== true) {
-      continue;
+  const consider = (player: Player | undefined) => {
+    if (
+      player !== undefined &&
+      !player.isAI &&
+      player.isForfeited !== true &&
+      player.isEliminated &&
+      !ids.includes(player.id)
+    ) {
+      ids.push(player.id);
     }
-    const defender = players.find(
-      (player) =>
-        !player.isAI &&
-        player.isForfeited !== true &&
-        player.name === event.defenderName &&
-        player.isEliminated,
-    );
-    if (defender !== undefined && !ids.includes(defender.id)) {
-      ids.push(defender.id);
+  };
+  for (const event of events) {
+    if (event.kind === 'combat' && event.isHomePlanetConquest === true) {
+      consider(
+        players.find(
+          (player) =>
+            (event.planetId !== undefined &&
+              player.homePlanetId === event.planetId) ||
+            player.name === event.defenderName,
+        ),
+      );
+    }
+    if (event.kind === 'multiway_combat' && event.isHomePlanetConquest === true) {
+      for (const participant of event.participants) {
+        if (participant.survived) {
+          continue;
+        }
+        consider(players.find((player) => player.id === participant.ownerId));
+      }
     }
   }
   return ids;
+}
+
+function humansNeedingKnockoutFarewell(players: Player[]): string[] {
+  return players
+    .filter(
+      (player) =>
+        !player.isAI &&
+        player.isEliminated &&
+        player.isForfeited !== true &&
+        player.knockoutFarewellComplete !== true,
+    )
+    .map((player) => player.id);
 }
 
 function findFarewellInPath(
@@ -493,6 +533,60 @@ function findFarewellInPath(
     if (farewellIds.includes(candidate.id)) return candidate.id;
   }
   return null;
+}
+
+/**
+ * Async: point `currentPlayerId` at a knocked-out human so they get a farewell
+ * turn. Pass-and-play defers a self-knockout until that player's next slot;
+ * async must not — Zustand `pendingFarewellPlayerIds` is wiped on submit.
+ */
+function applyAsyncKnockoutFarewellHandoff(
+  engineState: GameState,
+  outgoingPlayerId: string,
+  thisTurnKnockoutIds: string[],
+): GameState {
+  if (engineState.playMode === 'passAndPlay') {
+    return engineState;
+  }
+  const engineNextId = engineState.currentPlayerId;
+  const wrapBackRecovery =
+    engineNextId === outgoingPlayerId
+      ? humansNeedingKnockoutFarewell(engineState.players)
+      : [];
+  const pool = uniquePlayerIds([
+    ...thisTurnKnockoutIds,
+    ...(engineState.pendingFarewellPlayerIds ?? []),
+    ...wrapBackRecovery,
+  ]);
+  if (pool.length === 0) {
+    return engineState;
+  }
+
+  let farewellId: string | null = null;
+  if (thisTurnKnockoutIds.includes(outgoingPlayerId)) {
+    farewellId = outgoingPlayerId;
+  } else {
+    farewellId = findFarewellInPath(
+      outgoingPlayerId,
+      engineNextId,
+      engineState.players,
+      pool,
+    );
+    if (farewellId === null && thisTurnKnockoutIds.length > 0) {
+      farewellId = thisTurnKnockoutIds[0];
+    }
+  }
+  if (farewellId === null) {
+    return engineState;
+  }
+
+  return {
+    ...engineState,
+    currentPlayerId: farewellId,
+    pendingFarewellPlayerIds: pool.filter((id) => id !== farewellId),
+    knockoutResumePlayerId: engineNextId,
+    status: 'active',
+  };
 }
 
 /**
@@ -1211,6 +1305,7 @@ export const useGameStore = create<GameStore>()(
       asyncIsMyTurn: detail.isMyTurn,
       state,
       localPlayerId,
+      knockoutResumePlayerId: state.knockoutResumePlayerId,
       config: {
         playMode: 'asyncMultiplayer',
         playerName: '',
@@ -1250,7 +1345,7 @@ export const useGameStore = create<GameStore>()(
       playerBattleArchiveByPlayerId: asyncReports?.archive ?? {},
       playerTurnReportByPlayerId: asyncReports?.turnReport ?? {},
       eliminatedPlayerPendingKnockout: isEliminatedFarewellTurn,
-      pendingFarewellPlayerIds: [],
+      pendingFarewellPlayerIds: state.pendingFarewellPlayerIds ?? [],
       isSubmittingTurn: false,
       shouldReturnHome: false,
       isViewingFinishedGame: false,
@@ -1654,35 +1749,37 @@ export const useGameStore = create<GameStore>()(
     const outgoingPlayerId = gameState.currentPlayerId;
     const knockoutHumanIds = findNewlyEliminatedHumanIds(events, nextState.players);
     // Players knocked out DURING their own endTurn (round wrap they triggered) need
-    // a deferred farewell — showing it immediately would mean they see it right after
-    // they end their own turn, before any other player goes.
+    // a deferred farewell in pass-and-play — showing it immediately would mean they
+    // see it right after they end their own turn, before any other player goes.
+    // Async must not defer: Zustand pending farewells are wiped on submit.
     const deferredKnockouts = knockoutHumanIds.filter((id) => id === outgoingPlayerId);
     const immediateKnockouts = knockoutHumanIds.filter((id) => id !== outgoingPlayerId);
     const pendingFarewellWithDeferred = [
       ...get().pendingFarewellPlayerIds,
       ...deferredKnockouts,
     ];
-    const passAndPlayHandoff = applyPassAndPlayKnockoutHandoff(
-      nextState,
-      outgoingPlayerId,
-      pendingFarewellWithDeferred,
-      immediateKnockouts,
-    );
-    let newPendingFarewellIds = passAndPlayHandoff.pendingFarewellIds;
-    let finalState = passAndPlayHandoff.state;
-    let pendingKnockout = passAndPlayHandoff.pendingKnockout;
-    if (
-      !pendingKnockout &&
-      immediateKnockouts.length > 0 &&
-      nextState.status === 'active'
-    ) {
-      // For async multiplayer (and any other non-passAndPlay mode): redirect the
-      // submitted state to the first eliminated player so the backend sets
-      // current_user_id to them and they receive a normal "your turn" notification.
-      // pendingKnockout stays false — the outgoing player (attacker) is not eliminated.
-      // The eliminated player's own session sets eliminatedPlayerPendingKnockout
-      // in loadAsyncGame when it detects isMyTurn && isEliminated.
-      finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
+    let newPendingFarewellIds = pendingFarewellWithDeferred;
+    let finalState = nextState;
+    let pendingKnockout = false;
+    let passAndPlayResumeId: string | undefined;
+    if (nextState.playMode === 'passAndPlay') {
+      const passAndPlayHandoff = applyPassAndPlayKnockoutHandoff(
+        nextState,
+        outgoingPlayerId,
+        pendingFarewellWithDeferred,
+        immediateKnockouts,
+      );
+      newPendingFarewellIds = passAndPlayHandoff.pendingFarewellIds;
+      finalState = passAndPlayHandoff.state;
+      pendingKnockout = passAndPlayHandoff.pendingKnockout;
+      passAndPlayResumeId = passAndPlayHandoff.knockoutResumePlayerId;
+    } else if (isAsync) {
+      finalState = applyAsyncKnockoutFarewellHandoff(
+        nextState,
+        outgoingPlayerId,
+        [...immediateKnockouts, ...deferredKnockouts],
+      );
+      newPendingFarewellIds = finalState.pendingFarewellPlayerIds ?? [];
     }
 
     const showLock =
@@ -1716,7 +1813,7 @@ export const useGameStore = create<GameStore>()(
               pendingTurnReport: events,
               pendingTurnReportAcknowledged: false,
               knockoutResumePlayerId: pendingKnockout
-                ? passAndPlayHandoff.knockoutResumePlayerId
+                ? passAndPlayResumeId
                 : undefined,
             }
           : g,
@@ -1910,34 +2007,74 @@ export const useGameStore = create<GameStore>()(
     };
     if (record.asyncGameId != null) {
       const asyncGameId = record.asyncGameId;
-      const farewellPlayers = stateAfterForfeit.players;
-      const aliveHumans = farewellPlayers.filter((p) => !p.isEliminated && !p.isAI);
+      const markedPlayers = stateAfterForfeit.players.map((player) =>
+        player.id === farewellPlayerId
+          ? { ...player, knockoutFarewellComplete: true }
+          : player,
+      );
+      const remainingPending = uniquePlayerIds(
+        (stateAfterForfeit.pendingFarewellPlayerIds ?? []).filter(
+          (id) => id !== farewellPlayerId,
+        ),
+      );
+      const survivingPlayers = markedPlayers.filter((player) => !player.isEliminated);
+      const resumeId =
+        stateAfterForfeit.knockoutResumePlayerId ?? knockoutResumePlayerId;
       let nextState: typeof stateAfterForfeit;
-      if (aliveHumans.length <= 1) {
-        // Only the winner remains — submit status: 'finished' so the backend ends the game
-        const winner = aliveHumans[0];
+      if (remainingPending.length > 0) {
         nextState = {
           ...stateAfterForfeit,
+          players: markedPlayers,
+          currentPlayerId: remainingPending[0],
+          pendingFarewellPlayerIds: remainingPending.slice(1),
+          knockoutResumePlayerId: resumeId,
+          status: 'active',
+          turnNumber: record.state.turnNumber + 1,
+        };
+      } else if (survivingPlayers.length <= 1) {
+        const winner = survivingPlayers[0];
+        nextState = {
+          ...stateAfterForfeit,
+          players: markedPlayers,
           status: 'finished',
           currentPlayerId: winner?.id ?? stateAfterForfeit.currentPlayerId,
+          winnerId: winner?.id ?? stateAfterForfeit.winnerId,
+          pendingFarewellPlayerIds: [],
+          knockoutResumePlayerId: undefined,
           turnNumber: record.state.turnNumber + 1,
         };
       } else {
-        // Multiple alive players — find the next non-eliminated non-AI in turn order
-        const farewellCurrentIdx = farewellPlayers.findIndex(
-          (p) => p.id === stateAfterForfeit.currentPlayerId,
-        );
-        let nextHumanPlayerId = stateAfterForfeit.currentPlayerId;
-        for (let offset = 1; offset <= farewellPlayers.length; offset++) {
-          const candidate = farewellPlayers[(farewellCurrentIdx + offset) % farewellPlayers.length];
-          if (!candidate.isEliminated && !candidate.isAI) {
-            nextHumanPlayerId = candidate.id;
-            break;
+        const resumePlayer = markedPlayers.find((player) => player.id === resumeId);
+        const resumeIsPlayable =
+          resumePlayer !== undefined &&
+          !resumePlayer.isEliminated &&
+          !isAiControlled(resumePlayer, stateAfterForfeit.playMode);
+        let nextHumanPlayerId = resumeIsPlayable
+          ? resumePlayer.id
+          : farewellPlayerId;
+        if (!resumeIsPlayable) {
+          const farewellCurrentIdx = markedPlayers.findIndex(
+            (player) => player.id === farewellPlayerId,
+          );
+          for (let offset = 1; offset <= markedPlayers.length; offset++) {
+            const candidate =
+              markedPlayers[(farewellCurrentIdx + offset) % markedPlayers.length];
+            if (
+              !candidate.isEliminated &&
+              !isAiControlled(candidate, stateAfterForfeit.playMode)
+            ) {
+              nextHumanPlayerId = candidate.id;
+              break;
+            }
           }
         }
         nextState = {
           ...stateAfterForfeit,
+          players: markedPlayers,
           currentPlayerId: nextHumanPlayerId,
+          pendingFarewellPlayerIds: [],
+          knockoutResumePlayerId: undefined,
+          status: 'active',
           turnNumber: record.state.turnNumber + 1,
         };
       }

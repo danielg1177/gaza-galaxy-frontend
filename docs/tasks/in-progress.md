@@ -2,6 +2,16 @@
 
 Tasks currently being worked on.
 
+## Phase 73 — Bug Fix: Async knockout skips the eliminated human's farewell
+
+**Status:** Complete (2026-08-19).
+
+2-human + AI async: attacker opens their turn, sees they captured the other human's home, ends turn, immediately gets "Your Turn!" again. The victim never gets a farewell.
+
+- ~~**Task 258**~~ — Frontend: Redirect deferred/self wrap-kills and wrap-back skipped victims to the eliminated human; persist farewell queue on `GameState`; do not finish while AIs remain *(complete 2026-08-19)*
+
+---
+
 ## Phase 72 — Feature: Commander forfeit/rejoin briefing
 
 **Status:** Complete (2026-08-19).
@@ -626,6 +636,7 @@ Phase 46 (Task 213) did not stop stacked battle reports. The copies were `react-
 ---
 
 ## Changelog
+- 2026-08-19: Phase 73 complete (Task 258) — async wrap-kill knockout skipped the eliminated human's farewell and looped the attacker; deferred redirect + wrap-back recovery; farewell queue on `GameState`; `acknowledgeKnockout` continues vs remaining AIs.
 - 2026-08-19: Phase 72 complete (Task 257) — commander forfeit/rejoin briefing overlay on each other human's next turn.
 - 2026-08-19: Phase 71 complete (Tasks 255–256) — async forfeit: AI plays the slot then submit-then-forfeit API; Command Center **Rejoin**; `loadAsyncGame` overlays `is_forfeited`.
 - 2026-08-19: Phase 70 complete (Tasks 253–254) — pass-and-play forfeit / AI sit-out without flipping `isAI`.

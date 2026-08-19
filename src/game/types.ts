@@ -177,6 +177,12 @@ export interface Player {
   gold: number;
   researchPoints: number;
   isEliminated: boolean;
+  /**
+   * Human already opened (or skipped) their knockout farewell turn.
+   * Async submit uses this so an eliminated commander is not given another
+   * "your turn" after they have seen the defeat UI.
+   */
+  knockoutFarewellComplete?: boolean;
   isAI: boolean;
   /**
    * Human commander is sitting out; the AI plays their turns until they rejoin.
@@ -259,4 +265,16 @@ export interface GameState {
   aiStates?: Record<string, AiPlayerState>;
   /** Unfinished forfeit/rejoin briefings for other living humans. */
   commanderStatusNotices?: CommanderStatusNotice[];
+  /**
+   * Async: remaining humans who still need a knockout farewell turn.
+   * Persisted in `state_json` so the next submitter can redirect to them.
+   * Pass-and-play keeps the equivalent list on the Zustand store only.
+   */
+  pendingFarewellPlayerIds?: string[];
+  /**
+   * Async: living player `resolveTurn` already selected, restored after a
+   * knockout farewell submit. Same role as `GameRecord.knockoutResumePlayerId`
+   * in pass-and-play.
+   */
+  knockoutResumePlayerId?: string;
 }
