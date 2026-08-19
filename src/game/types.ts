@@ -227,6 +227,20 @@ export interface AiPlayerState {
   strategicPhase: 'expand' | 'build' | 'strike' | 'defend';
 }
 
+export type CommanderStatusNoticeKind = 'forfeit' | 'rejoin';
+
+/**
+ * Roster change other commanders should see once, on their next turn.
+ * Stored on `GameState` so it survives `resolveTurn` and async `state_json`.
+ */
+export interface CommanderStatusNotice {
+  id: string;
+  kind: CommanderStatusNoticeKind;
+  playerId: string;
+  playerName: string;
+  acknowledgedByPlayerIds: string[];
+}
+
 /**
  * Full authoritative snapshot of an in-progress or finished match.
  */
@@ -243,4 +257,6 @@ export interface GameState {
   winnerId: string | null;
   /** Persistent fog-of-war brain state for each AI player. Keyed by player id. */
   aiStates?: Record<string, AiPlayerState>;
+  /** Unfinished forfeit/rejoin briefings for other living humans. */
+  commanderStatusNotices?: CommanderStatusNotice[];
 }

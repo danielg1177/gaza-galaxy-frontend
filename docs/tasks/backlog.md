@@ -16,6 +16,13 @@ On your turn, ⋮ Forfeit runs the AI for your slot then `runAiTurnsUntilHuman`,
 
 ---
 
+## Phase 72 — Feature: Commander forfeit/rejoin briefing
+
+### ~~Task 257 — Frontend: turn-start overlay when a commander forfeits or rejoins~~ *(complete 2026-08-19)*
+On each other living human's next turn (this round or the next), show an in-tree **Commander update** overlay: forfeit (AI taking their turns) or rejoin (taken command again). Persist notices on `GameState` so they survive `resolveTurn` and async `state_json`.
+
+---
+
 ## Phase 2 — Core Rules & Engine Redesign
 
 These tasks overhaul the game engine to match the intended design. They must be completed before any UI work that depends on them.

@@ -558,6 +558,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
       status,
       winnerId,
       aiStates,
+      commanderStatusNotices: state.commanderStatusNotices,
     };
     aiStates = {
       ...aiStates,
@@ -577,6 +578,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     status,
     winnerId,
     aiStates,
+    commanderStatusNotices: state.commanderStatusNotices,
     events,
   };
 }

@@ -102,11 +102,16 @@ When the turn order later reaches a forfeited human without `autoAiUntilEnd`, Ga
 
 Async ⋮ **Forfeit** uses the same `isAiControlled` loop. The store discards queued human orders, marks the current player sitting out locally (so the last human forfeiting can play out to `finished`), submits the AI actions with **pre-resolution** `turnNumber`/`roundNumber`, then calls `POST /forfeit`. `loadAsyncGame` overlays server `is_forfeited` onto each human slot so the next submitter's `runAiTurnsUntilHuman` skips sitters.
 
+## Commander status notices (Task 257)
+
+`resolveTurn` copies `GameState.commanderStatusNotices` through to the result (it rebuilds the snapshot field-by-field and would otherwise drop the queue during AI play-out). Forfeit and rejoin enqueue a notice; each other playing human acknowledges it on their next turn via the GameScreen overlay.
+
 ## Stale fleet drain on load (Task 193)
 
 `loadGame` and `loadAsyncGame` call **`drainStaleFleets`**, which removes any fleet with `turnsRemaining <= 0` from `GameState.fleets` before the match resumes. Under normal play, round-wrap resolution leaves only `turnsRemaining > 0` fleets in state; persisted saves from before that invariant (or corrupted state) could otherwise re-enter the early-arrivals block at the next turn start and produce a phantom second combat on the same planet.
 
 ## Changelog
+- 2026-08-19: **Task 257** — `resolveTurn` preserves `commanderStatusNotices`; forfeit/rejoin briefings survive AI play-out and async submit.
 - 2026-08-19: **Task 256** — async forfeit submits the AI-resolved turn then `POST /forfeit`; `loadAsyncGame` overlays `is_forfeited`.
 - 2026-08-19: **Task 253–254** — pass-and-play forfeit: `runAiTurnsUntilHuman` uses `isAiControlled`; sitting-out humans without `autoAiUntilEnd` stop the AI loop for the rejoin prompt; `resolveTurn` writes fog memory for any AI-controlled player (not only `isAI`).
 - 2026-08-19: **Task 252** — pass-and-play knockout stores `knockoutResumePlayerId` (the living player `resolveTurn` already selected) and restores it in `acknowledgeKnockout`; local knockout no longer sets `isSubmittingTurn`.

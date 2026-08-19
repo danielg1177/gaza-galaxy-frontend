@@ -43,7 +43,7 @@ import {
 } from '../game/movementEngine';
 import { mulberry32 } from '../game/mapGenerator';
 import type { BuildingType, Fleet, OwnerId, Planet, Player, TurnEvent } from '../game/types';
-import { needsForfeitPrompt } from '../game/playerControl';
+import { needsForfeitPrompt, nextCommanderStatusNoticeFor } from '../game/playerControl';
 import { getFriendRequests } from '../services/friendsService';
 import { getGame, saveTurnProgress } from '../services/gamesService';
 import { useAuthStore } from '../store/authStore';
@@ -1782,6 +1782,7 @@ export default function GameScreen() {
   const forfeitCurrentPlayer = useGameStore((s) => s.forfeitCurrentPlayer);
   const rejoinFromForfeit = useGameStore((s) => s.rejoinFromForfeit);
   const letAiTakeForfeitTurn = useGameStore((s) => s.letAiTakeForfeitTurn);
+  const dismissCommanderStatusNotice = useGameStore((s) => s.dismissCommanderStatusNotice);
   const isResolvingAiTurns = useGameStore((s) => s.isResolvingAiTurns);
   const queueBuildOrder = useGameStore((s) => s.queueBuildOrder);
   const cancelBuildOrder = useGameStore((s) => s.cancelBuildOrder);
@@ -2080,8 +2081,28 @@ export default function GameScreen() {
     !eliminatedPlayerPendingKnockout &&
     currentTurnPlayerForPrompt !== undefined &&
     needsForfeitPrompt(currentTurnPlayerForPrompt, gameState.playMode);
+  const commanderNoticeViewerId = isAsyncGame
+    ? localHumanPlayerId
+    : gameState?.currentPlayerId;
+  const pendingCommanderNotice =
+    gameState !== null
+      ? nextCommanderStatusNoticeFor(gameState, commanderNoticeViewerId)
+      : null;
+  const showingCommanderNotice =
+    pendingCommanderNotice !== null &&
+    gameState !== null &&
+    gameState.status === 'active' &&
+    commanderNoticeViewerId !== undefined &&
+    gameState.currentPlayerId === commanderNoticeViewerId &&
+    !showingLockScreen &&
+    !isSubmittingTurn &&
+    !isResolvingAiTurns &&
+    !isReadOnly &&
+    !isViewingFinishedGame &&
+    !showingAiObserver &&
+    !eliminatedPlayerPendingKnockout;
   const lockScreenBlocksBattleReport =
-    (showingLockScreen || showingForfeitPrompt) &&
+    (showingLockScreen || showingForfeitPrompt || showingCommanderNotice) &&
     !(isAsyncGame && eliminatedPlayerPendingKnockout);
 
   useEffect(() => {
@@ -3774,6 +3795,7 @@ export default function GameScreen() {
         status === 'active' &&
         !isKnockoutTurn &&
         !showingForfeitPrompt &&
+        !showingCommanderNotice &&
         !isReadOnly &&
         !isViewingFinishedGame && (
         <>
@@ -4636,7 +4658,7 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={status === 'finished' && humanWon && !showingLockScreen && !showingForfeitPrompt && !isViewingFinishedGame}
+        visible={status === 'finished' && humanWon && !showingLockScreen && !showingForfeitPrompt && !showingCommanderNotice && !isViewingFinishedGame}
         transparent
         animationType="fade"
         onRequestClose={handleNewGame}
@@ -4655,7 +4677,7 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
-        visible={status === 'finished' && !humanWon && !showingLockScreen && !showingForfeitPrompt && !isViewingFinishedGame}
+        visible={status === 'finished' && !humanWon && !showingLockScreen && !showingForfeitPrompt && !showingCommanderNotice && !isViewingFinishedGame}
         transparent
         animationType="fade"
         onRequestClose={handleNewGame}
@@ -4679,6 +4701,7 @@ export default function GameScreen() {
         isHumanTurn &&
         !showingAiObserver &&
         !showingForfeitPrompt &&
+        !showingCommanderNotice &&
         status === 'active' &&
         !isReadOnly && (
         <>
@@ -4777,7 +4800,7 @@ export default function GameScreen() {
         </View>
       )}
 
-      {showingForfeitPrompt && (
+      {showingForfeitPrompt && !showingCommanderNotice && (
         <View
           style={[styles.lockScreen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
         >
@@ -4823,6 +4846,26 @@ export default function GameScreen() {
           <Pressable style={styles.lockExitButton} onPress={handleExitToHome}>
             <Text style={styles.lockExitButtonText}>Exit</Text>
           </Pressable>
+        </View>
+      )}
+      {showingCommanderNotice && pendingCommanderNotice !== null && (
+        <View style={styles.battleReportOverlay} pointerEvents="auto">
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Commander update</Text>
+            <Text style={styles.victoryModalMessage}>
+              {pendingCommanderNotice.kind === 'forfeit'
+                ? `${pendingCommanderNotice.playerName} has forfeited. The AI is taking their turns.`
+                : `${pendingCommanderNotice.playerName} has taken command again.`}
+            </Text>
+            <View style={styles.commanderNoticeActions}>
+              <Pressable
+                style={styles.lockStartButton}
+                onPress={dismissCommanderStatusNotice}
+              >
+                <Text style={styles.lockStartButtonText}>OK</Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
       )}
       {showingLockScreen &&
@@ -6089,6 +6132,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     marginBottom: 24,
     lineHeight: 22,
+  },
+  commanderNoticeActions: {
+    alignItems: 'center',
   },
   forfeitAiButton: {
     backgroundColor: '#3a3a58',

@@ -19,7 +19,7 @@ import {
   type ResolveTurnResult,
   type TurnInput,
 } from '../game/turnEngine';
-import { isAiControlled, needsForfeitPrompt } from '../game/playerControl';
+import { isAiControlled, needsForfeitPrompt, enqueueCommanderStatusNotice, nextCommanderStatusNoticeFor, acknowledgeCommanderStatusNotice } from '../game/playerControl';
 import type {
   AiPlayerState,
   BuildingType,
@@ -176,6 +176,7 @@ export interface GameStore {
   forfeitCurrentPlayer: () => void;
   rejoinFromForfeit: () => void;
   letAiTakeForfeitTurn: (dontAskAgain: boolean) => void;
+  dismissCommanderStatusNotice: () => void;
   acknowledgeKnockout: () => void;
   dismissLockScreen: () => void;
   resetGame: () => void;
@@ -262,6 +263,23 @@ function overlayForfeitFlagsFromApi(
   }
   if (changedMemory) {
     next = { ...next, aiStates };
+  }
+  for (let index = 0; index < players.length; index++) {
+    const player = players[index];
+    const previous = state.players[index];
+    if (player.isAI || previous === undefined) {
+      continue;
+    }
+    const wasForfeited = previous.isForfeited === true;
+    const isForfeited = player.isForfeited === true;
+    if (wasForfeited === isForfeited) {
+      continue;
+    }
+    next = enqueueCommanderStatusNotice(
+      next,
+      isForfeited ? 'forfeit' : 'rejoin',
+      player,
+    );
   }
   return next;
 }
@@ -549,13 +567,18 @@ function markHumanSittingOut(state: GameState, playerId: string): GameState {
       : player,
   );
   const next: GameState = { ...state, players };
-  return {
+  const withMemory: GameState = {
     ...next,
     aiStates: {
       ...(next.aiStates ?? {}),
       [playerId]: updateAiObservation(next, playerId, next.aiStates?.[playerId]),
     },
   };
+  const sittingPlayer = withMemory.players.find((player) => player.id === playerId);
+  if (sittingPlayer === undefined) {
+    return withMemory;
+  }
+  return enqueueCommanderStatusNotice(withMemory, 'forfeit', sittingPlayer);
 }
 
 function commitPassAndPlayResolvedTurn(
@@ -2061,14 +2084,20 @@ export const useGameStore = create<GameStore>()(
         g.id === record.id
           ? {
               ...g,
-              state: {
-                ...g.state,
-                players: g.state.players.map((player) =>
+              state: (() => {
+                const players = g.state.players.map((player) =>
                   player.id === currentPlayer.id
                     ? { ...player, isForfeited: false, autoAiUntilEnd: false }
                     : player,
-                ),
-              },
+                );
+                const rejoined =
+                  players.find((player) => player.id === currentPlayer.id) ?? currentPlayer;
+                return enqueueCommanderStatusNotice(
+                  { ...g.state, players },
+                  'rejoin',
+                  rejoined,
+                );
+              })(),
             }
           : g,
       ),
@@ -2076,6 +2105,28 @@ export const useGameStore = create<GameStore>()(
       queuedOrders: [],
       selectedPlanetId: null,
       pendingFleet: null,
+    });
+  },
+
+  dismissCommanderStatusNotice: () => {
+    const record = get().getActiveRecord();
+    if (record === null || record.state.status !== 'active') {
+      return;
+    }
+    const viewerId = record.localPlayerId ?? record.state.currentPlayerId;
+    const notice = nextCommanderStatusNoticeFor(record.state, viewerId);
+    if (notice === null) {
+      return;
+    }
+    const nextState = acknowledgeCommanderStatusNotice(
+      record.state,
+      viewerId,
+      notice.id,
+    );
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id ? { ...g, state: nextState } : g,
+      ),
     });
   },
 

@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-08-19 (Phase 71 — async forfeit / Command Center Rejoin)
+2026-08-19 (Phase 72 — commander forfeit/rejoin briefing)
 
 ## Overall Status
 
@@ -224,6 +224,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Forfeit** / **Exit to Home** / **Exit Game**; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-08-19: Phase 72 (Task 257) — **Commander update** overlay on each other human's next turn when someone forfeits (AI taking turns) or rejoins. Notices live on `GameState` and survive `resolveTurn` / async submit.
 - 2026-08-19: Phase 71 (Task 256) — async ⋮ **Forfeit** runs AI for the slot, submits, then `POST /forfeit` and returns home. Command Center **Rejoin**. `loadAsyncGame` overlays server `is_forfeited` onto `GameState.players`.
 - 2026-08-19: Phase 70 (Tasks 253–254) — pass-and-play forfeit: `Player.isForfeited` / `autoAiUntilEnd`; `isAiControlled` + `needsForfeitPrompt`; ⋮ Forfeit; Sitting out overlay (Rejoin / Let AI / don't ask again). Async forfeit APIs not in this slice.
 - 2026-08-19: Phase 69 (Task 252) — pass-and-play knockout after a round-wrap elimination no longer skips the first living player. `GameRecord.knockoutResumePlayerId` stores the engine's next player while the farewell hijacks `currentPlayerId`; `acknowledgeKnockout` restores it instead of walking forward from the eliminated slot. Local knockout no longer sets `isSubmittingTurn` (that overlay + 45s timeout was a fake backend submit while offline).

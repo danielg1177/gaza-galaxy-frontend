@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Phase 72 — Commander forfeit/rejoin briefing
+**Completed:** 2026-08-19
+**Files modified:** `src/game/types.ts`, `src/game/playerControl.ts`, `src/game/turnEngine.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `docs/systems/multiplayer.md`, `docs/systems/turn-engine.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`
+**Notes:** `GameState.commanderStatusNotices` queues forfeit/rejoin briefings. Each other playing human sees an in-tree **Commander update** overlay on their next turn (after the lock screen, before the battle report). `resolveTurn` preserves the queue. Async Command Center **Rejoin** is detected when `loadAsyncGame` overlays API flags.
+
+---
 ## Phase 71 — Async forfeit + Command Center Rejoin
 **Completed:** 2026-08-19
 **Files modified:** `src/services/gamesService.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `src/screens/HomeScreen.tsx`, `docs/systems/multiplayer.md`, `docs/systems/turn-engine.md`, `docs/development/decisions.md`, `docs/development/known-issues.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`

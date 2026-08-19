@@ -185,7 +185,7 @@ Pass-and-play games remain entirely local:
 - Lock screen after End Turn displays `roundNumber` (shared round) for all players — same as the in-game HUD
 - **Auto-handoff:** When a player ends their turn, the lock screen automatically dismisses after 1.5 seconds, immediately showing the next human player's turn without requiring manual interaction. The "Start Turn" button remains visible for manual override if desired.
 - **Knockout farewell:** Home-planet kills often resolve on round wrap (the last player's End Turn). The eliminated player sees a knockout report, then play returns to the living player the engine already selected — including the first player of the new round. Knockout End Turn is local-only; it does not submit to the backend.
-- **Forfeit (sit out):** ⋮ **Forfeit** on your turn marks `isForfeited` without ending the game or flipping `isAI`. The AI takes that turn immediately. When the slot comes around again, a **Sitting out** screen offers **Rejoin** or **Let the AI take this turn**, with a checkbox to stop asking (`autoAiUntilEnd`).
+- **Forfeit (sit out):** ⋮ **Forfeit** on your turn marks `isForfeited` without ending the game or flipping `isAI`. The AI takes that turn immediately. When the slot comes around again, a **Sitting out** screen offers **Rejoin** or **Let the AI take this turn**, with a checkbox to stop asking (`autoAiUntilEnd`). Other commanders see a **Commander update** overlay on their next turn.
 
 ## Async multiplayer forfeit (Task 256)
 
@@ -193,9 +193,14 @@ On your turn, ⋮ **Forfeit** discards queued fleets, runs the hard AI for your 
 
 Command Center cards for a sitting-out member stay non-enterable. Subtitle is **AI commanding**. **Rejoin** calls `POST /games/{id}/rejoin` and takes effect the next time the turn order reaches that slot. Sitters do not receive "Your Turn!" pushes. `loadAsyncGame` overlays `detail.players[i].isForfeited` onto `state.players[i]` so the next acting human's `endTurn` treats sitters as AI-controlled.
 
+## Commander forfeit/rejoin briefing (Task 257)
+
+`GameState.commanderStatusNotices` records when a human forfeits or rejoins. Each other living human who still takes their own turns sees one in-tree **Commander update** overlay per notice on their next turn (after pass-and-play lock screen, before the battle report). Forfeit copy: the AI is taking their turns. Rejoin copy: they have taken command again. Async Command Center **Rejoin** is detected when the next player loads and the API flag disagrees with `state_json`. `resolveTurn` copies the queue through so AI play-out does not drop it.
+
 ---
 
 ## Changelog
+- 2026-08-19: Task 257 — commander forfeit/rejoin briefing overlay; notices stored on `GameState` and shown on each other human's next turn.
 - 2026-08-19: Task 256 — async forfeit/rejoin: submit AI-resolved turn then `POST /forfeit`; Command Center **Rejoin**; overlay `is_forfeited` in `loadAsyncGame`.
 - 2026-08-19: Task 253–254 — pass-and-play forfeit (sit out): AI takes over without flipping `isAI`; rejoin prompt when the slot returns; async APIs not yet.
 - 2026-08-19: Task 252 — pass-and-play knockout restores the engine's next living player after the farewell; local knockout does not call the backend.
