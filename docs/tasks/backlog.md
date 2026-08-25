@@ -4,6 +4,15 @@ Tasks not yet started, in priority order.
 
 ---
 
+## Phase 75 — Feature: Account settings (username / password)
+
+**Status:** Complete (2026-08-25).
+
+- ~~**Task 261**~~ — Backend: `PATCH /auth/username` and `PATCH /auth/password` *(complete 2026-08-25)*
+- ~~**Task 262**~~ — Frontend: Settings screen from ⋮ menu; `authStore` update methods *(complete 2026-08-25)*
+
+---
+
 ## Phase 74 — Feature: End game for all players
 
 **Status:** Complete (2026-08-19).

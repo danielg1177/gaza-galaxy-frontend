@@ -27,7 +27,9 @@ function shouldNotifyUnauthorized(path: string): boolean {
     !path.startsWith('/auth/login') &&
     !path.startsWith('/auth/register') &&
     !path.startsWith('/auth/me') &&
-    !path.startsWith('/auth/logout')
+    !path.startsWith('/auth/logout') &&
+    !path.startsWith('/auth/username') &&
+    !path.startsWith('/auth/password')
   );
 }
 

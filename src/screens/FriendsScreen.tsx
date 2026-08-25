@@ -127,6 +127,19 @@ export default function FriendsScreen() {
             ]}
             onPress={() => {
               setMenuVisible(false);
+              navigation.navigate('Settings');
+            }}
+          >
+            <Text style={styles.menuItemText}>⚙️ Settings</Text>
+          </Pressable>
+          <View style={styles.menuDivider} />
+          <Pressable
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed && styles.menuItemPressed,
+            ]}
+            onPress={() => {
+              setMenuVisible(false);
               handleLogout();
             }}
           >

@@ -122,13 +122,19 @@ function sortAsyncGamesByAlertPriority(games: ApiGame[]): ApiGame[] {
   );
 }
 
-function getFinishedOutcome(game: ApiGame, username: string | undefined): FinishedOutcome {
-  if (username == null || username === '') {
-    return 'unknown';
-  }
-
+function getFinishedOutcome(
+  game: ApiGame,
+  userId: number | undefined,
+  username: string | undefined,
+): FinishedOutcome {
   const nonAiPlayers = game.players.filter((player) => !player.isAi);
-  const userPlayer = nonAiPlayers.find((player) => player.inGameName === username);
+  const userPlayer =
+    (userId != null
+      ? nonAiPlayers.find((player) => player.userId === userId)
+      : undefined) ??
+    (username != null && username !== ''
+      ? nonAiPlayers.find((player) => player.inGameName === username)
+      : undefined);
 
   if (userPlayer == null) {
     return 'unknown';
@@ -145,10 +151,7 @@ function getFinishedOutcome(game: ApiGame, username: string | undefined): Finish
   }
 
   const nonEliminatedNonAi = nonAiPlayers.filter((player) => !player.isEliminated);
-  if (
-    nonEliminatedNonAi.length === 1 &&
-    nonEliminatedNonAi[0].inGameName === username
-  ) {
+  if (nonEliminatedNonAi.length === 1 && nonEliminatedNonAi[0] === userPlayer) {
     return 'victory';
   }
 
@@ -234,7 +237,7 @@ function AsyncGameCard({
     (game.alertState === 'your_turn' || game.alertState === 'in_progress');
   const prominentAccentColor =
     game.alertState === 'in_progress' ? '#e07820' : COLORS.accent;
-  const finishedOutcome = getFinishedOutcome(game, currentUsername);
+  const finishedOutcome = getFinishedOutcome(game, currentUserId, currentUsername);
 
   let subtitle: string;
   if (game.status === 'waiting_for_players') {
@@ -799,6 +802,19 @@ export default function HomeScreen() {
             }}
           >
             <Text style={styles.homeMenuItemText}>📖 Rules</Text>
+          </Pressable>
+          <View style={styles.homeMenuDivider} />
+          <Pressable
+            style={({ pressed }) => [
+              styles.homeMenuItem,
+              pressed && styles.homeMenuItemPressed,
+            ]}
+            onPress={() => {
+              setHomeMenuVisible(false);
+              navigation.navigate('Settings');
+            }}
+          >
+            <Text style={styles.homeMenuItemText}>⚙️ Settings</Text>
           </Pressable>
           <View style={styles.homeMenuDivider} />
           <Pressable

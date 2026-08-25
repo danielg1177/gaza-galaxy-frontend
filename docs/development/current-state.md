@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-08-19 (Phase 74 — end game for all players)
+2026-08-25 (Phase 75 — account settings: username and password)
 
 ## Overall Status
 
@@ -224,6 +224,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit Game** / **Exit to Home** first, **Forfeit**, **End Game** last; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-08-25: Phase 75 — Settings screen (⋮ **Settings**) lets the signed-in user change username or password. `PATCH /auth/username` and `PATCH /auth/password`; `authStore.updateUsername` / `updatePassword`. Username change does not rewrite in-game commander names. Command Center victory/defeat matching prefers `userId`.
 - 2026-08-19: Phase 74 (Tasks 259–260) — ⋮ **End Game** at the bottom (under Forfeit) fully ends the match for all players after confirmation; **Exit Game** / **Exit to Home** moved to the first menu item. Async `POST /games/{id}/end`; pass-and-play `resetGame()`. Finished-with-no-winner status bar: **Game ended**.
 - 2026-08-19: Phase 73 (Task 258) — async knockout farewell: deferred wrap-kills and wrap-back recovery redirect the submitted turn to the eliminated human; persist `pendingFarewellPlayerIds` / `knockoutResumePlayerId` on `GameState`; `acknowledgeKnockout` continues vs AIs instead of finishing when one human remains.
 - 2026-08-19: Phase 72 (Task 257) — **Commander update** overlay on each other human's next turn when someone forfeits (AI taking turns) or rejoins. Notices live on `GameState` and survive `resolveTurn` / async submit.

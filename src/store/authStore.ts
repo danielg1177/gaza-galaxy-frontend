@@ -22,6 +22,12 @@ export interface AuthStore {
     password: string,
     passwordConfirmation: string,
   ) => Promise<void>;
+  updateUsername: (username: string) => Promise<void>;
+  updatePassword: (
+    currentPassword: string,
+    password: string,
+    passwordConfirmation: string,
+  ) => Promise<void>;
   logout: () => Promise<void>;
   loadStoredAuth: () => Promise<void>;
 }
@@ -62,6 +68,20 @@ export const useAuthStore = create<AuthStore>((set) => ({
     await AsyncStorage.setItem('auth_token', token);
     await AsyncStorage.setItem('current_user', JSON.stringify(user));
     set({ token, currentUser: user });
+  },
+
+  updateUsername: async (username) => {
+    const user = await apiClient.patch<AuthUser>('/auth/username', { username });
+    await AsyncStorage.setItem('current_user', JSON.stringify(user));
+    set({ currentUser: user });
+  },
+
+  updatePassword: async (currentPassword, password, passwordConfirmation) => {
+    await apiClient.patch('/auth/password', {
+      current_password: currentPassword,
+      password,
+      password_confirmation: passwordConfirmation,
+    });
   },
 
   logout: async () => {

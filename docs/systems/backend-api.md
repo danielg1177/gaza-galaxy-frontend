@@ -175,6 +175,28 @@ No auth required.
 
 ---
 
+#### `PATCH /api/auth/username`
+Auth required.
+
+**Request:** `{ "username": "string" }`
+**Validation:** same charset as register (3–32 chars, alphanumeric + underscore), unique except the current user.
+**Logic:** Update `users.username`. Does not rewrite `game_players` commander names or `state_json` player names.
+**Response:** `{ "id": 1, "username": "new_name" }`
+**Errors:** 422 if invalid or already taken.
+
+---
+
+#### `PATCH /api/auth/password`
+Auth required.
+
+**Request:** `{ "current_password": "string", "password": "string", "password_confirmation": "string" }`
+**Validation:** current password required; new password min 6 chars, confirmed.
+**Logic:** `Hash::check` current password; update hashed password. Current Sanctum token stays valid. Wrong current password returns **422** (not 401 — 401 would log the client out).
+**Response:** `{ "message": "Password updated" }`
+**Errors:** 422 if current password is wrong or new password fails validation.
+
+---
+
 ### Push Tokens
 
 #### `POST /api/push-token`
@@ -587,6 +609,7 @@ All API responses should use a consistent envelope. Errors:
 - The Sanctum token is stored in the client's AsyncStorage and persists across app sessions (no need to re-login)
 
 ## Changelog
+- 2026-08-25: Phase 75 — `PATCH /api/auth/username` and `PATCH /api/auth/password`; client Settings screen via `authStore.updateUsername` / `updatePassword`.
 - 2026-08-19: Task 259 — `POST /api/games/{id}/end` lets any human member finish an in-progress match for everyone; client `gamesService.endGame`.
 - 2026-05-29: Task 137 complete — `src/services/gamesService.ts` implements client-side games/turns/invites API layer (snake_case ↔ camelCase mapping; all endpoints via `apiClient`).
 - 2026-05-29: Task 132 complete — `App.tsx` startup auth gate; conditional main/auth stacks; `setOnUnauthorized` → `logout()` on 401. Phase 12 complete.

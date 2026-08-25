@@ -4,6 +4,13 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
+## 2026-08-25 — Account username is login identity, not in-game commander name
+**Decision:** Settings can change `users.username` (login / friend search). It does not rewrite `game_players` commander names or `GameState.players[].name`. Existing campaigns keep the name chosen at launch. Command Center victory/defeat and forfeit matching prefer `userId` over username vs in-game name.
+**Rationale:** Username is the sole account identifier. In-game names are per-campaign display labels and may already differ from the account username (slot 0 is editable at setup). Rewriting live and finished games would surprise opponents and chat history.
+**Alternatives considered:** Updating all `in_game_name` rows and `state_json` player names (rejected — mixes account identity with campaign names); requiring a password to change username (rejected — extra friction for a friends-only app).
+
+---
+
 ## 2026-08-19 — Any player can end the match; forfeit stays sit-out
 **Decision:** ⋮ **End Game** calls `POST /games/{id}/end` (any human member of an in-progress game). That sets `games.status = finished` with `winner_user_id` null and patches `state_json` so `status` is finished and `winnerId` is null. Pass-and-play / solo skip the API and `resetGame()` the local record. **Forfeit** remains AI sit-out. **Delete** remains creator-only row removal. The ⋮ menu lists **Exit Game** first and **End Game** last (under Forfeit). Confirmation copy: this will fully end the game for all players.
 **Rationale:** Players asked to stop a match for everyone without sitting out or waiting for the creator to delete it. A null winner keeps Command Center cards as neutral **FINISHED** instead of victory/defeat.

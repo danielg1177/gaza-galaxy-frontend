@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Phase 75 — Account settings (username / password)
+**Completed:** 2026-08-25
+**Files modified:** `src/screens/SettingsScreen.tsx` (new), `src/store/authStore.ts`, `src/services/apiClient.ts`, `src/screens/HomeScreen.tsx`, `src/screens/FriendsScreen.tsx`, `App.tsx`, `docs/systems/backend-api.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`
+**Notes:** ⋮ **Settings** on Command Center and Friends. Two forms: save username (`PATCH /auth/username`), save password with current + confirmation (`PATCH /auth/password`). Wrong current password is 422 (does not log the user out). Username change does not rewrite in-game commander names. Command Center victory/defeat matching prefers `userId`.
+
+---
 ## Phase 74 — End game for all players
 **Completed:** 2026-08-19
 **Files modified:** `src/services/gamesService.ts`, `src/screens/GameScreen.tsx`, `src/store/gameStore.ts`, `docs/systems/multiplayer.md`, `docs/systems/backend-api.md`, `docs/systems/save-system.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`

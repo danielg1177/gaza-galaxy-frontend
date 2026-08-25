@@ -2,6 +2,15 @@
 
 Tasks currently being worked on.
 
+## Phase 75 — Feature: Account settings (username / password)
+
+**Status:** Complete (2026-08-25).
+
+- ~~**Task 261**~~ — Backend: `PATCH /auth/username` (unique, same charset rules) and `PATCH /auth/password` (current password + confirmed new password, 422 on mismatch) *(complete 2026-08-25)*
+- ~~**Task 262**~~ — Frontend: Settings screen from Command Center / Friends ⋮ menu; `authStore.updateUsername` / `updatePassword`; Command Center outcomes match by `userId` *(complete 2026-08-25)*
+
+---
+
 ## Phase 74 — Feature: End game for all players
 
 **Status:** Complete (2026-08-19).
@@ -645,6 +654,7 @@ Phase 46 (Task 213) did not stop stacked battle reports. The copies were `react-
 ---
 
 ## Changelog
+- 2026-08-25: Phase 75 complete (Tasks 261–262) — Settings screen from ⋮ **Settings**; `PATCH /auth/username` and `PATCH /auth/password`; Command Center outcomes match by `userId`.
 - 2026-08-19: Phase 74 complete (Tasks 259–260) — any player can fully end a game from ⋮ **End Game** (bottom, under Forfeit) after confirmation; **Exit Game** is the first menu item.
 - 2026-08-19: Phase 73 complete (Task 258) — async wrap-kill knockout skipped the eliminated human's farewell and looped the attacker; deferred redirect + wrap-back recovery; farewell queue on `GameState`; `acknowledgeKnockout` continues vs remaining AIs.
 - 2026-08-19: Phase 72 complete (Task 257) — commander forfeit/rejoin briefing overlay on each other human's next turn.

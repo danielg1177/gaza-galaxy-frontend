@@ -16,6 +16,7 @@ import HomeScreen from './src/screens/HomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
 import RulesScreen from './src/screens/RulesScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import { setOnUnauthorized } from './src/services/apiClient';
 import { getGame } from './src/services/gamesService';
 import {
@@ -41,6 +42,7 @@ export type RootStackParamList = {
   Friends: undefined;
   Game: { isReadOnly?: boolean } | undefined;
   Rules: undefined;
+  Settings: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -230,6 +232,7 @@ export default function App() {
                 <Stack.Screen name="Friends" component={FriendsScreen} />
                 <Stack.Screen name="Game" component={GameScreen} getId={() => 'game'} />
                 <Stack.Screen name="Rules" component={RulesScreen} />
+                <Stack.Screen name="Settings" component={SettingsScreen} />
               </Stack.Navigator>
             ) : (
               <Stack.Navigator initialRouteName="Login" screenOptions={screenOptions}>
