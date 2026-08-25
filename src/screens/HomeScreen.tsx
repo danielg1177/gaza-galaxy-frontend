@@ -1643,7 +1643,6 @@ export default function HomeScreen() {
               <Text style={styles.eyebrow}>{APP_NAME_UPPER}</Text>
               <Text style={styles.title}>Command{'\n'}Center</Text>
               <View style={styles.titleRule} />
-              <Text style={styles.subtitle}>Select a campaign or launch a new one.</Text>
               <Pressable
                 style={({ pressed }) => [
                   styles.refreshButtonBelowHeader,
@@ -1725,7 +1724,7 @@ export default function HomeScreen() {
 
           {(asyncGamesLoading || sortedAsyncGames.length > 0) && (
             <View style={styles.section}>
-              <Text style={styles.label}>Play with Friends</Text>
+              <Text style={styles.label}>Games In Progress</Text>
               {asyncGamesLoading ? (
                 <ActivityIndicator
                   style={styles.asyncGamesSectionLoader}
