@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Phase 77 — Default campaign names + Find Game pending badge
+**Completed:** 2026-08-25
+**Files modified:** `src/screens/HomeScreen.tsx`, `docs/systems/multiplayer.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`
+**Notes:** Pass & Play / Invite friends default to named humans joined with ` v ` plus `v nAIs` (omitted when there are no AIs). Open lobby defaults to `N Users v nAIs`. Typing in the campaign name field stops auto-updates. Find Game Command Center badge is open count + pending waiting open lobbies the user is already in (created or joined).
+
+---
 ## Phase 76 — Matchmaking open lobbies
 **Completed:** 2026-08-25
 **Files modified:** `src/screens/FindGameScreen.tsx` (new), `src/screens/HomeScreen.tsx`, `src/services/gamesService.ts`, `src/services/matchmaking.ts` (new), `App.tsx`, `docs/systems/multiplayer.md`, `docs/systems/backend-api.md`, `docs/systems/notifications.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`

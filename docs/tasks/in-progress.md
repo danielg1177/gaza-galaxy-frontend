@@ -2,6 +2,14 @@
 
 Tasks currently being worked on.
 
+## Phase 77 — UX: Default campaign names + Find Game pending badge
+
+**Status:** Complete (2026-08-25).
+
+- ~~**Task 265**~~ — Frontend: Auto campaign names from roster (`Daniel v Nery v 3AIs` / `3 Users v 2AIs`); freeze when the user types; Find Game footer badge includes pending waiting lobbies *(complete 2026-08-25)*
+
+---
+
 ## Phase 76 — Feature: Matchmaking open lobbies
 
 **Status:** Complete (2026-08-25).
@@ -663,6 +671,7 @@ Phase 46 (Task 213) did not stop stacked battle reports. The copies were `react-
 ---
 
 ## Changelog
+- 2026-08-25: Phase 77 complete (Task 265) — roster-based default campaign names; Find Game badge includes pending lobbies.
 - 2026-08-25: Phase 75 complete (Tasks 261–262) — Settings screen from ⋮ **Settings**; `PATCH /auth/username` and `PATCH /auth/password`; Command Center outcomes match by `userId`.
 - 2026-08-19: Phase 74 complete (Tasks 259–260) — any player can fully end a game from ⋮ **End Game** (bottom, under Forfeit) after confirmation; **Exit Game** is the first menu item.
 - 2026-08-19: Phase 73 complete (Task 258) — async wrap-kill knockout skipped the eliminated human's farewell and looped the attacker; deferred redirect + wrap-back recovery; farewell queue on `GameState`; `acknowledgeKnockout` continues vs remaining AIs.

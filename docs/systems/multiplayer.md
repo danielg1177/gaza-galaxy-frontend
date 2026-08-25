@@ -95,12 +95,22 @@ When the user selects "Async Multiplayer" / Play with Friends in the new-game se
 5. Host is notified it is their turn; other humans are notified the game started
 6. The match leaves Find Game and appears on Command Center as in progress
 
-Command Center footer: **Find Game** (badge = open lobby count) to the left of **Create Game**. Find Game has Open and Pending tabs. Waiting open lobbies are hidden from the Command Center Play with Friends list.
+Command Center footer: **Find Game** (badge = open lobby count + pending waiting lobbies the user is already in, whether they created or joined) to the left of **Create Game**. Find Game has Open and Pending tabs. Waiting open lobbies are hidden from the Command Center Play with Friends list.
 
 ### Default Player Name
 - In any game mode, slot 0 (the local user) defaults to their username from the auth store
 - Human slots filled with friends default to that friend's username
 - All names remain editable by the creator
+
+### Default Campaign Name
+The Create Game name field auto-fills from the current roster and updates when seats, names, or fill mode change — unless the user has typed in the field (that custom title is kept).
+
+| Setup | Default title | Example |
+|-------|---------------|---------|
+| Pass & Play, or Play with Friends → Invite friends | Named humans joined with ` v `, then AI count | `Daniel v Nery v Eric v 3AIs` |
+| Play with Friends → Open lobby | Human seat count as `N Users`, then AI count | `3 Users v 2AIs` |
+
+If there are no AI seats, the `v nAIs` suffix is omitted (`Daniel v Nery`, or `3 Users`). One AI is `1AI`; two or more are `nAIs`. Empty extra human names are skipped until filled (slot 0 falls back to Commander). Launch still uses the field text when it is non-empty.
 
 ### Game Invites
 - Invited users see pending invites in their HomeScreen (badge count + invite list)
@@ -221,6 +231,7 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 ---
 
 ## Changelog
+- 2026-08-25: Default campaign names from roster (named `v` list vs `N Users`); freeze when the user types; Find Game footer badge includes pending waiting lobbies.
 - 2026-08-25: Matchmaking — Invite friends vs Open lobby on create; Find Game screen (Open + Pending); Command Center footer Find Game / Create Game; waiting open lobbies hidden from Play with Friends until start.
 - 2026-08-19: Tasks 259–260 — ⋮ **End Game** (bottom, under Forfeit) fully ends the match for all players after confirmation; **Exit Game** moved to the first menu item; async uses `POST /games/{id}/end`.
 - 2026-08-19: Task 258 — async wrap-kill farewells: deferred knockouts and wrap-back recovery redirect `currentPlayerId` to the eliminated human; `acknowledgeKnockout` does not finish while AIs remain.

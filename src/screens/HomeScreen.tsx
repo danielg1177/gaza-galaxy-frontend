@@ -60,18 +60,55 @@ const MAP_SIZE_LABELS: Record<MapSize, string> = {
   large: 'Large',
 };
 
-function getDefaultCampaignName(username: string | undefined): string {
-  const base = (username ?? 'Commander').trim() || 'Commander';
-  return `${base}'s Campaign`;
+function formatAiCountLabel(aiCount: number): string | null {
+  if (aiCount <= 0) {
+    return null;
+  }
+  return aiCount === 1 ? '1AI' : `${aiCount}AIs`;
 }
 
-function resolveCampaignName(rawName: string, playerName: string): string {
+function buildDefaultGameName(
+  slots: PlayerSlot[],
+  options: { seatCounts: boolean },
+): string {
+  const aiLabel = formatAiCountLabel(slots.filter((slot) => slot.type === 'ai').length);
+
+  if (options.seatCounts) {
+    const humanCount = slots.filter((slot) => slot.type === 'human').length;
+    const usersLabel = humanCount === 1 ? '1 User' : `${humanCount} Users`;
+    const name = aiLabel ? `${usersLabel} v ${aiLabel}` : usersLabel;
+    return name.slice(0, 100);
+  }
+
+  const humanNames = slots.flatMap((slot, index) => {
+    if (slot.type !== 'human') {
+      return [];
+    }
+    const trimmed = (slot.name ?? '').trim();
+    if (trimmed.length > 0) {
+      return [trimmed];
+    }
+    return index === 0 ? ['Commander'] : [];
+  });
+  const parts = aiLabel ? [...humanNames, aiLabel] : humanNames;
+  const name = parts.join(' v ');
+  return (name.length > 0 ? name : 'Campaign').slice(0, 100);
+}
+
+function resolveCampaignName(
+  rawName: string,
+  slots: PlayerSlot[],
+  seatCounts: boolean,
+): string {
   const trimmed = rawName.trim();
   if (trimmed.length > 0) {
     return trimmed.slice(0, 100);
   }
-  const commander = playerName.trim() || 'Commander';
-  return `${commander}'s Campaign`;
+  return buildDefaultGameName(slots, { seatCounts });
+}
+
+function isPendingOpenLobby(game: ApiGame): boolean {
+  return game.status === 'waiting_for_players' && game.isOpenLobby === true;
 }
 
 function isSoloGame(record: GameRecord): boolean {
@@ -533,17 +570,22 @@ export default function HomeScreen() {
   );
 
   const [isCreating, setIsCreating] = useState(false);
-  const [gameName, setGameName] = useState(() =>
-    getDefaultCampaignName(currentUser?.username),
-  );
   const [playerSlots, setPlayerSlots] = useState<PlayerSlot[]>(() =>
     createDefaultPlayerSlots(currentUser?.username ?? 'Commander'),
   );
   const [playMode, setPlayMode] = useState<'passAndPlay' | 'asyncMultiplayer'>('asyncMultiplayer');
   const [fillMode, setFillMode] = useState<'invite' | 'open'>('invite');
+  const usesOpenLobbyName = playMode === 'asyncMultiplayer' && fillMode === 'open';
+  const [gameName, setGameName] = useState(() =>
+    buildDefaultGameName(createDefaultPlayerSlots(currentUser?.username ?? 'Commander'), {
+      seatCounts: false,
+    }),
+  );
+  const [gameNameDirty, setGameNameDirty] = useState(false);
   const [mapSize, setMapSize] = useState<MapSize>('medium');
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [openGameCount, setOpenGameCount] = useState(0);
+  const [pendingLobbyCount, setPendingLobbyCount] = useState(0);
   const [invites, setInvites] = useState<ApiInvite[]>([]);
   const [inviteLoadingId, setInviteLoadingId] = useState<number | null>(null);
   const [asyncGames, setAsyncGames] = useState<ApiGame[]>([]);
@@ -563,12 +605,11 @@ export default function HomeScreen() {
   const sortedAsyncGames = useMemo(
     () =>
       sortAsyncGamesByAlertPriority(
-        asyncGames.filter(
-          (game) => !(game.status === 'waiting_for_players' && game.isOpenLobby === true),
-        ),
+        asyncGames.filter((game) => !isPendingOpenLobby(game)),
       ),
     [asyncGames],
   );
+  const findGameBadgeCount = openGameCount + pendingLobbyCount;
 
   useEffect(() => {
     if (playMode !== 'asyncMultiplayer') {
@@ -585,6 +626,13 @@ export default function HomeScreen() {
       }
     })();
   }, [playMode]);
+
+  useEffect(() => {
+    if (gameNameDirty) {
+      return;
+    }
+    setGameName(buildDefaultGameName(playerSlots, { seatCounts: usesOpenLobbyName }));
+  }, [playerSlots, usesOpenLobbyName, gameNameDirty]);
 
   const refreshAsyncGames = useCallback(async (): Promise<ApiGame[] | null> => {
     const isFirstLoad = isFirstAsyncGamesLoad.current;
@@ -658,6 +706,7 @@ export default function HomeScreen() {
           }
 
           const gamesForBadge = gamesResult ?? asyncGamesRef.current;
+          setPendingLobbyCount(gamesForBadge.filter(isPendingOpenLobby).length);
           const myTurnCount = gamesForBadge.filter((g) => g.isMyTurn).length;
           const friendCount =
             requestsResult !== null ? requestsResult.length : pendingRequestCountRef.current;
@@ -862,7 +911,7 @@ export default function HomeScreen() {
   const handleLaunch = () => {
     const { width, height, planetCount } = computeMapDimensions(mapSize, playerSlots.length);
     const playerName = (playerSlots[0]?.name ?? '').trim() || 'Commander';
-    const campaignName = resolveCampaignName(gameName, playerName);
+    const campaignName = resolveCampaignName(gameName, playerSlots, usesOpenLobbyName);
 
     if (playMode === 'passAndPlay') {
       startNewGame({
@@ -1200,10 +1249,13 @@ export default function HomeScreen() {
             <Text style={styles.label}>Campaign name</Text>
             <TextInput
               style={styles.input}
-              placeholder="e.g. Galaxy Conquest"
+              placeholder="e.g. Daniel v Nery v 2AIs"
               placeholderTextColor={COLORS.textMuted}
               value={gameName}
-              onChangeText={setGameName}
+              onChangeText={(text) => {
+                setGameNameDirty(true);
+                setGameName(text);
+              }}
               autoCapitalize="words"
               autoCorrect={false}
               maxLength={100}
@@ -1764,10 +1816,10 @@ export default function HomeScreen() {
               onPress={() => navigation.navigate('FindGame')}
             >
               <Text style={styles.launchButtonText}>Find Game</Text>
-              {openGameCount > 0 && (
+              {findGameBadgeCount > 0 && (
                 <View style={styles.findGameBadge}>
                   <Text style={styles.findGameBadgeText}>
-                    {openGameCount > 9 ? '9+' : openGameCount}
+                    {findGameBadgeCount > 9 ? '9+' : findGameBadgeCount}
                   </Text>
                 </View>
               )}
@@ -1778,7 +1830,7 @@ export default function HomeScreen() {
                 pressed && styles.launchButtonPressed,
               ]}
               onPress={() => {
-                setGameName(getDefaultCampaignName(currentUser?.username));
+                setGameNameDirty(false);
                 setIsCreating(true);
               }}
             >

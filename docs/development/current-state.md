@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-08-25 (Phase 76 — matchmaking open lobbies)
+2026-08-25 (Phase 77 — default game names + Find Game pending badge)
 
 ## Overall Status
 
@@ -10,6 +10,7 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Phase 77: Default campaign names from roster (`Daniel v Nery v 3AIs` / `3 Users v 2AIs`); Find Game footer badge includes pending lobbies the user is already in
 - Phase 76: Matchmaking open lobbies — Invite friends vs Open lobby on create; Find Game screen; `GET /games/open`, join / leave / start
 - Expo SDK 54 + TypeScript project initialized
 - `src/game/` folder structure created with stub modules
@@ -221,10 +222,11 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/game/validationEngine.ts` | Stub only |
 | `src/game/index.ts` | Re-exports all modules |
 | `src/store/gameStore.ts` | Zustand store — `isAsyncGame()` keyed on `asyncGameId`; `loadAsyncGame` forces `playMode: 'asyncMultiplayer'` and overlays `is_forfeited`; async `endTurn` / forfeit submit (`submitTurn`, `isSubmittingTurn`, `shouldReturnHome`); local pass-and-play unchanged |
-| `src/screens/HomeScreen.tsx` | Command Center lobby — async games with alert badges + priority sort; tappable only when `isMyTurn`; sitting-out cards show **Rejoin**; creator-only **Delete** per async card (`DELETE /api/games/{id}`); **Pass & Play** section lists all local `GameRecord`s (`asyncGameId == null`); per-card `getGame` loading; game invites; `AppTopBar` (Friends + Logout) |
+| `src/screens/HomeScreen.tsx` | Command Center lobby — async games with alert badges + priority sort; tappable only when `isMyTurn`; sitting-out cards show **Rejoin**; creator-only **Delete** per async card (`DELETE /api/games/{id}`); **Pass & Play** section lists all local `GameRecord`s (`asyncGameId == null`); per-card `getGame` loading; game invites; Find Game badge = open + pending lobbies; auto campaign names from roster unless the field was edited; `AppTopBar` (Friends + Logout) |
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit Game** / **Exit to Home** first, **Forfeit**, **End Game** last; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-08-25: Phase 77 — Create Game auto-names the campaign from the roster: named humans joined with ` v ` plus `v nAIs` for Pass & Play / Invite friends (omit AIs when none); Open lobby uses `N Users v nAIs`. Typing in the name field freezes auto-updates. Find Game footer badge is open lobbies plus pending waiting lobbies the user is already in (created or joined).
 - 2026-08-25: Phase 75 — Settings screen (⋮ **Settings**) lets the signed-in user change username or password. `PATCH /auth/username` and `PATCH /auth/password`; `authStore.updateUsername` / `updatePassword`. Username change does not rewrite in-game commander names. Command Center victory/defeat matching prefers `userId`.
 - 2026-08-19: Phase 74 (Tasks 259–260) — ⋮ **End Game** at the bottom (under Forfeit) fully ends the match for all players after confirmation; **Exit Game** / **Exit to Home** moved to the first menu item. Async `POST /games/{id}/end`; pass-and-play `resetGame()`. Finished-with-no-winner status bar: **Game ended**.
 - 2026-08-19: Phase 73 (Task 258) — async knockout farewell: deferred wrap-kills and wrap-back recovery redirect the submitted turn to the eliminated human; persist `pendingFarewellPlayerIds` / `knockoutResumePlayerId` on `GameState`; `acknowledgeKnockout` continues vs AIs instead of finishing when one human remains.

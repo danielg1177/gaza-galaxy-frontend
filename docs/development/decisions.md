@@ -2,6 +2,20 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-08-25 — Default campaign names come from the roster, not "{username}'s Campaign"
+**Decision:** Create Game pre-fills the campaign title from the current seats. Pass & Play and Invite friends join named humans with ` v ` and append `v nAIs` when there are AI seats. Open lobby uses `N Users v nAIs`. No AI seats means no AI suffix. Any keystroke in the name field stops further auto-updates for that create session.
+**Rationale:** The old `{username}'s Campaign` default did not describe who was playing. Roster-based titles match how players talk about a match. Open lobbies do not know joiner names at create time, so seat counts are used instead of names. Preserving a typed title avoids clobbering a custom name when someone adds a seat.
+**Alternatives considered:** Always `{username}'s Campaign` (rejected — user asked for vs-style names); rewriting the title after players join an open lobby (rejected — the default is for create time; joiners are unknown at naming); treating a matching typed string as still auto (rejected — any typing should freeze).
+
+---
+
+## 2026-08-25 — Find Game badge counts open and pending lobbies
+**Decision:** The Command Center **Find Game** badge is `open lobby count + pending waiting open lobbies the current user is already in` (created or joined). Open and pending do not overlap: open is lobbies you are not in; pending is waiting open lobbies you are in.
+**Rationale:** A host or joiner waiting for seats had no badge while public open games did, so the button looked empty even though Find Game → Pending had matches. Combining both counts matches the two Find Game tabs.
+**Alternatives considered:** Open-only badge (rejected — user asked pending games to appear); including friend-invite games that are already in progress (rejected — those are Command Center games, not Find Game pending).
+
+---
+
 ## 2026-08-25 — Invite friends and open lobby are both create options
 **Decision:** Play with Friends keeps two fill models. Invite friends uses the existing friend picker and creator-first start. Open lobby uses empty human seats, a public Find Game list, and delayed `startGame()` when the last seat fills. One match cannot mix invited friends and open seats.
 **Rationale:** Closed games among friends and pickup games for anyone signed in are both wanted. Sharing tables (`games` / `game_players`) with `user_id` null vs set keeps the API small.
