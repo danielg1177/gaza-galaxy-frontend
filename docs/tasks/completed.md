@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Phase 76 — Matchmaking open lobbies
+**Completed:** 2026-08-25
+**Files modified:** `src/screens/FindGameScreen.tsx` (new), `src/screens/HomeScreen.tsx`, `src/services/gamesService.ts`, `src/services/matchmaking.ts` (new), `App.tsx`, `docs/systems/multiplayer.md`, `docs/systems/backend-api.md`, `docs/systems/notifications.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`
+**Notes:** Play with Friends has Invite friends (existing) and Open lobby. Command Center footer is Find Game (open-count badge) + Create Game. Find Game Open/Pending tabs. Last joiner generates `state_json` and starts. Waiting open lobbies stay off Command Center until the match is in progress.
+
+---
 ## Phase 75 — Account settings (username / password)
 **Completed:** 2026-08-25
 **Files modified:** `src/screens/SettingsScreen.tsx` (new), `src/store/authStore.ts`, `src/services/apiClient.ts`, `src/screens/HomeScreen.tsx`, `src/screens/FriendsScreen.tsx`, `App.tsx`, `docs/systems/backend-api.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`

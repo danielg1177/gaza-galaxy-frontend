@@ -32,6 +32,7 @@ import {
   isCurrentUserGameCreator,
   listGames,
   listInvites,
+  listOpenGames,
   rejoinGame,
   updateGameName,
   type ApiGame,
@@ -539,8 +540,10 @@ export default function HomeScreen() {
     createDefaultPlayerSlots(currentUser?.username ?? 'Commander'),
   );
   const [playMode, setPlayMode] = useState<'passAndPlay' | 'asyncMultiplayer'>('asyncMultiplayer');
+  const [fillMode, setFillMode] = useState<'invite' | 'open'>('invite');
   const [mapSize, setMapSize] = useState<MapSize>('medium');
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [openGameCount, setOpenGameCount] = useState(0);
   const [invites, setInvites] = useState<ApiInvite[]>([]);
   const [inviteLoadingId, setInviteLoadingId] = useState<number | null>(null);
   const [asyncGames, setAsyncGames] = useState<ApiGame[]>([]);
@@ -558,7 +561,12 @@ export default function HomeScreen() {
   const [friends, setFriends] = useState<Friend[]>([]);
 
   const sortedAsyncGames = useMemo(
-    () => sortAsyncGamesByAlertPriority(asyncGames),
+    () =>
+      sortAsyncGamesByAlertPriority(
+        asyncGames.filter(
+          (game) => !(game.status === 'waiting_for_players' && game.isOpenLobby === true),
+        ),
+      ),
     [asyncGames],
   );
 
@@ -633,9 +641,10 @@ export default function HomeScreen() {
         try {
           const gamesResult = await refreshAsyncGames();
 
-          const [requestsResult, invitesResult] = await Promise.all([
+          const [requestsResult, invitesResult, openResult] = await Promise.all([
             getFriendRequests().catch(() => null),
             listInvites().catch(() => null),
+            listOpenGames().catch(() => null),
           ]);
 
           if (requestsResult !== null) {
@@ -643,6 +652,9 @@ export default function HomeScreen() {
           }
           if (invitesResult !== null) {
             setInvites(invitesResult);
+          }
+          if (openResult !== null) {
+            setOpenGameCount(openResult.count);
           }
 
           const gamesForBadge = gamesResult ?? asyncGamesRef.current;
@@ -708,6 +720,19 @@ export default function HomeScreen() {
           return { type: 'human', name: slot.name };
         }
         return { type: 'ai', difficulty: 'hard' };
+      }),
+    );
+  };
+
+  const selectFillMode = (next: 'invite' | 'open') => {
+    setFillMode(next);
+    setFriendPickerSlotIndex(null);
+    setPlayerSlots((prev) =>
+      prev.map((slot, i) => {
+        if (i === 0 || slot.type === 'ai') {
+          return slot;
+        }
+        return { type: 'human', name: next === 'invite' ? '' : undefined, userId: undefined };
       }),
     );
   };
@@ -870,7 +895,41 @@ export default function HomeScreen() {
       return;
     }
 
-    // Async multiplayer — generate the initial state client-side and create on the backend.
+    const isOpenLobby =
+      playMode === 'asyncMultiplayer' &&
+      fillMode === 'open' &&
+      playerSlots.slice(1).some((slot) => slot.type === 'human');
+
+    if (isOpenLobby) {
+      const seed = Date.now();
+      setIsLaunching(true);
+      void (async () => {
+        try {
+          await createGame({
+            name: campaignName,
+            playMode: 'async_multiplayer',
+            mapConfig: { mapSize, mapWidth: width, mapHeight: height, planetCount, seed },
+            playerSlots: playerSlots.map((slot, index) => ({
+              type: slot.type,
+              userId: null,
+              name:
+                (slot.name ?? '').trim() ||
+                (slot.type === 'ai' ? 'AI' : index === 0 ? playerName : 'Open'),
+              ...(slot.type === 'ai' ? { difficulty: 'hard' } : {}),
+            })),
+          });
+          setIsLaunching(false);
+          setIsCreating(false);
+          navigation.navigate('FindGame', { tab: 'pending' });
+        } catch {
+          setIsLaunching(false);
+          showAlert('Error', 'Could not create lobby. Check your connection and try again.');
+        }
+      })();
+      return;
+    }
+
+    // Async multiplayer invite path — generate the initial state client-side and create on the backend.
     // The backend stores state_json directly so no engine script is required.
     const seed = Date.now();
     const config: GameConfig = {
@@ -1131,8 +1190,8 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.header}>
-            <Text style={styles.eyebrow}>NEW CAMPAIGN</Text>
-            <Text style={styles.title}>Launch{'\n'}Campaign</Text>
+            <Text style={styles.eyebrow}>CREATE GAME</Text>
+            <Text style={styles.title}>Create{'\n'}Game</Text>
             <View style={styles.titleRule} />
             <Text style={styles.subtitle}>Configure your campaign before entering the galaxy.</Text>
           </View>
@@ -1211,6 +1270,8 @@ export default function HomeScreen() {
                         autoCorrect={false}
                         multiline={false}
                       />
+                    ) : fillMode === 'open' ? (
+                      <Text style={styles.openSeatLabel}>Open seat</Text>
                     ) : (
                       <View style={styles.friendPickerRow}>
                         <Pressable
@@ -1336,6 +1397,53 @@ export default function HomeScreen() {
             </View>
           </View>
 
+          {playMode === 'asyncMultiplayer' && (
+            <View style={styles.section}>
+              <Text style={styles.label}>Fill seats</Text>
+              <View style={styles.slotTypeToggle}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.slotTypeChip,
+                    fillMode === 'invite' && styles.slotTypeChipSelected,
+                    pressed && fillMode !== 'invite' && styles.slotTypeChipPressed,
+                  ]}
+                  onPress={() => selectFillMode('invite')}
+                >
+                  <Text
+                    style={[
+                      styles.slotTypeChipText,
+                      fillMode === 'invite' && styles.slotTypeChipTextSelected,
+                    ]}
+                  >
+                    Invite friends
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.slotTypeChip,
+                    fillMode === 'open' && styles.slotTypeChipSelected,
+                    pressed && fillMode !== 'open' && styles.slotTypeChipPressed,
+                  ]}
+                  onPress={() => selectFillMode('open')}
+                >
+                  <Text
+                    style={[
+                      styles.slotTypeChipText,
+                      fillMode === 'open' && styles.slotTypeChipTextSelected,
+                    ]}
+                  >
+                    Open lobby
+                  </Text>
+                </Pressable>
+              </View>
+              <Text style={styles.fillModeHint}>
+                {fillMode === 'invite'
+                  ? 'Pick friends for each human seat. The game starts for you immediately.'
+                  : 'Human seats after you stay open. Anyone can join from Find Game.'}
+              </Text>
+            </View>
+          )}
+
           <View style={styles.section}>
             <Text style={styles.label}>Map size</Text>
             <View style={styles.mapSizeRow}>
@@ -1387,7 +1495,13 @@ export default function HomeScreen() {
             {isLaunching ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Text style={styles.launchButtonText}>Launch Campaign</Text>
+              <Text style={styles.launchButtonText}>
+                {playMode === 'asyncMultiplayer' &&
+                fillMode === 'open' &&
+                playerSlots.slice(1).some((slot) => slot.type === 'human')
+                  ? 'Create Game'
+                  : 'Launch Campaign'}
+              </Text>
             )}
           </Pressable>
         </ScrollView>
@@ -1557,7 +1671,7 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {(asyncGamesLoading || asyncGames.length > 0) && (
+          {(asyncGamesLoading || sortedAsyncGames.length > 0) && (
             <View style={styles.section}>
               <Text style={styles.label}>Play with Friends</Text>
               {asyncGamesLoading ? (
@@ -1634,22 +1748,43 @@ export default function HomeScreen() {
 
           {_hasHydrated &&
           localGames.length === 0 &&
-          asyncGames.length === 0 &&
+          sortedAsyncGames.length === 0 &&
           !asyncGamesLoading ? (
             <Text style={styles.emptyMessage}>No active campaigns.{'\n'}Start a new one below.</Text>
           ) : null}
         </ScrollView>
 
         <View style={styles.lobbyFooter}>
-          <Pressable
-            style={({ pressed }) => [styles.newCampaignButton, pressed && styles.launchButtonPressed]}
-            onPress={() => {
-              setGameName(getDefaultCampaignName(currentUser?.username));
-              setIsCreating(true);
-            }}
-          >
-            <Text style={styles.launchButtonText}>New Campaign</Text>
-          </Pressable>
+          <View style={styles.lobbyFooterRow}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.findGameButton,
+                pressed && styles.launchButtonPressed,
+              ]}
+              onPress={() => navigation.navigate('FindGame')}
+            >
+              <Text style={styles.launchButtonText}>Find Game</Text>
+              {openGameCount > 0 && (
+                <View style={styles.findGameBadge}>
+                  <Text style={styles.findGameBadgeText}>
+                    {openGameCount > 9 ? '9+' : openGameCount}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.newCampaignButton,
+                pressed && styles.launchButtonPressed,
+              ]}
+              onPress={() => {
+                setGameName(getDefaultCampaignName(currentUser?.username));
+                setIsCreating(true);
+              }}
+            >
+              <Text style={styles.launchButtonText}>Create Game</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
       <EditGameNameModal
@@ -1680,6 +1815,7 @@ const styles = StyleSheet.create({
   },
   lobbyContainer: {
     flex: 1,
+    overflow: 'visible',
   },
   lobbyScrollContent: {
     flexGrow: 1,
@@ -1690,6 +1826,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 24,
     paddingTop: 8,
+    overflow: 'visible',
+  },
+  lobbyFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+    overflow: 'visible',
+  },
+  findGameButton: {
+    flex: 1,
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    overflow: 'visible',
+  },
+  findGameBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#c0392b',
+    borderRadius: 10,
+    minWidth: 22,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  findGameBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   scrollContent: {
     flexGrow: 1,
@@ -2178,6 +2348,19 @@ const styles = StyleSheet.create({
   slotTypeChipTextSelected: {
     color: COLORS.accent,
   },
+  openSeatLabel: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    letterSpacing: 0.3,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  fillModeHint: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
+  },
   slotNameInput: {
     backgroundColor: COLORS.background,
     borderWidth: 1,
@@ -2472,10 +2655,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   newCampaignButton: {
+    flex: 1,
     backgroundColor: COLORS.accent,
     borderRadius: 10,
     paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   launchButton: {
     marginTop: 8,

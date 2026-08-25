@@ -2,6 +2,15 @@
 
 Tasks currently being worked on.
 
+## Phase 76 — Feature: Matchmaking open lobbies
+
+**Status:** Complete (2026-08-25).
+
+- ~~**Task 263**~~ — Backend: open human seats on `POST /games`; `GET /games/open`; join / leave / start *(complete 2026-08-25)*
+- ~~**Task 264**~~ — Frontend: Invite friends vs Open lobby; Find Game screen; Command Center Find Game / Create Game footer *(complete 2026-08-25)*
+
+---
+
 ## Phase 75 — Feature: Account settings (username / password)
 
 **Status:** Complete (2026-08-25).

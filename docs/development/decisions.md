@@ -2,6 +2,11 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-08-25 — Invite friends and open lobby are both create options
+**Decision:** Play with Friends keeps two fill models. Invite friends uses the existing friend picker and creator-first start. Open lobby uses empty human seats, a public Find Game list, and delayed `startGame()` when the last seat fills. One match cannot mix invited friends and open seats.
+**Rationale:** Closed games among friends and pickup games for anyone signed in are both wanted. Sharing tables (`games` / `game_players`) with `user_id` null vs set keeps the API small.
+**Alternatives considered:** Replacing the friend picker with matchmaking only (rejected — user asked to keep both); mixing friend IDs and open seats in one lobby (rejected — unclear who is invited vs public).
+
 ---
 
 ## 2026-08-25 — Account username is login identity, not in-game commander name

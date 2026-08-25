@@ -338,18 +338,34 @@ Auth required.
 ```
 `user_id: null` in slot 0 means the authenticated creator fills that slot.
 
+**Open lobby:** extra human slots may also send `user_id: null`. Those seats skip the friend check and skip `startGame()`. The game stays `waiting_for_players` with empty `state_json` until `POST /games/{id}/start`. Cannot mix invited friend IDs and open seats.
+
 **Logic:**
 1. Validate `play_mode = 'async_multiplayer'` (pass_and_play games are local-only; this endpoint is for async only).
-2. Validate all `user_id` fields in human slots (excluding creator) are friends of the creator.
+2. Validate all **invited** `user_id` fields in human slots (excluding creator and open seats) are friends of the creator.
 3. Validate player count is 2–8.
 4. Validate map config fields are within valid ranges.
-5. Create `games` row with `status = 'waiting'`, `state_json = ''` (empty until game starts).
-6. Create `game_players` rows for each slot (turn_order = slot index).
-7. For each human slot where `user_id != creator`: create `game_invites` row with `status = 'pending'`.
-8. If there are no pending invites (all human slots are the creator, or play_mode is pass_and_play): immediately start the game (see "Starting a Game" section below).
+5. Create `games` row. Invite games may store client `state_json` immediately. Open lobbies leave `state_json` empty.
+6. Create `game_players` rows for each slot (turn_order = slot index). Open human seats have `user_id` null.
+7. For each human slot where `user_id` is set and `user_id != creator`: create `game_invites` row with `status = 'pending'`.
+8. If there are no open seats: call `startGame()` (existing creator-first path).
 9. Send push notification to all invited users.
 
 **Response:** `{ "game": { "id": 1, "status": "waiting", ... }, "invites_sent": [5] }`
+
+---
+
+#### `GET /api/games/open`
+Public waiting matchmaking lobbies the caller is not already in. No `state_json`. Includes `human_filled` / `human_total` (creator counts as filled), `ai_count`, `map_config`, and `host`.
+
+#### `POST /api/games/{id}/join`
+Claim the next empty human seat. `409` if full. Response includes `should_start` when this join filled the last seat.
+
+#### `POST /api/games/{id}/leave`
+Release a waiting matchmaking seat. Creator must delete instead.
+
+#### `POST /api/games/{id}/start`
+Member of a full lobby posts `{ "state_json": "..." }`. Runs `startGame()`. Notifies the first human (your turn) and every other human (game started).
 
 ---
 

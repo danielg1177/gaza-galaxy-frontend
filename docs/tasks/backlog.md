@@ -4,6 +4,15 @@ Tasks not yet started, in priority order.
 
 ---
 
+## Phase 76 — Feature: Matchmaking open lobbies
+
+**Status:** Complete (2026-08-25).
+
+- ~~**Task 263**~~ — Backend: open seats, `GET /games/open`, join / leave / start *(complete 2026-08-25)*
+- ~~**Task 264**~~ — Frontend: Find Game + Invite friends vs Open lobby *(complete 2026-08-25)*
+
+---
+
 ## Phase 75 — Feature: Account settings (username / password)
 
 **Status:** Complete (2026-08-25).

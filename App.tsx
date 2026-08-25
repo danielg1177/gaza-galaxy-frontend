@@ -11,6 +11,7 @@ import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import FriendsScreen from './src/screens/FriendsScreen';
+import FindGameScreen from './src/screens/FindGameScreen';
 import GameScreen from './src/screens/GameScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -40,6 +41,7 @@ export type RootStackParamList = {
   Register: undefined;
   Home: undefined;
   Friends: undefined;
+  FindGame: { tab?: 'open' | 'pending' } | undefined;
   Game: { isReadOnly?: boolean } | undefined;
   Rules: undefined;
   Settings: undefined;
@@ -230,6 +232,7 @@ export default function App() {
               <Stack.Navigator initialRouteName="Home" screenOptions={screenOptions}>
                 <Stack.Screen name="Home" component={HomeScreen} />
                 <Stack.Screen name="Friends" component={FriendsScreen} />
+                <Stack.Screen name="FindGame" component={FindGameScreen} />
                 <Stack.Screen name="Game" component={GameScreen} getId={() => 'game'} />
                 <Stack.Screen name="Rules" component={RulesScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} />

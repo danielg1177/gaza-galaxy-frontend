@@ -76,15 +76,26 @@ Players can add friends by searching for their username. Friend connections must
 - **Delete game (creator only):** when `created_by_user_id` on the list payload equals the authenticated user, each async card shows a **Delete** control. Confirmation alert → `DELETE /api/games/{id}` → card removed from lobby state and any matching local `GameRecord` (`asyncGameId`) dropped from Zustand. No status gate (waiting, in progress, and finished may all be deleted by the creator). Non-creators never see the control.
 
 ### Async Game Creation
-When the user selects "Async Multiplayer" mode in the new-game setup:
+When the user selects "Async Multiplayer" / Play with Friends in the new-game setup, a **Fill seats** control chooses the fill model:
 
+**Invite friends (default)**
 1. Human player slots (other than slot 0 — the creator) show a friend picker instead of a name text input
 2. Slot 0 defaults to the current user's username (read from auth store) — user may rename it
 3. Each human slot the creator fills with a friend shows that friend's username as the slot name (editable by the creator)
-4. AI slots remain unchanged (difficulty selector, generated name)
-5. On "Create Game": client calls `POST /api/games` with the player_slots array
+4. AI slots remain unchanged (generated name; difficulty is always hard)
+5. On "Launch Campaign": client calls `POST /api/games` with the player_slots array and `state_json`
 6. Backend creates the game and sends invites to all named friends
 7. Creator is taken directly into the game on their first turn
+
+**Open lobby (matchmaking)**
+1. Extra human seats are labeled Open — no friend picker
+2. On "Create Game": client calls `POST /api/games` with extra human `user_id` null and no `state_json`
+3. Game stays `waiting_for_players` and appears on Find Game (Pending for the host, Open for everyone else)
+4. Joiners call `POST /games/{id}/join`. The last joiner generates `state_json` and calls `POST /games/{id}/start`
+5. Host is notified it is their turn; other humans are notified the game started
+6. The match leaves Find Game and appears on Command Center as in progress
+
+Command Center footer: **Find Game** (badge = open lobby count) to the left of **Create Game**. Find Game has Open and Pending tabs. Waiting open lobbies are hidden from the Command Center Play with Friends list.
 
 ### Default Player Name
 - In any game mode, slot 0 (the local user) defaults to their username from the auth store
@@ -210,6 +221,7 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 ---
 
 ## Changelog
+- 2026-08-25: Matchmaking — Invite friends vs Open lobby on create; Find Game screen (Open + Pending); Command Center footer Find Game / Create Game; waiting open lobbies hidden from Play with Friends until start.
 - 2026-08-19: Tasks 259–260 — ⋮ **End Game** (bottom, under Forfeit) fully ends the match for all players after confirmation; **Exit Game** moved to the first menu item; async uses `POST /games/{id}/end`.
 - 2026-08-19: Task 258 — async wrap-kill farewells: deferred knockouts and wrap-back recovery redirect `currentPlayerId` to the eliminated human; `acknowledgeKnockout` does not finish while AIs remain.
 - 2026-08-19: Task 257 — commander forfeit/rejoin briefing overlay; notices stored on `GameState` and shown on each other human's next turn.

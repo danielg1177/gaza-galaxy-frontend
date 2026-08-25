@@ -25,6 +25,15 @@ export interface SendMessageResponse {
   message: GameMessage;
 }
 
+export interface ApiMapConfig {
+  mapSize?: string;
+  mapWidth?: number;
+  mapHeight?: number;
+  planetCount?: number;
+  seed?: number;
+  galaxyShape?: string;
+}
+
 export interface ApiGame {
   id: number;
   name: string;
@@ -41,12 +50,33 @@ export interface ApiGame {
     | 'finished';
   isMyTurn: boolean;
   hasInProgressActions: boolean;
+  isOpenLobby?: boolean;
+  mapConfig?: ApiMapConfig;
   players: ApiGamePlayer[];
   currentPlayerName: string;
   roundNumber: number;
   turnNumber: number;
   createdAt: string;
   unreadMessageCount: number;
+}
+
+export interface ApiOpenGameHost {
+  id: number;
+  username: string;
+}
+
+export interface ApiOpenGame {
+  id: number;
+  name: string;
+  status: ApiGame['status'];
+  host: ApiOpenGameHost | null;
+  mapConfig: ApiMapConfig;
+  humanFilled: number;
+  humanTotal: number;
+  aiCount: number;
+  isOpenLobby: boolean;
+  players: ApiGamePlayer[];
+  createdAt: string;
 }
 
 export interface InProgressTurnPayload {
@@ -126,12 +156,28 @@ interface ApiGameRaw {
   alert_state: ApiGame['alertState'];
   is_my_turn: boolean;
   has_in_progress_actions: boolean;
+  is_open_lobby?: boolean;
+  map_config?: ApiMapConfig;
   players: ApiGamePlayerRaw[];
   current_player_name: string;
   round_number: number;
   turn_number: number;
   created_at: string;
   unread_message_count: number;
+}
+
+interface ApiOpenGameRaw {
+  id: number;
+  name: string;
+  status: ApiGameRaw['status'];
+  host: { id: number; username: string } | null;
+  map_config: ApiMapConfig;
+  human_filled: number;
+  human_total: number;
+  ai_count: number;
+  is_open_lobby: boolean;
+  players: ApiGamePlayerRaw[];
+  created_at: string;
 }
 
 interface InProgressActionsRaw {
@@ -156,6 +202,8 @@ interface GameDetailResponse {
     has_in_progress_actions?: boolean;
     created_at?: string;
     unread_message_count?: number;
+    is_open_lobby?: boolean;
+    map_config?: ApiMapConfig;
   };
   state_json: string;
   is_my_turn: boolean;
@@ -269,8 +317,10 @@ function mapGame(api: ApiGameRaw): ApiGame {
     alertState: api.alert_state,
     isMyTurn: api.is_my_turn,
     hasInProgressActions: api.has_in_progress_actions,
+    isOpenLobby: api.is_open_lobby === true,
+    mapConfig: api.map_config,
     players: api.players.map(mapGamePlayer),
-    currentPlayerName: api.current_player_name,
+    currentPlayerName: api.current_player_name ?? '',
     roundNumber: api.round_number,
     turnNumber: api.turn_number,
     createdAt: api.created_at,
@@ -296,6 +346,8 @@ function mapGameDetail(data: GameDetailResponse): ApiGameDetail {
     is_my_turn: data.is_my_turn,
     has_in_progress_actions:
       game.has_in_progress_actions ?? data.in_progress_actions != null,
+    is_open_lobby: game.is_open_lobby,
+    map_config: game.map_config,
     players: game.players ?? [],
     current_player_name: game.current_player_name ?? '',
     round_number: game.round_number,
@@ -324,9 +376,79 @@ function mapInvite(api: ApiInviteRaw): ApiInvite {
   };
 }
 
+function mapOpenGame(api: ApiOpenGameRaw): ApiOpenGame {
+  return {
+    id: api.id,
+    name: api.name,
+    status: api.status,
+    host: api.host,
+    mapConfig: api.map_config ?? {},
+    humanFilled: api.human_filled,
+    humanTotal: api.human_total,
+    aiCount: api.ai_count,
+    isOpenLobby: api.is_open_lobby === true,
+    players: (api.players ?? []).map(mapGamePlayer),
+    createdAt: api.created_at,
+  };
+}
+
+export function humanSeatCounts(players: ApiGamePlayer[]): {
+  filled: number;
+  total: number;
+  aiCount: number;
+} {
+  const humans = players.filter((player) => !player.isAi);
+  return {
+    filled: humans.filter((player) => player.userId != null).length,
+    total: humans.length,
+    aiCount: players.filter((player) => player.isAi).length,
+  };
+}
+
 export async function listGames(): Promise<ApiGame[]> {
   const data = await apiClient.get<GamesListResponse>('/games');
   return data.games.map(mapGame);
+}
+
+export async function listOpenGames(): Promise<{ games: ApiOpenGame[]; count: number }> {
+  const data = await apiClient.get<{ games: ApiOpenGameRaw[]; count: number }>(
+    '/games/open',
+  );
+  return {
+    games: data.games.map(mapOpenGame),
+    count: data.count,
+  };
+}
+
+export async function joinOpenGame(
+  id: number,
+): Promise<{ shouldStart: boolean; game: ApiOpenGame }> {
+  const data = await apiClient.post<{
+    joined: boolean;
+    should_start: boolean;
+    game: ApiOpenGameRaw;
+  }>(`/games/${id}/join`);
+  return {
+    shouldStart: data.should_start === true,
+    game: mapOpenGame(data.game),
+  };
+}
+
+export async function leaveOpenGame(id: number): Promise<void> {
+  await apiClient.post(`/games/${id}/leave`);
+}
+
+export async function startOpenGame(
+  id: number,
+  stateJson: string,
+): Promise<{ game: ApiGame; stateJson: string }> {
+  const data = await apiClient.post<CreateGameResponseRaw>(`/games/${id}/start`, {
+    state_json: stateJson,
+  });
+  return {
+    game: mapGame(data.game),
+    stateJson: data.state_json,
+  };
 }
 
 export async function getGame(id: number): Promise<ApiGameDetail> {

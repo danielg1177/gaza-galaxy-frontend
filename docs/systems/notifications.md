@@ -81,11 +81,13 @@ Sent from `POST /api/games/{id}/turn/submit` after the turn is stored:
 - Data: `{ game_id: {id}, event: "your_turn" }`
 
 ### Game started
-Sent from the invite-accept flow when the last invite is accepted and the game starts:
+Sent from `POST /games/{id}/start` when a matchmaking lobby fills (and historically from invite-accept when a parked game unblocks):
 - Send to: the first human player in turn order
 - Title: `"Game Started!"`
 - Body: `"Your game '{game.name}' has started — it's your first turn!"`
 - Data: `{ game_id: {id}, event: "game_started" }`
+
+Other humans in a matchmaking start receive the same `event: "game_started"` with body that the game has started and they will be notified on their turn. Deep-link still lands on Home when it is not their turn.
 
 ### Game invite received
 Sent from `POST /api/games` when the game is created:
@@ -132,6 +134,7 @@ Batch multiple tokens by passing an array to `to` when notifying multiple player
 ---
 
 ## Changelog
+- 2026-08-25: Matchmaking start notifies the first human (your turn) and every other human (game started). Same `event: game_started` so deep-link stays on Home when it is not your turn.
 - 2026-05-29: Task 148 complete — `App.tsx` deep-link handler: notification response listener, `pendingGameId` ref, imperative navigation via `useNavigationContainerRef`, `getGame` + `loadAsyncGame` flow matching HomeScreen async card tap.
 - 2026-05-29: Task 147 complete — `src/services/pushNotificationService.ts` implements `registerNotificationHandler()` and `setupPushNotifications()`; `App.tsx` wires module-level handler and post-login token upload with AsyncStorage dedup (`push_token` key).
 - 2026-05-29: Full spec written — Expo push setup, deep-link handler, all trigger events, backend call format. Phase 16 planning complete.

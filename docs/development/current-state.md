@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-08-25 (Phase 75 — account settings: username and password)
+2026-08-25 (Phase 76 — matchmaking open lobbies)
 
 ## Overall Status
 
@@ -10,6 +10,7 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Phase 76: Matchmaking open lobbies — Invite friends vs Open lobby on create; Find Game screen; `GET /games/open`, join / leave / start
 - Expo SDK 54 + TypeScript project initialized
 - `src/game/` folder structure created with stub modules
 - Task 2: Core game types/interfaces defined in `src/game/types.ts`
