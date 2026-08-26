@@ -19,12 +19,16 @@ import { ApiError } from '../services/apiClient';
 import { useAuthStore } from '../store/authStore';
 import {
   acceptFriendRequest,
+  blockUser,
   declineFriendRequest,
+  getBlockedUsers,
   getFriendRequests,
   getFriends,
   removeFriend,
   searchUsers,
   sendFriendRequest,
+  unblockUser,
+  type BlockedUser,
   type Friend,
   type FriendRequest,
   type UserSearchResult,
@@ -67,6 +71,7 @@ export default function FriendsScreen() {
 
   const [friends, setFriends] = useState<Friend[]>([]);
   const [requests, setRequests] = useState<FriendRequest[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserSearchResult[] | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -183,12 +188,14 @@ export default function FriendsScreen() {
   const isActionPending = (key: string) => pendingActions.has(key);
 
   const loadLists = useCallback(async () => {
-    const [friendsList, requestsList] = await Promise.all([
+    const [friendsList, requestsList, blockedList] = await Promise.all([
       getFriends(),
       getFriendRequests(),
+      getBlockedUsers(),
     ]);
     setFriends(friendsList);
     setRequests(requestsList);
+    setBlockedUsers(blockedList);
     setLoadError(null);
   }, []);
 
@@ -336,6 +343,49 @@ export default function FriendsScreen() {
     );
   };
 
+  const handleBlock = async (userId: number, username: string) => {
+    const key = `block:${userId}`;
+    setActionPending(key, true);
+    try {
+      await blockUser(userId);
+      setFriends((prev) => prev.filter((friend) => friend.user.id !== userId));
+      setRequests((prev) => prev.filter((request) => request.fromUser.id !== userId));
+      setSearchResults((prev) => prev?.filter((row) => row.id !== userId) ?? null);
+      await loadLists();
+    } catch (err) {
+      showAlert(
+        'Block failed',
+        err instanceof ApiError ? err.message : `Could not block ${username}.`,
+      );
+    } finally {
+      setActionPending(key, false);
+    }
+  };
+
+  const confirmBlock = (userId: number, username: string) => {
+    showConfirm(
+      `Block ${username}?`,
+      'They will not be able to message you or send friend requests. You can still play in the same campaign; chat stays hidden.',
+      () => void handleBlock(userId, username),
+    );
+  };
+
+  const handleUnblock = async (blocked: BlockedUser) => {
+    const key = `unblock:${blocked.friendshipId}`;
+    setActionPending(key, true);
+    try {
+      await unblockUser(blocked.friendshipId);
+      setBlockedUsers((prev) => prev.filter((row) => row.friendshipId !== blocked.friendshipId));
+    } catch (err) {
+      showAlert(
+        'Unblock failed',
+        err instanceof ApiError ? err.message : 'Could not unblock this player.',
+      );
+    } finally {
+      setActionPending(key, false);
+    }
+  };
+
   if (isInitialLoading) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -371,7 +421,7 @@ export default function FriendsScreen() {
           <Text style={styles.eyebrow}>SOCIAL</Text>
           <Text style={styles.title}>Friends</Text>
           <View style={styles.titleRule} />
-          <Text style={styles.subtitle}>Manage friends and incoming requests.</Text>
+            <Text style={styles.subtitle}>Manage friends, blocks, and incoming requests.</Text>
         </View>
 
         {loadError !== null && (
@@ -430,28 +480,41 @@ export default function FriendsScreen() {
                   return (
                     <View key={user.id} style={styles.row}>
                       <Text style={styles.rowUsername}>{user.username}</Text>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.rowActionButton,
-                          disabled && styles.rowActionButtonDisabled,
-                          pressed && !disabled && styles.rowActionButtonPressed,
-                        ]}
-                        onPress={() => void handleAddFriend(user)}
-                        disabled={disabled || addPending}
-                      >
-                        {addPending ? (
-                          <ActivityIndicator color={COLORS.accent} size="small" />
-                        ) : (
-                          <Text
-                            style={[
-                              styles.rowActionButtonText,
-                              disabled && styles.rowActionButtonTextDisabled,
-                            ]}
-                          >
-                            {getSearchActionLabel(user.friendshipStatus)}
-                          </Text>
-                        )}
-                      </Pressable>
+                      <View style={styles.requestActions}>
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.rowActionButton,
+                            disabled && styles.rowActionButtonDisabled,
+                            pressed && !disabled && styles.rowActionButtonPressed,
+                          ]}
+                          onPress={() => void handleAddFriend(user)}
+                          disabled={disabled || addPending}
+                        >
+                          {addPending ? (
+                            <ActivityIndicator color={COLORS.accent} size="small" />
+                          ) : (
+                            <Text
+                              style={[
+                                styles.rowActionButtonText,
+                                disabled && styles.rowActionButtonTextDisabled,
+                              ]}
+                            >
+                              {getSearchActionLabel(user.friendshipStatus)}
+                            </Text>
+                          )}
+                        </Pressable>
+                        <Pressable
+                          style={({ pressed }) => [
+                            styles.removeButton,
+                            pressed && styles.removeButtonPressed,
+                            isActionPending(`block:${user.id}`) && styles.actionButtonDisabled,
+                          ]}
+                          onPress={() => confirmBlock(user.id, user.username)}
+                          disabled={isActionPending(`block:${user.id}`)}
+                        >
+                          <Text style={styles.removeButtonText}>Block</Text>
+                        </Pressable>
+                      </View>
                     </View>
                   );
                 })
@@ -506,6 +569,18 @@ export default function FriendsScreen() {
                           <Text style={styles.declineButtonText}>Decline</Text>
                         )}
                       </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.removeButton,
+                          pressed && styles.removeButtonPressed,
+                          isActionPending(`block:${request.fromUser.id}`) &&
+                            styles.actionButtonDisabled,
+                        ]}
+                        onPress={() => confirmBlock(request.fromUser.id, request.fromUser.username)}
+                        disabled={isActionPending(`block:${request.fromUser.id}`)}
+                      >
+                        <Text style={styles.removeButtonText}>Block</Text>
+                      </Pressable>
                     </View>
                   </View>
                 );
@@ -527,19 +602,67 @@ export default function FriendsScreen() {
                 return (
                   <View key={friend.friendshipId} style={styles.row}>
                     <Text style={styles.rowUsername}>{friend.user.username}</Text>
+                    <View style={styles.requestActions}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.removeButton,
+                          pressed && styles.removeButtonPressed,
+                          removePending && styles.actionButtonDisabled,
+                        ]}
+                        onPress={() => confirmRemove(friend)}
+                        disabled={removePending}
+                      >
+                        {removePending ? (
+                          <ActivityIndicator color={COLORS.textMuted} size="small" />
+                        ) : (
+                          <Text style={styles.removeButtonText}>Remove</Text>
+                        )}
+                      </Pressable>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.removeButton,
+                          pressed && styles.removeButtonPressed,
+                          isActionPending(`block:${friend.user.id}`) && styles.actionButtonDisabled,
+                        ]}
+                        onPress={() => confirmBlock(friend.user.id, friend.user.username)}
+                        disabled={isActionPending(`block:${friend.user.id}`)}
+                      >
+                        <Text style={styles.removeButtonText}>Block</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.label}>Blocked</Text>
+          {blockedUsers.length === 0 ? (
+            <Text style={styles.emptyText}>No blocked players.</Text>
+          ) : (
+            <View style={styles.list}>
+              {blockedUsers.map((blocked) => {
+                const unblockKey = `unblock:${blocked.friendshipId}`;
+                const unblockPending = isActionPending(unblockKey);
+
+                return (
+                  <View key={blocked.friendshipId} style={styles.row}>
+                    <Text style={styles.rowUsername}>{blocked.user.username}</Text>
                     <Pressable
                       style={({ pressed }) => [
-                        styles.removeButton,
-                        pressed && styles.removeButtonPressed,
-                        removePending && styles.actionButtonDisabled,
+                        styles.rowActionButton,
+                        pressed && styles.rowActionButtonPressed,
+                        unblockPending && styles.actionButtonDisabled,
                       ]}
-                      onPress={() => confirmRemove(friend)}
-                      disabled={removePending}
+                      onPress={() => void handleUnblock(blocked)}
+                      disabled={unblockPending}
                     >
-                      {removePending ? (
-                        <ActivityIndicator color={COLORS.textMuted} size="small" />
+                      {unblockPending ? (
+                        <ActivityIndicator color={COLORS.accent} size="small" />
                       ) : (
-                        <Text style={styles.removeButtonText}>Remove</Text>
+                        <Text style={styles.rowActionButtonText}>Unblock</Text>
                       )}
                     </Pressable>
                   </View>
@@ -784,7 +907,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.accent,
     backgroundColor: COLORS.accentDim,
-    minWidth: 120,
+    minWidth: 88,
     alignItems: 'center',
     justifyContent: 'center',
   },

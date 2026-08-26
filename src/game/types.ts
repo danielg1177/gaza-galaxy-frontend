@@ -179,13 +179,13 @@ export interface Player {
   isEliminated: boolean;
   /**
    * Human already opened (or skipped) their knockout farewell turn.
-   * Async submit uses this so an eliminated commander is not given another
+   * Async submit uses this so an eliminated player is not given another
    * "your turn" after they have seen the defeat UI.
    */
   knockoutFarewellComplete?: boolean;
   isAI: boolean;
   /**
-   * Human commander is sitting out; the AI plays their turns until they rejoin.
+   * Human player is sitting out; the AI plays their turns until they rejoin.
    * Does not change `isAI` (slot type / identity). Absent on created AI slots
    * and on humans who have never forfeited.
    */
@@ -236,7 +236,7 @@ export interface AiPlayerState {
 export type CommanderStatusNoticeKind = 'forfeit' | 'rejoin';
 
 /**
- * Roster change other commanders should see once, on their next turn.
+ * Roster change other players should see once, on their next turn.
  * Stored on `GameState` so it survives `resolveTurn` and async `state_json`.
  */
 export interface CommanderStatusNotice {

@@ -4,6 +4,25 @@ Tasks not yet started, in priority order.
 
 ---
 
+## Phase 79 — Feature: Chat report
+
+**Status:** Complete (2026-08-26).
+
+- ~~**Task 269**~~ — Backend: `message_reports`, `hidden_at`, `POST .../report`, artisan hide/delete *(complete 2026-08-26)*
+- ~~**Task 270**~~ — Frontend: ConversationModal report + block *(complete 2026-08-26)*
+
+---
+
+## Phase 78 — Feature: Account deletion + block
+
+**Status:** Complete (2026-08-26).
+
+- ~~**Task 266**~~ — Backend: user-delete FKs + `DELETE /auth/account` *(complete 2026-08-26)*
+- ~~**Task 267**~~ — Frontend: Settings delete account *(complete 2026-08-26)*
+- ~~**Task 268**~~ — Block communication (not gameplay); Find Game confirm *(complete 2026-08-26)*
+
+---
+
 ## Phase 76 — Feature: Matchmaking open lobbies
 
 **Status:** Complete (2026-08-25).
@@ -43,10 +62,10 @@ On your turn, ⋮ Forfeit runs the AI for your slot then `runAiTurnsUntilHuman`,
 
 ---
 
-## Phase 72 — Feature: Commander forfeit/rejoin briefing
+## Phase 72 — Feature: Player forfeit/rejoin briefing
 
-### ~~Task 257 — Frontend: turn-start overlay when a commander forfeits or rejoins~~ *(complete 2026-08-19)*
-On each other living human's next turn (this round or the next), show an in-tree **Commander update** overlay: forfeit (AI taking their turns) or rejoin (taken command again). Persist notices on `GameState` so they survive `resolveTurn` and async `state_json`.
+### ~~Task 257 — Frontend: turn-start overlay when a player forfeits or rejoins~~ *(complete 2026-08-19)*
+On each other living human's next turn (this round or the next), show an in-tree **Player update** overlay: forfeit (AI taking their turns) or rejoin. Persist notices on `GameState` so they survive `resolveTurn` and async `state_json`.
 
 ---
 
@@ -2383,7 +2402,7 @@ Capturing a player's home planet must trigger full elimination of that player. T
    a. After resolving the full cycle, check if exactly one non-eliminated human or AI player remains. If so, set a `gameOver: true` flag and record `winnerId`.
    b. In pass-and-play, when the next turn belongs to an eliminated human player: auto-open their knockout battle report (sources from `playerBattleArchiveByPlayerId` which already has their home-planet combat event from this cycle), display the **"You have been knocked out!"** banner at the top, and on close advance turn to the next active player without giving the eliminated player an End Turn opportunity.
 5. In `GameScreen`:
-   a. When `gameOver` is true and `winnerId === localHumanPlayerId`, show a **Victory** modal: "You are the last commander standing! The galaxy is yours." Dismiss → navigate to Home Screen.
+   a. When `gameOver` is true and `winnerId === localHumanPlayerId`, show a **Victory** modal: "You are the last player standing! The galaxy is yours." Dismiss → navigate to Home Screen.
    b. For an eliminated human player whose turn it technically is in pass-and-play: show the knockout battle report (auto-open, blue home-planet card at top, large red/orange **"You have been knocked out of the game!"** banner), then on close auto-advance without showing the End Turn button.
 6. `npx tsc --noEmit` must pass clean.
 
@@ -2922,7 +2941,7 @@ Export types to match the backend API response shapes (see `docs/systems/backend
 **Requirements:**
 1. In the new-game setup form, read `useAuthStore().currentUser?.username` and use it as the default value for slot 0's name input.
 2. The name remains editable (same as today).
-3. If `currentUser` is null (shouldn't happen in normal flow): fall back to current "Commander" default.
+3. If `currentUser` is null (shouldn't happen in normal flow): fall back to current "Player" default.
 4. This applies to both pass-and-play and async multiplayer game creation.
 
 **What not to change:** Game engine files, gameStore, GameScreen.

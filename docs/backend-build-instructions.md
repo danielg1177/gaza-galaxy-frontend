@@ -273,7 +273,7 @@ No auth required.
 
 **Response (201):**
 ```json
-{ "user": { "id": 1, "username": "commander_dan" }, "token": "1|abc123..." }
+{ "user": { "id": 1, "username": "player_dan" }, "token": "1|abc123..." }
 ```
 
 ---
@@ -291,7 +291,7 @@ No auth required.
 
 **Response (200):**
 ```json
-{ "user": { "id": 1, "username": "commander_dan" }, "token": "2|xyz789..." }
+{ "user": { "id": 1, "username": "player_dan" }, "token": "2|xyz789..." }
 ```
 
 **Error (401):**
@@ -313,7 +313,7 @@ Auth required.
 #### `GET /api/auth/me`
 Auth required.
 
-**Response (200):** `{ "id": 1, "username": "commander_dan" }`
+**Response (200):** `{ "id": 1, "username": "player_dan" }`
 
 ---
 
@@ -733,7 +733,7 @@ Auth required.
     {
       "id": 3,
       "game": { "id": 1, "name": "The Final War" },
-      "inviter": { "id": 1, "username": "commander_dan" },
+      "inviter": { "id": 1, "username": "player_dan" },
       "player_count": 3,
       "created_at": "2026-05-29T12:00:00.000Z"
     }

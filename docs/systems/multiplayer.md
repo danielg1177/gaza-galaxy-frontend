@@ -50,6 +50,13 @@ Players can add friends by searching for their username. Friend connections must
 | `pending_sent` | Current user sent a request; awaiting acceptance |
 | `pending_received` | Another user sent the current user a request |
 | `accepted` | Mutual friends |
+| `blocked` | Caller blocked the other user. Hidden from search. Chat and friend requests are cut. Shared games are allowed. |
+
+### Block
+- Block from Friends (search, requests, friend rows) or from chat (··· / long-press).
+- They cannot message you, send friend requests, or send game invites. In a two-human game the composer is replaced with a reason banner.
+- You can still join a lobby they are in after a confirm. They can join yours; you get a push only if you blocked them.
+- Unblock from Friends → Blocked.
 
 ### Flow
 1. User searches for another user by username (`GET /api/users/search?q=...`)
@@ -63,6 +70,9 @@ Players can add friends by searching for their username. Friend connections must
 - Lists: accepted friends, pending incoming requests, and a search bar
 - Pending incoming request count shown as a badge on the HomeScreen Friends button (top-left `AppTopBar`)
 - Logout available top-right on HomeScreen and FriendsScreen via shared `AppTopBar`
+
+### Account deletion
+Settings → **Delete account** (current password). Live campaigns continue with AI commanding the departed empire, or end if they were the last human. Waiting lobbies they created are cancelled. Local Pass & Play on the device is kept.
 
 ---
 
@@ -110,7 +120,7 @@ The Create Game name field auto-fills from the current roster and updates when s
 | Pass & Play, or Play with Friends → Invite friends | Named humans joined with ` v `, then AI count | `Daniel v Nery v Eric v 3AIs` |
 | Play with Friends → Open lobby | Human seat count as `N Users`, then AI count | `3 Users v 2AIs` |
 
-If there are no AI seats, the `v nAIs` suffix is omitted (`Daniel v Nery`, or `3 Users`). One AI is `1AI`; two or more are `nAIs`. Empty extra human names are skipped until filled (slot 0 falls back to Commander). Launch still uses the field text when it is non-empty.
+If there are no AI seats, the `v nAIs` suffix is omitted (`Daniel v Nery`, or `3 Users`). One AI is `1AI`; two or more are `nAIs`. Empty extra human names are skipped until filled (slot 0 falls back to Player). Launch still uses the field text when it is non-empty.
 
 ### Game Invites
 - Invited users see pending invites in their HomeScreen (badge count + invite list)
@@ -207,7 +217,7 @@ Pass-and-play games remain entirely local:
 - **Auto-handoff:** When a player ends their turn, the lock screen automatically dismisses after 1.5 seconds, immediately showing the next human player's turn without requiring manual interaction. The "Start Turn" button remains visible for manual override if desired.
 - **Knockout farewell:** Home-planet kills often resolve on round wrap (the last player's End Turn). The eliminated player sees a knockout report, then play returns to the living player the engine already selected — including the first player of the new round. Knockout End Turn is local-only; it does not submit to the backend.
 - **Async knockout farewell (Task 258):** A wrap-kill during the victim's own submit is a deferred knockout. Async `endTurn` must set `currentPlayerId` to that eliminated human (not the next living human). Sitting-out humans still skip knockout farewells. After farewell, the match continues if any player (including AI) is still alive.
-- **Forfeit (sit out):** ⋮ **Forfeit** on your turn marks `isForfeited` without ending the game or flipping `isAI`. The AI takes that turn immediately. When the slot comes around again, a **Sitting out** screen offers **Rejoin** or **Let the AI take this turn**, with a checkbox to stop asking (`autoAiUntilEnd`). Other commanders see a **Commander update** overlay on their next turn.
+- **Forfeit (sit out):** ⋮ **Forfeit** on your turn marks `isForfeited` without ending the game or flipping `isAI`. The AI takes that turn immediately. When the slot comes around again, a **Sitting out** screen offers **Rejoin** or **Let the AI take this turn**, with a checkbox to stop asking (`autoAiUntilEnd`). Other players see a **Player update** overlay on their next turn.
 
 ## Async multiplayer forfeit (Task 256)
 
@@ -224,13 +234,16 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 
 **Delete** remains creator-only on the Command Center. **Forfeit** remains sit-out with AI control.
 
-## Commander forfeit/rejoin briefing (Task 257)
+## Player forfeit/rejoin briefing (Task 257)
 
-`GameState.commanderStatusNotices` records when a human forfeits or rejoins. Each other living human who still takes their own turns sees one in-tree **Commander update** overlay per notice on their next turn (after pass-and-play lock screen, before the battle report). Forfeit copy: the AI is taking their turns. Rejoin copy: they have taken command again. Async Command Center **Rejoin** is detected when the next player loads and the API flag disagrees with `state_json`. `resolveTurn` copies the queue through so AI play-out does not drop it.
+`GameState.commanderStatusNotices` records when a human forfeits or rejoins. Each other living human who still takes their own turns sees one in-tree **Player update** overlay per notice on their next turn (after pass-and-play lock screen, before the battle report). Forfeit copy: the AI is taking their turns. Rejoin copy: they have rejoined. Async Command Center **Rejoin** is detected when the next player loads and the API flag disagrees with `state_json`. `resolveTurn` copies the queue through so AI play-out does not drop it.
 
 ---
 
 ## Changelog
+- 2026-08-26: Blocked send in a two-human game replaces the chat composer with the server reason (`can_send` / `cannot_send_reason`).
+- 2026-08-26: User-facing copy refers to players (not commanders); default name `Player`; deleted accounts `Former Player`; overlay title **Player update**.
+- 2026-08-26: Account deletion + communication-only block; Find Game confirm for blocked players in a lobby; chat report.
 - 2026-08-25: Default campaign names from roster (named `v` list vs `N Users`); freeze when the user types; Find Game footer badge includes pending waiting lobbies.
 - 2026-08-25: Matchmaking — Invite friends vs Open lobby on create; Find Game screen (Open + Pending); Command Center footer Find Game / Create Game; waiting open lobbies hidden from Play with Friends until start.
 - 2026-08-19: Tasks 259–260 — ⋮ **End Game** (bottom, under Forfeit) fully ends the match for all players after confirmation; **Exit Game** moved to the first menu item; async uses `POST /games/{id}/end`.

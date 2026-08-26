@@ -29,7 +29,8 @@ function shouldNotifyUnauthorized(path: string): boolean {
     !path.startsWith('/auth/me') &&
     !path.startsWith('/auth/logout') &&
     !path.startsWith('/auth/username') &&
-    !path.startsWith('/auth/password')
+    !path.startsWith('/auth/password') &&
+    !path.startsWith('/auth/account')
   );
 }
 
@@ -88,7 +89,7 @@ export const apiClient = {
     return request<T>('PATCH', path, body);
   },
 
-  delete<T>(path: string): Promise<T> {
-    return request<T>('DELETE', path);
+  delete<T>(path: string, body?: unknown): Promise<T> {
+    return request<T>('DELETE', path, body);
   },
 };

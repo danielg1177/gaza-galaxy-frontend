@@ -11,7 +11,7 @@ export interface ApiGamePlayer {
 
 export interface GameMessage {
   id: number;
-  senderUserId: number;
+  senderUserId: number | null;
   senderName: string;
   content: string;
   createdAt: string;
@@ -19,6 +19,8 @@ export interface GameMessage {
 
 export interface GetMessagesResponse {
   messages: GameMessage[];
+  canSend: boolean;
+  cannotSendReason: string | null;
 }
 
 export interface SendMessageResponse {
@@ -58,11 +60,18 @@ export interface ApiGame {
   turnNumber: number;
   createdAt: string;
   unreadMessageCount: number;
+  blockedPlayers?: ApiBlockedPlayer[];
 }
 
 export interface ApiOpenGameHost {
   id: number;
   username: string;
+}
+
+export interface ApiBlockedPlayer {
+  id: number;
+  username: string;
+  inGameName: string;
 }
 
 export interface ApiOpenGame {
@@ -77,6 +86,7 @@ export interface ApiOpenGame {
   isOpenLobby: boolean;
   players: ApiGamePlayer[];
   createdAt: string;
+  blockedPlayers: ApiBlockedPlayer[];
 }
 
 export interface InProgressTurnPayload {
@@ -164,6 +174,11 @@ interface ApiGameRaw {
   turn_number: number;
   created_at: string;
   unread_message_count: number;
+  blocked_players?: Array<{
+    id: number;
+    username: string;
+    in_game_name: string;
+  }>;
 }
 
 interface ApiOpenGameRaw {
@@ -178,6 +193,11 @@ interface ApiOpenGameRaw {
   is_open_lobby: boolean;
   players: ApiGamePlayerRaw[];
   created_at: string;
+  blocked_players?: Array<{
+    id: number;
+    username: string;
+    in_game_name: string;
+  }>;
 }
 
 interface InProgressActionsRaw {
@@ -291,6 +311,16 @@ export function isCurrentUserGameCreator(
   return false;
 }
 
+function mapBlockedPlayers(
+  rows: Array<{ id: number; username: string; in_game_name: string }> | undefined,
+): ApiBlockedPlayer[] {
+  return (rows ?? []).map((row) => ({
+    id: row.id,
+    username: row.username,
+    inGameName: row.in_game_name,
+  }));
+}
+
 function mapGamePlayer(api: ApiGamePlayerRaw): ApiGamePlayer {
   return {
     inGameName: api.in_game_name,
@@ -325,6 +355,7 @@ function mapGame(api: ApiGameRaw): ApiGame {
     turnNumber: api.turn_number,
     createdAt: api.created_at,
     unreadMessageCount: api.unread_message_count ?? 0,
+    blockedPlayers: mapBlockedPlayers(api.blocked_players),
   };
 }
 
@@ -389,6 +420,7 @@ function mapOpenGame(api: ApiOpenGameRaw): ApiOpenGame {
     isOpenLobby: api.is_open_lobby === true,
     players: (api.players ?? []).map(mapGamePlayer),
     createdAt: api.created_at,
+    blockedPlayers: mapBlockedPlayers(api.blocked_players),
   };
 }
 
@@ -549,7 +581,16 @@ export async function declineInvite(inviteId: number): Promise<void> {
 }
 
 export async function getMessages(gameId: number): Promise<GetMessagesResponse> {
-  return apiClient.get<GetMessagesResponse>(`/games/${gameId}/messages`);
+  const data = await apiClient.get<{
+    messages: GameMessage[];
+    can_send?: boolean;
+    cannot_send_reason?: string | null;
+  }>(`/games/${gameId}/messages`);
+  return {
+    messages: data.messages,
+    canSend: data.can_send !== false,
+    cannotSendReason: data.cannot_send_reason ?? null,
+  };
 }
 
 export async function sendMessage(
@@ -559,4 +600,8 @@ export async function sendMessage(
   return apiClient.post<SendMessageResponse>(`/games/${gameId}/messages`, {
     content,
   });
+}
+
+export async function reportMessage(gameId: number, messageId: number): Promise<void> {
+  await apiClient.post(`/games/${gameId}/messages/${messageId}/report`);
 }

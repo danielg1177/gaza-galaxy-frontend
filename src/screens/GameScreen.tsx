@@ -3754,7 +3754,7 @@ export default function GameScreen() {
     selectedPlanet === undefined;
   const pendingAiPlayer = players.find((p) => p.id === pendingAiPlayerId) ?? null;
   const currentTurnPlayer = players.find((p) => p.id === currentPlayerId);
-  const currentTurnPlayerName = currentTurnPlayer?.name ?? 'another commander';
+  const currentTurnPlayerName = currentTurnPlayer?.name ?? 'another player';
   const humanWon = status === 'finished' && winnerId === humanPlayer.id;
   const winnerPlayer =
     winnerId !== null ? players.find((p) => p.id === winnerId) : undefined;
@@ -4909,11 +4909,11 @@ export default function GameScreen() {
       {showingCommanderNotice && pendingCommanderNotice !== null && (
         <View style={styles.battleReportOverlay} pointerEvents="auto">
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Commander update</Text>
+            <Text style={styles.modalTitle}>Player update</Text>
             <Text style={styles.victoryModalMessage}>
               {pendingCommanderNotice.kind === 'forfeit'
                 ? `${pendingCommanderNotice.playerName} has forfeited. The AI is taking their turns.`
-                : `${pendingCommanderNotice.playerName} has taken command again.`}
+                : `${pendingCommanderNotice.playerName} has rejoined.`}
             </Text>
             <View style={styles.commanderNoticeActions}>
               <Pressable

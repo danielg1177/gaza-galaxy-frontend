@@ -1,3 +1,4 @@
+import { DEFAULT_PLAYER_NAME } from '../constants/app';
 import type { MapSize } from '../game/types';
 import {
   generateInitialGameState,
@@ -50,7 +51,7 @@ export async function startMatchmakingFromLobby(
   const map: ApiMapConfig = lobby.mapConfig ?? {};
   const playerSlots = playersToSlots(lobby.players);
   const config: GameConfig = {
-    playerName: playerSlots[0]?.name ?? 'Commander',
+    playerName: playerSlots[0]?.name ?? DEFAULT_PLAYER_NAME,
     playerSlots,
     mapSize: resolveMapSize(map.mapSize),
     mapWidth: map.mapWidth ?? 286,

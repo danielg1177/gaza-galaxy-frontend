@@ -2,6 +2,27 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-08-26 — Players are called players, not commanders
+**Decision:** User-facing copy, default names, and docs refer to match participants as **players**. Fallback in-game name is `Player`. Deleted accounts anonymize as `Former Player`. The forfeit/rejoin overlay title is **Player update**. Internal persisted field `GameState.commanderStatusNotices` is unchanged so in-progress `state_json` still loads. **Command Center** and the historical Palm OS title **Strategic Commander** are not player labels and stay as they are.
+**Rationale:** Commander was leftover product language. The engine, API, and UI already model `Player` / `game_players`.
+**Alternatives considered:** Renaming the persisted notice key (rejected — would drop queued briefings on existing campaigns).
+
+---
+
+## 2026-08-26 — Block stops communication, not shared games
+**Decision:** Blocking a player hides them from search, blocks friend requests and game invites, and filters their chat (and chat pushes). It does not forfeit or eject anyone from a match. Joining an open lobby that already includes a blocked player shows a confirm: they still cannot message you. Hosts are pushed when a blocked player sits in their lobby.
+**Rationale:** Apple 1.2 requires users to stop UGC contact, not to forbid playing a wargame. The confirm keeps that choice explicit. Chat filtering still applies after they sit together.
+**Alternatives considered:** Hard-reject join when any seated human is blocked (rejected — user asked to keep gameplay); kicking from in-progress games (rejected — wrecks campaigns).
+
+---
+
+## 2026-08-26 — Account deletion forfeits in-progress games instead of deleting them
+**Decision:** Deleting an account permanently forfeits in-progress slots (AI commands the empire, player name becomes Former Player). If it is that player's turn, the backend skips their action phase and points `current_user_id` at the next playing human. If they are the last playing human, the match finishes with no winner. Waiting lobbies they hosted are deleted. Creator transfers to the next remaining human. Chat rows stay with a null sender.
+**Rationale:** The backend does not run the TypeScript engine, so it cannot AI-resolve the leftover turn the way ⋮ Forfeit does. Skipping the action phase (or ending the game) avoids a stall. Cascading game deletes would erase other people's campaigns.
+**Alternatives considered:** Cascade-delete all games they touched (rejected — punishes opponents); sit-out forfeit with rejoin (rejected — the user row is gone); running Node engine on delete (rejected — architecture is client-computed state).
+
+---
+
 ## 2026-08-25 — Default campaign names come from the roster, not "{username}'s Campaign"
 **Decision:** Create Game pre-fills the campaign title from the current seats. Pass & Play and Invite friends join named humans with ` v ` and append `v nAIs` when there are AI seats. Open lobby uses `N Users v nAIs`. No AI seats means no AI suffix. Any keystroke in the name field stops further auto-updates for that create session.
 **Rationale:** The old `{username}'s Campaign` default did not describe who was playing. Roster-based titles match how players talk about a match. Open lobbies do not know joiner names at create time, so seat counts are used instead of names. Preserving a typed title avoids clobbering a custom name when someone adds a seat.
@@ -23,8 +44,8 @@ This file records significant design decisions with rationale. Never delete entr
 
 ---
 
-## 2026-08-25 — Account username is login identity, not in-game commander name
-**Decision:** Settings can change `users.username` (login / friend search). It does not rewrite `game_players` commander names or `GameState.players[].name`. Existing campaigns keep the name chosen at launch. Command Center victory/defeat and forfeit matching prefer `userId` over username vs in-game name.
+## 2026-08-25 — Account username is login identity, not in-game player name
+**Decision:** Settings can change `users.username` (login / friend search). It does not rewrite `game_players` player names or `GameState.players[].name`. Existing campaigns keep the name chosen at launch. Command Center victory/defeat and forfeit matching prefer `userId` over username vs in-game name.
 **Rationale:** Username is the sole account identifier. In-game names are per-campaign display labels and may already differ from the account username (slot 0 is editable at setup). Rewriting live and finished games would surprise opponents and chat history.
 **Alternatives considered:** Updating all `in_game_name` rows and `state_json` player names (rejected — mixes account identity with campaign names); requiring a password to change username (rejected — extra friction for a friends-only app).
 
@@ -53,7 +74,7 @@ This file records significant design decisions with rationale. Never delete entr
 
 ## 2026-08-19 — Forfeit is AI control, not `isAI` and not elimination
 **Decision:** Sitting out sets `Player.isForfeited` (and optional `autoAiUntilEnd` in pass-and-play). `isAI` remains the created slot type. `isAiControlled` in `playerControl.ts` decides who `computeAiTurn` plays. Pass-and-play humans without `autoAiUntilEnd` still stop `runAiTurnsUntilHuman` so the rejoin prompt can show.
-**Rationale:** `isAI` drives identity — local human, knockout farewells, Command Center victory/defeat, fog viewer. Flipping it would treat a sitting commander as a nameless AI. Forfeit is not home-planet elimination; their empire stays in the war.
+**Rationale:** `isAI` drives identity — local human, knockout farewells, Command Center victory/defeat, fog viewer. Flipping it would treat a sitting player as a nameless AI. Forfeit is not home-planet elimination; their empire stays in the war.
 **Alternatives considered:** Setting `isAI: true` on forfeit (rejected — breaks identity and win/loss); eliminating the player (rejected — user asked to sit out without ending the game).
 
 ---

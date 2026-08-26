@@ -21,6 +21,11 @@ export interface UserSearchResult {
     | 'accepted';
 }
 
+export interface BlockedUser {
+  friendshipId: number;
+  user: { id: number; username: string };
+}
+
 interface ApiFriend {
   friendship_id: number;
   user: { id: number; username: string };
@@ -48,6 +53,10 @@ interface FriendRequestsResponse {
 
 interface UserSearchResponse {
   users: ApiUserSearchResult[];
+}
+
+interface BlockedListResponse {
+  blocked: ApiFriend[];
 }
 
 function mapFriend(api: ApiFriend): Friend {
@@ -104,4 +113,20 @@ export async function searchUsers(query: string): Promise<UserSearchResult[]> {
     `/users/search?q=${encodeURIComponent(query)}`,
   );
   return data.users.map(mapUserSearchResult);
+}
+
+export async function getBlockedUsers(): Promise<BlockedUser[]> {
+  const data = await apiClient.get<BlockedListResponse>('/friends/blocked');
+  return data.blocked.map((row) => ({
+    friendshipId: row.friendship_id,
+    user: row.user,
+  }));
+}
+
+export async function blockUser(userId: number): Promise<void> {
+  await apiClient.post('/friends/block', { user_id: userId });
+}
+
+export async function unblockUser(friendshipId: number): Promise<void> {
+  await apiClient.delete(`/friends/blocked/${friendshipId}`);
 }

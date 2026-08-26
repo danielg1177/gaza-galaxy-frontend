@@ -107,37 +107,54 @@ export default function FindGameScreen() {
     if (actionGameId !== null) {
       return;
     }
-    setActionGameId(lobby.id);
-    void (async () => {
-      try {
-        const result = await joinOpenGame(lobby.id);
-        if (result.shouldStart) {
-          const started = await startMatchmakingFromLobby(result.game);
-          loadAsyncGame({
-            ...started.game,
-            stateJson: started.stateJson,
-            inProgressActions: null,
-            latestEvents: [],
-          });
-          if (started.game.isMyTurn) {
-            navigation.navigate('Game');
-          } else {
-            navigation.navigate('Home');
+
+    const join = () => {
+      setActionGameId(lobby.id);
+      void (async () => {
+        try {
+          const result = await joinOpenGame(lobby.id);
+          if (result.shouldStart) {
+            const started = await startMatchmakingFromLobby(result.game);
+            loadAsyncGame({
+              ...started.game,
+              stateJson: started.stateJson,
+              inProgressActions: null,
+              latestEvents: [],
+            });
+            if (started.game.isMyTurn) {
+              navigation.navigate('Game');
+            } else {
+              navigation.navigate('Home');
+            }
+            return;
           }
-          return;
+          setTab('pending');
+          await refresh(false);
+        } catch (err) {
+          showAlert(
+            'Could not join',
+            err instanceof ApiError ? err.message : 'Try again.',
+          );
+          await refresh(false);
+        } finally {
+          setActionGameId(null);
         }
-        setTab('pending');
-        await refresh(false);
-      } catch (err) {
-        showAlert(
-          'Could not join',
-          err instanceof ApiError ? err.message : 'Try again.',
-        );
-        await refresh(false);
-      } finally {
-        setActionGameId(null);
-      }
-    })();
+      })();
+    };
+
+    const blockedNames = (lobby.blockedPlayers ?? [])
+      .map((player) => player.username)
+      .join(', ');
+    if (blockedNames.length > 0) {
+      showConfirm(
+        'Blocked player in this lobby',
+        `You've blocked ${blockedNames}. They won't be able to message you. Join anyway?`,
+        join,
+      );
+      return;
+    }
+
+    join();
   };
 
   const handleStart = (game: ApiGame) => {
@@ -367,6 +384,11 @@ function OpenLobbyCard({
       {filledNames.length > 0 && (
         <Text style={styles.cardPlayers}>{filledNames}</Text>
       )}
+      {(lobby.blockedPlayers ?? []).length > 0 && (
+        <Text style={styles.blockedNote}>
+          Includes a player you've blocked. They cannot message you.
+        </Text>
+      )}
       <Pressable
         style={({ pressed }) => [
           styles.primaryButton,
@@ -422,6 +444,11 @@ function PendingLobbyCard({
       </Text>
       {filledNames.length > 0 && (
         <Text style={styles.cardPlayers}>{filledNames}</Text>
+      )}
+      {(game.blockedPlayers ?? []).length > 0 && (
+        <Text style={styles.blockedNote}>
+          A player you've blocked is in this lobby. They cannot message you.
+        </Text>
       )}
       {isFull && (
         <Pressable
@@ -601,6 +628,11 @@ const styles = StyleSheet.create({
   },
   cardPlayers: {
     color: COLORS.text,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  blockedNote: {
+    color: COLORS.error,
     fontSize: 13,
     lineHeight: 18,
   },

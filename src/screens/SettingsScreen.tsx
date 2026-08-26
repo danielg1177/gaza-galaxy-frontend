@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
+import { FORMER_PLAYER_NAME } from '../constants/app';
 import { ApiError } from '../services/apiClient';
 import { useAuthStore } from '../store/authStore';
 import { showConfirm } from '../utils/webAlert';
@@ -54,6 +55,7 @@ export default function SettingsScreen() {
   const currentUser = useAuthStore((s) => s.currentUser);
   const updateUsername = useAuthStore((s) => s.updateUsername);
   const updatePassword = useAuthStore((s) => s.updatePassword);
+  const deleteAccount = useAuthStore((s) => s.deleteAccount);
 
   const [username, setUsername] = useState(currentUser?.username ?? '');
   const [usernameErrors, setUsernameErrors] = useState<string[]>([]);
@@ -68,6 +70,10 @@ export default function SettingsScreen() {
   const [passwordLoading, setPasswordLoading] = useState(false);
 
   const [menuVisible, setMenuVisible] = useState(false);
+
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteErrors, setDeleteErrors] = useState<string[]>([]);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const handleLogout = () => {
     showConfirm('Log out?', 'You will need to sign in again to continue.', () => {
@@ -141,6 +147,42 @@ export default function SettingsScreen() {
     }
   };
 
+  const runDeleteAccount = async () => {
+    setDeleteErrors([]);
+    if (deletePassword.length === 0) {
+      setDeleteErrors(['Enter your current password to delete your account.']);
+      return;
+    }
+
+    setDeleteLoading(true);
+    try {
+      await deleteAccount(deletePassword);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setDeleteErrors(getApiErrorMessages(err));
+      } else {
+        setDeleteErrors(['Could not delete account. Try again.']);
+      }
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    if (deletePassword.length === 0) {
+      setDeleteErrors(['Enter your current password to delete your account.']);
+      return;
+    }
+
+    showConfirm(
+      'Delete account?',
+      `This cannot be undone. In-progress campaigns continue with the AI commanding your empire, or end if you are the last human. Waiting lobbies you created are cancelled. Chat with other players stays, with your name shown as ${FORMER_PLAYER_NAME}.`,
+      () => {
+        void runDeleteAccount();
+      },
+    );
+  };
+
   const renderNavMenuDropdown = () => (
     <Modal
       visible={menuVisible}
@@ -209,7 +251,7 @@ export default function SettingsScreen() {
     </Modal>
   );
 
-  const busy = usernameLoading || passwordLoading;
+  const busy = usernameLoading || passwordLoading || deleteLoading;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -243,7 +285,7 @@ export default function SettingsScreen() {
             <Text style={styles.eyebrow}>ACCOUNT</Text>
             <Text style={styles.title}>Settings</Text>
             <View style={styles.titleRule} />
-            <Text style={styles.subtitle}>Change your username or password.</Text>
+            <Text style={styles.subtitle}>Change your username or password, or delete your account.</Text>
           </View>
 
           <View style={styles.section}>
@@ -358,6 +400,50 @@ export default function SettingsScreen() {
             {passwordErrors.length > 0 && (
               <View style={styles.errorContainer}>
                 {passwordErrors.map((message, index) => (
+                  <Text key={index} style={styles.errorText}>
+                    {message}
+                  </Text>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Delete account</Text>
+            <Text style={styles.dangerCopy}>
+              Permanently remove your account. Other players keep shared campaigns; you cannot rejoin.
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Current password"
+              placeholderTextColor={COLORS.textMuted}
+              value={deletePassword}
+              onChangeText={(value) => {
+                setDeletePassword(value);
+                setDeleteErrors([]);
+              }}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!busy}
+            />
+            <Pressable
+              style={({ pressed }) => [
+                styles.deleteButton,
+                (pressed || deleteLoading) && styles.submitButtonPressed,
+              ]}
+              onPress={handleDeleteAccount}
+              disabled={busy}
+            >
+              {deleteLoading ? (
+                <ActivityIndicator color="#ffffff" size="small" />
+              ) : (
+                <Text style={styles.submitButtonText}>Delete account</Text>
+              )}
+            </Pressable>
+            {deleteErrors.length > 0 && (
+              <View style={styles.errorContainer}>
+                {deleteErrors.map((message, index) => (
                   <Text key={index} style={styles.errorText}>
                     {message}
                   </Text>
@@ -539,5 +625,20 @@ const styles = StyleSheet.create({
     color: COLORS.error,
     fontSize: 14,
     lineHeight: 20,
+  },
+  dangerCopy: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    letterSpacing: 0.3,
+    marginBottom: 12,
+  },
+  deleteButton: {
+    backgroundColor: COLORS.error,
+    borderRadius: 10,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
   },
 });

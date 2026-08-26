@@ -19,6 +19,7 @@ import {
   type ResolveTurnResult,
   type TurnInput,
 } from '../game/turnEngine';
+import { DEFAULT_PLAYER_NAME } from '../constants/app';
 import { isAiControlled, needsForfeitPrompt, enqueueCommanderStatusNotice, nextCommanderStatusNoticeFor, acknowledgeCommanderStatusNotice } from '../game/playerControl';
 import type {
   AiPlayerState,
@@ -155,6 +156,8 @@ export interface GameStore {
   activeGameMessages: GameMessage[];
   isFetchingMessages: boolean;
   isSendingMessage: boolean;
+  canSendGameMessages: boolean;
+  cannotSendGameMessagesReason: string | null;
   notificationBadgeCount: number;
   startNewGame: (config: GameConfig) => void;
   loadGame: (id: string) => void;
@@ -1109,6 +1112,8 @@ export const useGameStore = create<GameStore>()(
   activeGameMessages: [],
   isFetchingMessages: false,
   isSendingMessage: false,
+  canSendGameMessages: true,
+  cannotSendGameMessagesReason: null,
   notificationBadgeCount: 0,
 
   startNewGame: (config) => {
@@ -1117,7 +1122,7 @@ export const useGameStore = create<GameStore>()(
     const id = seed.toString();
     const name =
       config.gameName?.trim() ||
-      `${config.playerName.trim() || 'Commander'}'s Campaign`;
+      `${config.playerName.trim() || DEFAULT_PLAYER_NAME}'s Campaign`;
     const record: GameRecord = { id, name, state, config };
     set({
       games: [...get().games, record],
@@ -2411,7 +2416,12 @@ export const useGameStore = create<GameStore>()(
     set({ isFetchingMessages: true });
     try {
       const response = await fetchMessagesApi(gameId);
-      set({ activeGameMessages: response.messages, isFetchingMessages: false });
+      set({
+        activeGameMessages: response.messages,
+        isFetchingMessages: false,
+        canSendGameMessages: response.canSend,
+        cannotSendGameMessagesReason: response.cannotSendReason,
+      });
     } catch {
       set({ isFetchingMessages: false });
     }
@@ -2426,13 +2436,25 @@ export const useGameStore = create<GameStore>()(
         isSendingMessage: false,
       }));
     } catch (err) {
-      set({ isSendingMessage: false });
+      if (err instanceof ApiError && err.status === 422 && !err.errors) {
+        set({
+          isSendingMessage: false,
+          canSendGameMessages: false,
+          cannotSendGameMessagesReason: err.message,
+        });
+      } else {
+        set({ isSendingMessage: false });
+      }
       throw err;
     }
   },
 
   clearMessages: () => {
-    set({ activeGameMessages: [] });
+    set({
+      activeGameMessages: [],
+      canSendGameMessages: true,
+      cannotSendGameMessagesReason: null,
+    });
   },
 
   setNotificationBadgeCount: (count) => set({ notificationBadgeCount: count }),

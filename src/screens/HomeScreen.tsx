@@ -17,7 +17,7 @@ import { subscribeHomeRefresh } from '../services/homeRefreshEvents';
 import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
-import { APP_NAME_UPPER } from '../constants/app';
+import { APP_NAME_UPPER, DEFAULT_PLAYER_NAME } from '../constants/app';
 import type { MapSize } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
 import { ConversationModal } from '../components/ConversationModal';
@@ -88,7 +88,7 @@ function buildDefaultGameName(
     if (trimmed.length > 0) {
       return [trimmed];
     }
-    return index === 0 ? ['Commander'] : [];
+    return index === 0 ? [DEFAULT_PLAYER_NAME] : [];
   });
   const parts = aiLabel ? [...humanNames, aiLabel] : humanNames;
   const name = parts.join(' v ');
@@ -571,13 +571,13 @@ export default function HomeScreen() {
 
   const [isCreating, setIsCreating] = useState(false);
   const [playerSlots, setPlayerSlots] = useState<PlayerSlot[]>(() =>
-    createDefaultPlayerSlots(currentUser?.username ?? 'Commander'),
+    createDefaultPlayerSlots(currentUser?.username ?? DEFAULT_PLAYER_NAME),
   );
   const [playMode, setPlayMode] = useState<'passAndPlay' | 'asyncMultiplayer'>('asyncMultiplayer');
   const [fillMode, setFillMode] = useState<'invite' | 'open'>('invite');
   const usesOpenLobbyName = playMode === 'asyncMultiplayer' && fillMode === 'open';
   const [gameName, setGameName] = useState(() =>
-    buildDefaultGameName(createDefaultPlayerSlots(currentUser?.username ?? 'Commander'), {
+    buildDefaultGameName(createDefaultPlayerSlots(currentUser?.username ?? DEFAULT_PLAYER_NAME), {
       seatCounts: false,
     }),
   );
@@ -910,7 +910,7 @@ export default function HomeScreen() {
 
   const handleLaunch = () => {
     const { width, height, planetCount } = computeMapDimensions(mapSize, playerSlots.length);
-    const playerName = (playerSlots[0]?.name ?? '').trim() || 'Commander';
+    const playerName = (playerSlots[0]?.name ?? '').trim() || DEFAULT_PLAYER_NAME;
     const campaignName = resolveCampaignName(gameName, playerSlots, usesOpenLobbyName);
 
     if (playMode === 'passAndPlay') {

@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-08-25 (Phase 77 — default game names + Find Game pending badge)
+2026-08-26 (player terminology — commanders → players)
 
 ## Overall Status
 
@@ -10,6 +10,9 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Player terminology: user-facing copy, default names, and deleted-account labels say **player** / `Player` / `Former Player` (not commander). Overlay title **Player update**. Persisted `commanderStatusNotices` unchanged.
+- Phase 79: Chat report + hide (ConversationModal ··· / long-press; `POST .../report`; artisan hide-message)
+- Phase 78: Account deletion (Settings) and communication-only block (Friends + Find Game confirm)
 - Phase 77: Default campaign names from roster (`Daniel v Nery v 3AIs` / `3 Users v 2AIs`); Find Game footer badge includes pending lobbies the user is already in
 - Phase 76: Matchmaking open lobbies — Invite friends vs Open lobby on create; Find Game screen; `GET /games/open`, join / leave / start
 - Expo SDK 54 + TypeScript project initialized
@@ -139,7 +142,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 - Task 135: Optimistic friend-request UI — send → `pending_sent` in search results; accept → move to Friends list; decline/remove → row removed immediately; action errors via `Alert.alert`
 - Task 136: HomeScreen Friends nav — top-right pill button navigates to `Friends`; `useFocusEffect` refreshes pending request count via `getFriendRequests()` (errors swallowed, no spinner); accent badge shows count or `9+`
 - Task 137: Games service layer — `src/services/gamesService.ts` exports `ApiGame`, `ApiGameDetail`, `CreateGamePayload`, `InProgressTurnPayload`, `SubmitTurnPayload`, `ApiInvite` and nine API functions (`listGames`, `getGame`, `createGame`, `deleteGame`, `saveTurnProgress`, `submitTurn`, `listInvites`, `acceptInvite`, `declineInvite`); snake_case API responses mapped to camelCase; all calls via `apiClient`
-- Task 138: Username default in game setup — `HomeScreen` slot 0 name pre-fills from `useAuthStore().currentUser?.username` with `'Commander'` fallback; field remains editable; applies to pass-and-play and async multiplayer
+- Task 138: Username default in game setup — `HomeScreen` slot 0 name pre-fills from `useAuthStore().currentUser?.username` with `'Player'` fallback; field remains editable; applies to pass-and-play and async multiplayer
 - Task 139: Friend picker for async human slots — `PlayerSlot.userId?` added; async non-slot-0 human slots use tappable friend picker + modal (`getFriends()`); pass-and-play keeps TextInput; slot 0 unchanged
 - Task 140: Game invites section on HomeScreen — `listInvites()` in `useFocusEffect`; "Game Invites (N)" section with accept/decline rows; per-row loading spinner; section hidden when empty
 - Task 141: Async games list in HomeScreen — `listGames()` on focus; "Async Multiplayer" section with `AsyncGameCard`; tap active game → `getGame` + `loadAsyncGame` + navigate; `GameRecord.asyncGameId?` + `loadAsyncGame` in store; local pass-and-play filtered by `asyncGameId == null`
@@ -189,7 +192,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 - **Distance measurement:** dragging from any planet shows a live bottom-center pill (`X.X clicks`) from origin to finger and the same accent drag line as fleet dispatch; works on owned planets (alongside fleet drag) and non-owned planets (measurement-only, no dispatch); non-owned measurement drags block map pan like fleet drag
 - **In-transit fleet tooltip:** tapping an in-flight fleet marker (not on a planet) shows ship count and rounds-until-arrival (owner colour on accent bar only); **✕** opposite ship count; semi-transparent background; auto-fades out after 4s
 - **Zoom/pan math:** at every zoom level, pan can reach all map content with 150px padding beyond strict edge clamp (prevents pinch-release jump when zooming near boundaries); gesture/tap transforms use a consistent top-left-anchored formula (`screen = map * scale + translate`) without relying on `transformOrigin`
-- **End game:** ⋮ **End Game** (last item, under Forfeit) confirms then fully ends the match for all players — async via `POST /games/{id}/end` (no winner, **FINISHED** on Command Center); pass-and-play/`solo` removes the local record. Victory modal for winning local human ("You are the last commander standing!"), game-over modal naming the winner otherwise (skipped when there is no winner); both **Return to Home** via `resetGame` (finished local games removed from lobby); knockout battle report for eliminated pass-and-play humans (no End Turn)
+- **End game:** ⋮ **End Game** (last item, under Forfeit) confirms then fully ends the match for all players — async via `POST /games/{id}/end` (no winner, **FINISHED** on Command Center); pass-and-play/`solo` removes the local record. Victory modal for winning local human ("You are the last player standing!"), game-over modal naming the winner otherwise (skipped when there is no winner); both **Return to Home** via `resetGame` (finished local games removed from lobby); knockout battle report for eliminated pass-and-play humans (no End Turn)
 - **Pass-and-play:** after End Turn, lock screen shows "Pass the device", round number (`roundNumber`, same as HUD), active player name, and a **Start Turn** button (no tap-anywhere dismiss); lock screen never shown for async games (`asyncGameId != null`); off-white overlay matches app background; map stays mounted underneath; dismissing lock screen (and initial game load) instantly snaps viewport to the active human player's home planet at `HOME_PLANET_SNAP_SCALE` (0.85×) with edge clamping
 - `npx tsc --noEmit` passes clean
 - Full engine: map gen, spawns, turns, production, movement, combat, AI
@@ -226,11 +229,14 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit Game** / **Exit to Home** first, **Forfeit**, **End Game** last; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-08-26: Blocked chat send shows a reason banner in ConversationModal (`can_send` / `cannot_send_reason` from GET messages; web-safe alert on other send failures).
+- 2026-08-26: Players are called players, not commanders — UI copy, default name `Player`, deleted-account `Former Player`, overlay **Player update**. `GameState.commanderStatusNotices` key kept for existing saves.
+- 2026-08-26: Phase 78–79 — Settings **Delete account** (`DELETE /auth/account`). Block hides chat, search, friend requests, and game invites, but not shared games; Find Game confirms before joining a lobby that already has a blocked player. Chat ··· / long-press Report and Block.
 - 2026-08-25: Phase 77 — Create Game auto-names the campaign from the roster: named humans joined with ` v ` plus `v nAIs` for Pass & Play / Invite friends (omit AIs when none); Open lobby uses `N Users v nAIs`. Typing in the name field freezes auto-updates. Find Game footer badge is open lobbies plus pending waiting lobbies the user is already in (created or joined).
-- 2026-08-25: Phase 75 — Settings screen (⋮ **Settings**) lets the signed-in user change username or password. `PATCH /auth/username` and `PATCH /auth/password`; `authStore.updateUsername` / `updatePassword`. Username change does not rewrite in-game commander names. Command Center victory/defeat matching prefers `userId`.
+- 2026-08-25: Phase 75 — Settings screen (⋮ **Settings**) lets the signed-in user change username or password. `PATCH /auth/username` and `PATCH /auth/password`; `authStore.updateUsername` / `updatePassword`. Username change does not rewrite in-game player names. Command Center victory/defeat matching prefers `userId`.
 - 2026-08-19: Phase 74 (Tasks 259–260) — ⋮ **End Game** at the bottom (under Forfeit) fully ends the match for all players after confirmation; **Exit Game** / **Exit to Home** moved to the first menu item. Async `POST /games/{id}/end`; pass-and-play `resetGame()`. Finished-with-no-winner status bar: **Game ended**.
 - 2026-08-19: Phase 73 (Task 258) — async knockout farewell: deferred wrap-kills and wrap-back recovery redirect the submitted turn to the eliminated human; persist `pendingFarewellPlayerIds` / `knockoutResumePlayerId` on `GameState`; `acknowledgeKnockout` continues vs AIs instead of finishing when one human remains.
-- 2026-08-19: Phase 72 (Task 257) — **Commander update** overlay on each other human's next turn when someone forfeits (AI taking turns) or rejoins. Notices live on `GameState` and survive `resolveTurn` / async submit.
+- 2026-08-19: Phase 72 (Task 257) — **Player update** overlay on each other human's next turn when someone forfeits (AI taking turns) or rejoins. Notices live on `GameState` and survive `resolveTurn` / async submit.
 - 2026-08-19: Phase 71 (Task 256) — async ⋮ **Forfeit** runs AI for the slot, submits, then `POST /forfeit` and returns home. Command Center **Rejoin**. `loadAsyncGame` overlays server `is_forfeited` onto `GameState.players`.
 - 2026-08-19: Phase 70 (Tasks 253–254) — pass-and-play forfeit: `Player.isForfeited` / `autoAiUntilEnd`; `isAiControlled` + `needsForfeitPrompt`; ⋮ Forfeit; Sitting out overlay (Rejoin / Let AI / don't ask again). Async forfeit APIs not in this slice.
 - 2026-08-19: Phase 69 (Task 252) — pass-and-play knockout after a round-wrap elimination no longer skips the first living player. `GameRecord.knockoutResumePlayerId` stores the engine's next player while the farewell hijacks `currentPlayerId`; `acknowledgeKnockout` restores it instead of walking forward from the eliminated slot. Local knockout no longer sets `isSubmittingTurn` (that overlay + 45s timeout was a fake backend submit while offline).

@@ -1,5 +1,23 @@
 # Completed Tasks
 
+## Player terminology (commanders → players)
+**Completed:** 2026-08-26
+**Files modified:** `src/constants/app.ts`, `src/screens/HomeScreen.tsx`, `src/screens/GameScreen.tsx`, `src/screens/SettingsScreen.tsx`, `src/screens/FindGameScreen.tsx`, `src/screens/FriendsScreen.tsx`, `src/components/ConversationModal.tsx`, `src/services/matchmaking.ts`, `src/store/gameStore.ts`, `src/game/types.ts`, backend `AccountDeletionService`, `GameController`, `MessageController`, docs
+**Notes:** User-facing copy, default names, and deleted-account labels say player / `Player` / `Former Player`. Overlay title **Player update**; rejoin copy "has rejoined." Persisted `GameState.commanderStatusNotices` is unchanged so existing campaigns still load. **Command Center** and historical **Strategic Commander** are unchanged.
+
+---
+## Phase 79 — Chat report and hide
+**Completed:** 2026-08-26
+**Files modified:** `src/components/ConversationModal.tsx`, `src/services/gamesService.ts`, backend `MessageController`, `message_reports` / `hidden_at`, artisan `moderation:hide-message`
+**Notes:** Long-press or ··· on another player's message → Report or Block. Reports snapshot the content and email `MODERATION_EMAIL`. Hidden messages drop out of GET / unread.
+
+---
+## Phase 78 — Account deletion + communication block
+**Completed:** 2026-08-26
+**Files modified:** `src/screens/SettingsScreen.tsx`, `src/store/authStore.ts`, `src/screens/FriendsScreen.tsx`, `src/screens/FindGameScreen.tsx`, `src/services/friendsService.ts`, `src/services/apiClient.ts`, backend `AccountDeletionService`, `FriendController`, FK migration
+**Notes:** Settings **Delete account** requires current password. Live games: AI takes the empire (or the match ends if they were the last human). Block hides search/requests/chat/invites but does not forbid sharing a board; Find Game confirms before joining a lobby that already has a blocked player.
+
+---
 ## Phase 77 — Default campaign names + Find Game pending badge
 **Completed:** 2026-08-25
 **Files modified:** `src/screens/HomeScreen.tsx`, `docs/systems/multiplayer.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`
@@ -15,7 +33,7 @@
 ## Phase 75 — Account settings (username / password)
 **Completed:** 2026-08-25
 **Files modified:** `src/screens/SettingsScreen.tsx` (new), `src/store/authStore.ts`, `src/services/apiClient.ts`, `src/screens/HomeScreen.tsx`, `src/screens/FriendsScreen.tsx`, `App.tsx`, `docs/systems/backend-api.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`
-**Notes:** ⋮ **Settings** on Command Center and Friends. Two forms: save username (`PATCH /auth/username`), save password with current + confirmation (`PATCH /auth/password`). Wrong current password is 422 (does not log the user out). Username change does not rewrite in-game commander names. Command Center victory/defeat matching prefers `userId`.
+**Notes:** ⋮ **Settings** on Command Center and Friends. Two forms: save username (`PATCH /auth/username`), save password with current + confirmation (`PATCH /auth/password`). Wrong current password is 422 (does not log the user out). Username change does not rewrite in-game player names. Command Center victory/defeat matching prefers `userId`.
 
 ---
 ## Phase 74 — End game for all players
@@ -30,10 +48,10 @@
 **Notes:** Task 243 only redirected `immediateKnockouts`. A home-planet kill on round wrap during the victim's own `endTurn` is deferred; Zustand pending farewells are wiped on submit, so the victim was skipped and `runAiTurnsUntilHuman` returned the turn to the attacker. Async submit now redirects deferred knockouts (and wrap-back recovery for already-skipped victims). `Player.knockoutFarewellComplete` + `GameState.pendingFarewellPlayerIds` / `knockoutResumePlayerId` persist in `state_json`. `acknowledgeKnockout` finishes only when one player of any kind remains.
 
 ---
-## Phase 72 — Commander forfeit/rejoin briefing
+## Phase 72 — Player forfeit/rejoin briefing
 **Completed:** 2026-08-19
 **Files modified:** `src/game/types.ts`, `src/game/playerControl.ts`, `src/game/turnEngine.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `docs/systems/multiplayer.md`, `docs/systems/turn-engine.md`, `docs/development/current-state.md`, `docs/tasks/in-progress.md`, `docs/tasks/completed.md`, `docs/tasks/backlog.md`
-**Notes:** `GameState.commanderStatusNotices` queues forfeit/rejoin briefings. Each other playing human sees an in-tree **Commander update** overlay on their next turn (after the lock screen, before the battle report). `resolveTurn` preserves the queue. Async Command Center **Rejoin** is detected when `loadAsyncGame` overlays API flags.
+**Notes:** `GameState.commanderStatusNotices` queues forfeit/rejoin briefings. Each other playing human sees an in-tree **Player update** overlay on their next turn (after the lock screen, before the battle report). `resolveTurn` preserves the queue. Async Command Center **Rejoin** is detected when `loadAsyncGame` overlays API flags.
 
 ---
 ## Phase 71 — Async forfeit + Command Center Rejoin

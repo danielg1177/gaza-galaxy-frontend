@@ -28,6 +28,7 @@ export interface AuthStore {
     password: string,
     passwordConfirmation: string,
   ) => Promise<void>;
+  deleteAccount: (currentPassword: string) => Promise<void>;
   logout: () => Promise<void>;
   loadStoredAuth: () => Promise<void>;
 }
@@ -82,6 +83,21 @@ export const useAuthStore = create<AuthStore>((set) => ({
       password,
       password_confirmation: passwordConfirmation,
     });
+  },
+
+  deleteAccount: async (currentPassword) => {
+    const generationAtStart = authGeneration;
+    await apiClient.delete('/auth/account', {
+      current_password: currentPassword,
+    });
+    if (generationAtStart !== authGeneration) {
+      return;
+    }
+    await AsyncStorage.removeItem('auth_token');
+    await AsyncStorage.removeItem('current_user');
+    await AsyncStorage.removeItem('push_token');
+    await AsyncStorage.removeItem('web_push_subscription');
+    set({ currentUser: null, token: null });
   },
 
   logout: async () => {

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -13,8 +12,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ApiError } from '../services/apiClient';
 import type { GameMessage } from '../services/gamesService';
+import { reportMessage } from '../services/gamesService';
+import { blockUser } from '../services/friendsService';
 import { useGameStore } from '../store/gameStore';
+import { showAlert, showConfirm } from '../utils/webAlert';
 import { lockViewportZoom, preventInputZoomOnFocus, resetScrollOnBlur } from '../utils/viewportZoom';
 
 interface ConversationModalProps {
@@ -35,6 +38,8 @@ const COLORS = {
   inputBorder: '#3a3a4a',
   sendDisabled: '#4a4a5a',
   sendActive: '#4060c8',
+  danger: '#c0392b',
+  blockedBanner: '#2a2430',
 };
 
 const MONTHS = [
@@ -82,11 +87,15 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
   const activeGameMessages = useGameStore((s) => s.activeGameMessages);
   const isFetchingMessages = useGameStore((s) => s.isFetchingMessages);
   const isSendingMessage = useGameStore((s) => s.isSendingMessage);
+  const canSendGameMessages = useGameStore((s) => s.canSendGameMessages);
+  const cannotSendGameMessagesReason = useGameStore((s) => s.cannotSendGameMessagesReason);
   const fetchMessages = useGameStore((s) => s.fetchMessages);
   const sendMessage = useGameStore((s) => s.sendMessage);
   const clearMessages = useGameStore((s) => s.clearMessages);
 
   const [inputText, setInputText] = useState('');
+  const [actionMessage, setActionMessage] = useState<GameMessage | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
   const listRef = useRef<FlatList<GameMessage>>(null);
   const prevVisibleRef = useRef(visible);
   const initialLoadDoneRef = useRef(false);
@@ -136,7 +145,7 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
 
   const handleSend = async () => {
     const trimmed = inputText.trim();
-    if (!trimmed || isSendingMessage) {
+    if (!trimmed || isSendingMessage || !canSendGameMessages) {
       return;
     }
 
@@ -144,11 +153,65 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
       await sendMessage(gameId, trimmed);
       setInputText('');
     } catch (err) {
-      Alert.alert(
+      if (err instanceof ApiError && err.status === 422 && !err.errors) {
+        return;
+      }
+      showAlert(
         'Failed to send',
         err instanceof Error ? err.message : 'Something went wrong',
       );
     }
+  };
+
+  const handleReport = (message: GameMessage) => {
+    showConfirm(
+      'Report this message?',
+      'We will review it and can hide the message or remove the account.',
+      () => {
+        void (async () => {
+          setActionBusy(true);
+          try {
+            await reportMessage(gameId, message.id);
+            setActionMessage(null);
+            showAlert('Reported', 'Thanks. We will review this.');
+          } catch (err) {
+            showAlert(
+              'Report failed',
+              err instanceof Error ? err.message : 'Could not send the report.',
+            );
+          } finally {
+            setActionBusy(false);
+          }
+        })();
+      },
+    );
+  };
+
+  const handleBlockSender = (message: GameMessage) => {
+    if (message.senderUserId == null) {
+      return;
+    }
+    showConfirm(
+      `Block ${message.senderName}?`,
+      'They will not be able to message you. Shared campaigns continue.',
+      () => {
+        void (async () => {
+          setActionBusy(true);
+          try {
+            await blockUser(message.senderUserId as number);
+            setActionMessage(null);
+            await fetchMessages(gameId);
+          } catch (err) {
+            showAlert(
+              'Block failed',
+              err instanceof Error ? err.message : 'Could not block this player.',
+            );
+          } finally {
+            setActionBusy(false);
+          }
+        })();
+      },
+    );
   };
 
   const renderMessage = ({ item }: { item: GameMessage }) => {
@@ -165,28 +228,46 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
           {!isMine && (
             <Text style={styles.senderName}>{item.senderName}</Text>
           )}
+          <TouchableOpacity
+            activeOpacity={isMine ? 1 : 0.85}
+            onLongPress={isMine ? undefined : () => setActionMessage(item)}
+            disabled={isMine}
+          >
+            <View
+              style={[
+                styles.bubble,
+                isMine ? styles.bubbleMine : styles.bubbleOther,
+              ]}
+            >
+              <Text style={styles.messageText}>{item.content}</Text>
+            </View>
+          </TouchableOpacity>
           <View
             style={[
-              styles.bubble,
-              isMine ? styles.bubbleMine : styles.bubbleOther,
-            ]}
-          >
-            <Text style={styles.messageText}>{item.content}</Text>
-          </View>
-          <Text
-            style={[
-              styles.timestamp,
+              styles.metaRow,
               isMine ? styles.timestampMine : styles.timestampOther,
             ]}
           >
-            {formatMessageTime(item.createdAt)}
-          </Text>
+            <Text style={styles.timestamp}>
+              {formatMessageTime(item.createdAt)}
+            </Text>
+            {!isMine && (
+              <TouchableOpacity
+                onPress={() => setActionMessage(item)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Message actions"
+              >
+                <Text style={styles.messageMenu}>···</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </View>
     );
   };
 
-  const canSend = inputText.trim().length > 0 && !isSendingMessage;
+  const canSend =
+    canSendGameMessages && inputText.trim().length > 0 && !isSendingMessage;
 
   return (
     <Modal
@@ -234,35 +315,79 @@ export const ConversationModal: React.FC<ConversationModalProps> = ({
               )}
             </View>
 
-            <View style={[styles.sendBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-              <TextInput
-                style={[styles.input, Platform.OS === 'web' && styles.inputWeb]}
-                placeholder="Message..."
-                placeholderTextColor={COLORS.textMuted}
-                value={inputText}
-                onChangeText={setInputText}
-                maxLength={500}
-                multiline
-                numberOfLines={4}
-                editable={!isSendingMessage}
-                onFocus={Platform.OS === 'web' ? preventInputZoomOnFocus : undefined}
-                onBlur={Platform.OS === 'web' ? resetScrollOnBlur : undefined}
-              />
-              <TouchableOpacity
+            {canSendGameMessages ? (
+              <View style={[styles.sendBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+                <TextInput
+                  style={[styles.input, Platform.OS === 'web' && styles.inputWeb]}
+                  placeholder="Message..."
+                  placeholderTextColor={COLORS.textMuted}
+                  value={inputText}
+                  onChangeText={setInputText}
+                  maxLength={500}
+                  multiline
+                  numberOfLines={4}
+                  editable={!isSendingMessage}
+                  onFocus={Platform.OS === 'web' ? preventInputZoomOnFocus : undefined}
+                  onBlur={Platform.OS === 'web' ? resetScrollOnBlur : undefined}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.sendButton,
+                    canSend ? styles.sendButtonActive : styles.sendButtonDisabled,
+                  ]}
+                  onPress={handleSend}
+                  disabled={!canSend}
+                >
+                  {isSendingMessage ? (
+                    <ActivityIndicator size="small" color={COLORS.text} />
+                  ) : (
+                    <Text style={styles.sendButtonText}>➤</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View
                 style={[
-                  styles.sendButton,
-                  canSend ? styles.sendButtonActive : styles.sendButtonDisabled,
+                  styles.blockedBanner,
+                  { paddingBottom: Math.max(insets.bottom, 16) },
                 ]}
-                onPress={handleSend}
-                disabled={!canSend}
               >
-                {isSendingMessage ? (
-                  <ActivityIndicator size="small" color={COLORS.text} />
-                ) : (
-                  <Text style={styles.sendButtonText}>➤</Text>
+                <Text style={styles.blockedBannerText}>
+                  {cannotSendGameMessagesReason ??
+                    'You cannot send messages in this game. Communication with the other player is blocked.'}
+                </Text>
+              </View>
+            )}
+            {actionMessage !== null && (
+              <View style={styles.actionSheet}>
+                <Text style={styles.actionSheetTitle} numberOfLines={2}>
+                  {actionMessage.senderName}
+                </Text>
+                <TouchableOpacity
+                  style={styles.actionSheetButton}
+                  onPress={() => handleReport(actionMessage)}
+                  disabled={actionBusy}
+                >
+                  <Text style={styles.actionSheetButtonText}>Report message</Text>
+                </TouchableOpacity>
+                {actionMessage.senderUserId != null && (
+                  <TouchableOpacity
+                    style={styles.actionSheetButton}
+                    onPress={() => handleBlockSender(actionMessage)}
+                    disabled={actionBusy}
+                  >
+                    <Text style={styles.actionSheetDangerText}>Block player</Text>
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
-            </View>
+                <TouchableOpacity
+                  style={styles.actionSheetButton}
+                  onPress={() => setActionMessage(null)}
+                  disabled={actionBusy}
+                >
+                  <Text style={styles.actionSheetMutedText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -365,6 +490,18 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 4,
   },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  messageMenu: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
   timestampMine: {
     textAlign: 'right',
     marginRight: 4,
@@ -381,6 +518,19 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: COLORS.inputBorder,
     backgroundColor: COLORS.background,
+  },
+  blockedBanner: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.inputBorder,
+    backgroundColor: COLORS.blockedBanner,
+  },
+  blockedBannerText: {
+    color: COLORS.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   input: {
     flex: 1,
@@ -417,5 +567,38 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: COLORS.text,
     fontWeight: '600',
+  },
+  actionSheet: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.inputBorder,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: COLORS.background,
+    gap: 4,
+  },
+  actionSheetTitle: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  actionSheetButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  actionSheetButtonText: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionSheetDangerText: {
+    color: COLORS.danger,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionSheetMutedText: {
+    color: COLORS.textMuted,
+    fontSize: 16,
   },
 });

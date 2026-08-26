@@ -2,6 +2,25 @@
 
 Tasks currently being worked on.
 
+## Phase 79 — Feature: Chat report
+
+**Status:** Complete (2026-08-26).
+
+- ~~**Task 269**~~ — Backend: `message_reports`, hide, report endpoint, artisan commands *(complete 2026-08-26)*
+- ~~**Task 270**~~ — Frontend: ConversationModal report + block *(complete 2026-08-26)*
+
+---
+
+## Phase 78 — Feature: Account deletion + communication block
+
+**Status:** Complete (2026-08-26).
+
+- ~~**Task 266**~~ — Backend: FK `nullOnDelete` + `DELETE /auth/account` *(complete 2026-08-26)*
+- ~~**Task 267**~~ — Frontend: Settings delete account *(complete 2026-08-26)*
+- ~~**Task 268**~~ — Block chat/search/invites; Find Game join confirm *(complete 2026-08-26)*
+
+---
+
 ## Phase 77 — UX: Default campaign names + Find Game pending badge
 
 **Status:** Complete (2026-08-25).
@@ -47,11 +66,11 @@ Tasks currently being worked on.
 
 ---
 
-## Phase 72 — Feature: Commander forfeit/rejoin briefing
+## Phase 72 — Feature: Player forfeit/rejoin briefing
 
 **Status:** Complete (2026-08-19).
 
-- ~~**Task 257**~~ — Turn-start **Commander update** overlay for forfeit and rejoin *(complete 2026-08-19)*
+- ~~**Task 257**~~ — Turn-start **Player update** overlay for forfeit and rejoin *(complete 2026-08-19)*
 
 ---
 
@@ -671,11 +690,14 @@ Phase 46 (Task 213) did not stop stacked battle reports. The copies were `react-
 ---
 
 ## Changelog
+- 2026-08-26: Player terminology — UI and docs call them players, not commanders; default `Player`; deleted-account `Former Player`; overlay **Player update**.
+- 2026-08-26: Phase 79 complete (Tasks 269–270) — report message in ConversationModal; `message_reports` + hide artisan command.
+- 2026-08-26: Phase 78 complete (Tasks 266–268) — account deletion; communication-only block; Find Game confirm when a blocked player is already seated.
 - 2026-08-25: Phase 77 complete (Task 265) — roster-based default campaign names; Find Game badge includes pending lobbies.
 - 2026-08-25: Phase 75 complete (Tasks 261–262) — Settings screen from ⋮ **Settings**; `PATCH /auth/username` and `PATCH /auth/password`; Command Center outcomes match by `userId`.
 - 2026-08-19: Phase 74 complete (Tasks 259–260) — any player can fully end a game from ⋮ **End Game** (bottom, under Forfeit) after confirmation; **Exit Game** is the first menu item.
 - 2026-08-19: Phase 73 complete (Task 258) — async wrap-kill knockout skipped the eliminated human's farewell and looped the attacker; deferred redirect + wrap-back recovery; farewell queue on `GameState`; `acknowledgeKnockout` continues vs remaining AIs.
-- 2026-08-19: Phase 72 complete (Task 257) — commander forfeit/rejoin briefing overlay on each other human's next turn.
+- 2026-08-19: Phase 72 complete (Task 257) — player forfeit/rejoin briefing overlay on each other human's next turn.
 - 2026-08-19: Phase 71 complete (Tasks 255–256) — async forfeit: AI plays the slot then submit-then-forfeit API; Command Center **Rejoin**; `loadAsyncGame` overlays `is_forfeited`.
 - 2026-08-19: Phase 70 complete (Tasks 253–254) — pass-and-play forfeit / AI sit-out without flipping `isAI`.
 - 2026-08-19: Phase 69 complete (Task 252) — pass-and-play knockout skipped the first player after a round-wrap elimination; `knockoutResumePlayerId` restore; local knockout no longer sets `isSubmittingTurn`.

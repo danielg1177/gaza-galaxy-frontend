@@ -74,7 +74,7 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
 - **Async knockout (Task 243, Task 258):** the same round-wrap kill is often a **deferred** knockout (`id === outgoingPlayerId` on the victim's submit). Async must redirect `currentPlayerId` to that human on the same submit — Zustand pending farewells do not survive `resetGame`. `GameState.pendingFarewellPlayerIds` / `knockoutResumePlayerId` persist in `state_json`. `Player.knockoutFarewellComplete` prevents a second farewell. If the engine wraps back to the submitter and an eliminated human has not completed farewell, that submit still redirects to them (recovery for already-skipped victims). `acknowledgeKnockout` does not finish the game while any non-eliminated player (including AI) remains.
 
 ## Victory
-When exactly one player has `isEliminated !== true`, `status` becomes `'finished'` and `winnerId` is set. `GameScreen` shows a **Victory** modal for the winning local human ("You are the last commander standing!") or a **Game Over** modal naming the winner otherwise; both dismiss to Home via `resetGame`.
+When exactly one player has `isEliminated !== true`, `status` becomes `'finished'` and `winnerId` is set. `GameScreen` shows a **Victory** modal for the winning local human ("You are the last player standing!") or a **Game Over** modal naming the winner otherwise; both dismiss to Home via `resetGame`.
 
 ## Stub Integration Points
 | Module | Function | Contract |
@@ -91,7 +91,7 @@ When exactly one player has `isEliminated !== true`, `status` becomes `'finished
 
 The Zustand store (`src/store/gameStore.ts`) keeps human fleet dispatches in **`queuedOrders`** (`PendingFleet[]`) until **`endTurn()`**. Each confirm in the ship-count modal calls **`queueOrder`** only (no `GameState` mutation). **`endTurn()`** builds one `TurnInput`: all queued orders as `SEND_FLEET` actions (in queue order), then `{ type: 'END_TURN' }`, calls **`resolveTurn`**, then **`runAiTurnsUntilHuman`**, saves state, sets **`turnReport`** from aggregated `events`, and clears **`queuedOrders`**. **`cancelQueuedOrder(index)`** removes a queued row without touching the engine.
 
-`runAiTurnsUntilHuman` continues while `isAiControlled(currentPlayer, playMode)` is true: created AI slots, forfeited humans in async multiplayer, and pass-and-play humans who checked **Don't ask again**. It stops for a living human, including a forfeited pass-and-play commander who still wants the rejoin prompt (`needsForfeitPrompt`).
+`runAiTurnsUntilHuman` continues while `isAiControlled(currentPlayer, playMode)` is true: created AI slots, forfeited humans in async multiplayer, and pass-and-play humans who checked **Don't ask again**. It stops for a living human, including a forfeited pass-and-play player who still wants the rejoin prompt (`needsForfeitPrompt`).
 
 ## Pass-and-play forfeit (Task 253–254)
 
@@ -103,15 +103,16 @@ When the turn order later reaches a forfeited human without `autoAiUntilEnd`, Ga
 
 Async ⋮ **Forfeit** uses the same `isAiControlled` loop. The store discards queued human orders, marks the current player sitting out locally (so the last human forfeiting can play out to `finished`), submits the AI actions with **pre-resolution** `turnNumber`/`roundNumber`, then calls `POST /forfeit`. `loadAsyncGame` overlays server `is_forfeited` onto each human slot so the next submitter's `runAiTurnsUntilHuman` skips sitters.
 
-## Commander status notices (Task 257)
+## Player status notices (Task 257)
 
-`resolveTurn` copies `GameState.commanderStatusNotices` through to the result (it rebuilds the snapshot field-by-field and would otherwise drop the queue during AI play-out). Forfeit and rejoin enqueue a notice; each other playing human acknowledges it on their next turn via the GameScreen overlay.
+`resolveTurn` copies `GameState.commanderStatusNotices` through to the result (it rebuilds the snapshot field-by-field and would otherwise drop the queue during AI play-out). Forfeit and rejoin enqueue a notice; each other playing human acknowledges it on their next turn via the GameScreen **Player update** overlay.
 
 ## Stale fleet drain on load (Task 193)
 
 `loadGame` and `loadAsyncGame` call **`drainStaleFleets`**, which removes any fleet with `turnsRemaining <= 0` from `GameState.fleets` before the match resumes. Under normal play, round-wrap resolution leaves only `turnsRemaining > 0` fleets in state; persisted saves from before that invariant (or corrupted state) could otherwise re-enter the early-arrivals block at the next turn start and produce a phantom second combat on the same planet.
 
 ## Changelog
+- 2026-08-26: Overlay title **Player update**; rejoin copy "has rejoined." Persisted field remains `commanderStatusNotices`.
 - 2026-08-19: **Task 258** — async knockout farewells include deferred/self wrap-kills; persist farewell queue on `GameState`; `acknowledgeKnockout` keeps the match active while AIs remain.
 - 2026-08-19: **Task 257** — `resolveTurn` preserves `commanderStatusNotices`; forfeit/rejoin briefings survive AI play-out and async submit.
 - 2026-08-19: **Task 256** — async forfeit submits the AI-resolved turn then `POST /forfeit`; `loadAsyncGame` overlays `is_forfeited`.

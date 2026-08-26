@@ -150,7 +150,7 @@ No auth required.
 **Logic:** Create user; generate Sanctum token; return user + token.
 **Response:**
 ```json
-{ "user": { "id": 1, "username": "commander_dan" }, "token": "..." }
+{ "user": { "id": 1, "username": "player_dan" }, "token": "..." }
 ```
 
 ---
@@ -171,7 +171,7 @@ No auth required.
 ---
 
 #### `GET /api/auth/me`
-**Response:** `{ "id": 1, "username": "commander_dan" }`
+**Response:** `{ "id": 1, "username": "player_dan" }`
 
 ---
 
@@ -180,7 +180,7 @@ Auth required.
 
 **Request:** `{ "username": "string" }`
 **Validation:** same charset as register (3–32 chars, alphanumeric + underscore), unique except the current user.
-**Logic:** Update `users.username`. Does not rewrite `game_players` commander names or `state_json` player names.
+**Logic:** Update `users.username`. Does not rewrite `game_players` player names or `state_json` player names.
 **Response:** `{ "id": 1, "username": "new_name" }`
 **Errors:** 422 if invalid or already taken.
 
@@ -194,6 +194,15 @@ Auth required.
 **Logic:** `Hash::check` current password; update hashed password. Current Sanctum token stays valid. Wrong current password returns **422** (not 401 — 401 would log the client out).
 **Response:** `{ "message": "Password updated" }`
 **Errors:** 422 if current password is wrong or new password fails validation.
+
+---
+
+#### `DELETE /api/auth/account`
+Auth required.
+
+**Request:** `{ "current_password": "string" }`
+**Logic:** Verify password (422 if wrong). Permanently leave live games, cancel hosted waiting lobbies, revoke tokens, delete the user. Client clears `auth_token` / `current_user` / push keys (not local Pass & Play).
+**Response:** `{ "message": "Account deleted" }`
 
 ---
 
@@ -258,13 +267,32 @@ Auth required.
 ---
 
 #### `DELETE /api/friends/{friendship_id}`
-**Logic:** Find friendship where `id = {friendship_id} AND (requester_id = me OR addressee_id = me)`; delete it.
+**Logic:** Find friendship where `id = {friendship_id} AND (requester_id = me OR addressee_id = me)`; delete it. Rejected if status is `blocked`.
 **Response:** `{ "message": "Removed" }`
 
 ---
 
+#### `GET /api/friends/blocked`
+**Logic:** `status = blocked` AND `requester_id = me`.
+**Response:** `{ "blocked": [{ "friendship_id", "user" }] }`
+
+---
+
+#### `POST /api/friends/block`
+**Request:** `{ "user_id": 4 }`
+**Logic:** Remove pending/accepted rows; insert blocked row; cancel pending game invites either direction. Does not kick anyone from in-progress games.
+**Response:** `{ "friendship_id": 9, "status": "blocked" }`
+
+---
+
+#### `DELETE /api/friends/blocked/{friendship_id}`
+**Logic:** Blocker only. Deletes the blocked row.
+**Response:** `{ "message": "Unblocked" }`
+
+---
+
 #### `GET /api/users/search?q={query}`
-**Logic:** `WHERE username LIKE '%{q}%' AND id != me`; limit 20; for each result include friendship status between me and that user (`none`, `pending_sent`, `pending_received`, `accepted`).
+**Logic:** `WHERE username LIKE '%{q}%' AND id != me`, excluding users in a block either direction; limit 20; for each result include friendship status between me and that user (`none`, `pending_sent`, `pending_received`, `accepted`).
 **Response:**
 ```json
 {
@@ -332,7 +360,7 @@ Auth required.
   "player_slots": [
     { "type": "human", "user_id": null, "name": "Dan" },
     { "type": "human", "user_id": 5, "name": "Bob" },
-    { "type": "ai", "difficulty": "normal", "name": "Commander Zorg" }
+    { "type": "ai", "difficulty": "normal", "name": "Zorg" }
   ]
 }
 ```
@@ -625,6 +653,8 @@ All API responses should use a consistent envelope. Errors:
 - The Sanctum token is stored in the client's AsyncStorage and persists across app sessions (no need to re-login)
 
 ## Changelog
+- 2026-08-26: Chat GET returns `can_send` / `cannot_send_reason` so the composer can be replaced when every other remaining human is blocked.
+- 2026-08-26: Phase 78–79 — `DELETE /api/auth/account`; block/unblock; message report/hide.
 - 2026-08-25: Phase 75 — `PATCH /api/auth/username` and `PATCH /api/auth/password`; client Settings screen via `authStore.updateUsername` / `updatePassword`.
 - 2026-08-19: Task 259 — `POST /api/games/{id}/end` lets any human member finish an in-progress match for everyone; client `gamesService.endGame`.
 - 2026-05-29: Task 137 complete — `src/services/gamesService.ts` implements client-side games/turns/invites API layer (snake_case ↔ camelCase mapping; all endpoints via `apiClient`).
