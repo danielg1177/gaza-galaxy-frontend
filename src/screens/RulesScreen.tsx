@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { PlatformSlider } from '../components/PlatformSlider';
 import { ShipIcon } from '../components/ShipIcon';
+import { computeFactoryOutputs } from '../game/productionEngine';
 
 type RulesNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Rules'>;
 
@@ -23,8 +24,7 @@ export default function RulesScreen() {
   const navigation = useNavigation<RulesNavigationProp>();
   const [sliderValue, setSliderValue] = useState(0.5);
 
-  const shipsPerTurn = Math.round(20 * 1.0 * sliderValue * 10) / 10;
-  const goldPerTurn = Math.round(20 * 50.0 * (1 - sliderValue) * 10) / 10;
+  const { troops: shipsPerTurn, gold: goldPerTurn } = computeFactoryOutputs(20, 'A', sliderValue);
 
   return (
     <SafeAreaView style={styles.safeArea}>

@@ -80,15 +80,17 @@ The planet modal shows `Alert.alert` ("Demolish building?", no-refund warning) b
 
 ## Production slider
 
-Each owned planet has `productionSlider` in `[0, 1]` (default `0.5` at generation):
+Each owned planet has `productionSlider` in `[0, 1]` (default `0.5` at generation). Both the engine and the planet-modal label use `computeFactoryOutputs(factories, class, productionSlider)`:
 
-- **Troops:** `rawTroopOutput = factories × FACTORY_TROOP_OUTPUT[class] × productionSlider`
-- **Gold:** `rawGoldOutput = factories × FACTORY_GOLD_OUTPUT[class] × (1 - productionSlider)`
+- **Troops:** `rawTroopOutput = roundToTenth(factories × FACTORY_TROOP_OUTPUT[class] × productionSlider)`
+- **Gold:** `rawGoldOutput = roundToTenth(factories × FACTORY_GOLD_OUTPUT[class] × (1 - productionSlider))`
+
+`roundToTenth(value)` is `Math.round(value * 10) / 10`. That is the same one-decimal rounding the slider used to apply only at display time via `.toFixed(1)`, so a label of `4.0 troops/turn` is the value added to the accumulator (not an unrounded `3.96` that then floors to 3).
 
 In the owned-planet modal (`GameScreen`), planets with at least one factory show:
 
 - Percentage split label (`XX% troops / YY% gold`)
-- Live projected output label (`⚔ X.X troops/turn · 💰 Y.Y gold/turn`) computed from active factories (`builtOnRound < currentRound`) and current slider position
+- Live projected output label (`⚔ X.X troops/turn · 💰 Y.Y gold/turn`) from `computeFactoryOutputs` using active factories (`builtOnRound < currentRound`) and current slider position
 
 Fractional troops accumulate in `troopAccumulator`. Each turn, whole troops are floored from the accumulator, added to `shipCount`, and subtracted from the accumulator. Gold is floored before adding to the owner's `gold`.
 
@@ -126,13 +128,15 @@ Values step uniformly: troops decrease by 1/16 per grade; gold decreases by 3.12
 | `RESEARCH_THRESHOLDS` | `readonly number[]` — 15-entry cumulative lookup, one per tech level 0–14 |
 | `FACTORY_TROOP_OUTPUT` | `Record<PlanetClass, number>` — see table above |
 | `FACTORY_GOLD_OUTPUT` | `Record<PlanetClass, number>` — see table above |
+| `roundToTenth` | `Math.round(value * 10) / 10` — shared one-decimal rounding |
+| `computeFactoryOutputs` | `{ troops, gold }` after slider split and `roundToTenth` |
 
 ## `runProduction` logic
 
 For each planet where `owner !== 'neutral'`:
 
 1. Count active `factory` and `researchLab` buildings (`builtOnRound < currentRound`).
-2. Compute `rawTroopOutput` and `rawGoldOutput` from factory count, class tables, and `productionSlider`.
+2. Compute `rawTroopOutput` and `rawGoldOutput` via `computeFactoryOutputs` (class tables, `productionSlider`, then `roundToTenth`).
 3. Add `rawTroopOutput` to `troopAccumulator`; floor accumulator for whole troops; add whole troops to `shipCount`; subtract whole troops from accumulator.
 4. Add `Math.floor(rawGoldOutput)` to the owning player's `gold`.
 5. Add `labs × RESEARCH_LAB_POINTS_PER_TURN` to the owning player's `researchPoints`.
@@ -198,6 +202,7 @@ When a planet changes owner in `combatEngine.resolveArrival` (neutral capture or
 
 ## Changelog
 
+- 2026-09-02: Factory troop and gold output now round to the nearest tenth (`roundToTenth` / `computeFactoryOutputs`) before the troop accumulator and gold floor, matching the slider label so `4.0 troops/turn` yields 4 troops rather than flooring an unrounded `3.96` to 3.
 - 2026-06-01: Removed all `troop_produced` UI — no Battle Report cards or ⋮ Report Production section; store no longer routes the event to per-player turn reports.
 - 2026-06-01: ~~Bug fix — `troop_produced` routed to planet owner only in `playerTurnReportByPlayerId`.~~ *(superseded — UI removed entirely)*
 - 2026-06-01: Task 192 — `troop_produced` turn-report event when whole troops are added; `troopAccumulator` reset on capture documented (implemented in `combatEngine`).

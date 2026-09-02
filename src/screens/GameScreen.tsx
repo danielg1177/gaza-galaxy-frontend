@@ -29,8 +29,7 @@ import type { RootStackParamList } from '../../App';
 import { ConversationModal } from '../components/ConversationModal';
 import StrategicMapModal from '../components/StrategicMapModal';
 import {
-  FACTORY_GOLD_OUTPUT,
-  FACTORY_TROOP_OUTPUT,
+  computeFactoryOutputs,
   MAX_TECH_LEVEL,
   researchThreshold,
 } from '../game/productionEngine';
@@ -2230,26 +2229,14 @@ export default function GameScreen() {
       ).length ?? 0,
     [gameState?.roundNumber, selectedPlanet],
   );
-  const selectedPlanetLiveTroopsPerTurn = useMemo(() => {
+  const selectedPlanetLiveOutput = useMemo(() => {
     if (selectedPlanet === undefined) {
-      return 0;
+      return { troops: 0, gold: 0 };
     }
-    const sliderValue = selectedPlanet.productionSlider;
-    return (
-      selectedPlanetActiveFactories *
-      (FACTORY_TROOP_OUTPUT[selectedPlanet.class] ?? 0) *
-      sliderValue
-    );
-  }, [selectedPlanet, selectedPlanetActiveFactories]);
-  const selectedPlanetLiveGoldPerTurn = useMemo(() => {
-    if (selectedPlanet === undefined) {
-      return 0;
-    }
-    const sliderValue = selectedPlanet.productionSlider;
-    return (
-      selectedPlanetActiveFactories *
-      (FACTORY_GOLD_OUTPUT[selectedPlanet.class] ?? 0) *
-      (1 - sliderValue)
+    return computeFactoryOutputs(
+      selectedPlanetActiveFactories,
+      selectedPlanet.class,
+      selectedPlanet.productionSlider,
     );
   }, [selectedPlanet, selectedPlanetActiveFactories]);
   const selectedRoundNumber = gameState?.roundNumber ?? -1;
@@ -4446,8 +4433,8 @@ export default function GameScreen() {
                   {100 - Math.round((selectedPlanet?.productionSlider ?? 0.5) * 100)}% gold
                 </Text>
                 <Text style={styles.productionOutputLabel}>
-                  ⚔ {selectedPlanetLiveTroopsPerTurn.toFixed(1)} troops/turn · 💰{' '}
-                  {selectedPlanetLiveGoldPerTurn.toFixed(1)} gold/turn
+                  ⚔ {selectedPlanetLiveOutput.troops.toFixed(1)} troops/turn · 💰{' '}
+                  {selectedPlanetLiveOutput.gold.toFixed(1)} gold/turn
                 </Text>
               </View>
             )}

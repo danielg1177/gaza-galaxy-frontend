@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Production slider tenth-rounding matches troop credit
+**Completed:** 2026-09-02
+**Files modified:** `src/game/productionEngine.ts`, `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, `docs/systems/production.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/development/known-issues.md`, `docs/tasks/completed.md`
+**Notes:** The planet-modal slider rounded projected output with `.toFixed(1)` (3.96 → "4.0") while `runProduction` added the unrounded product and `Math.floor`ed the accumulator (3 troops). Factory troop and gold output now go through `roundToTenth` / `computeFactoryOutputs` before the accumulator and gold floor; the modal and Rules example slider use the same helper.
+
+---
 ## Player terminology (commanders → players)
 **Completed:** 2026-08-26
 **Files modified:** `src/constants/app.ts`, `src/screens/HomeScreen.tsx`, `src/screens/GameScreen.tsx`, `src/screens/SettingsScreen.tsx`, `src/screens/FindGameScreen.tsx`, `src/screens/FriendsScreen.tsx`, `src/components/ConversationModal.tsx`, `src/services/matchmaking.ts`, `src/store/gameStore.ts`, `src/game/types.ts`, backend `AccountDeletionService`, `GameController`, `MessageController`, docs

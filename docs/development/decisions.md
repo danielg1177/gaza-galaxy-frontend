@@ -2,6 +2,13 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-09-02 — Factory output rounds to the nearest tenth before credit
+**Decision:** `runProduction` credits `roundToTenth(factories × class output × slider)` for troops and gold (`computeFactoryOutputs`). The planet-modal live label and the Rules screen example use the same helper. Whole troops still come from flooring `troopAccumulator`; gold is still `Math.floor` after the tenth round.
+**Rationale:** The slider displayed one decimal via `.toFixed(1)` while production used the unrounded product, so `4.0 troops/turn` could add 3.96 and yield 3 ships that round. Rounding at credit time makes the label the value that actually enters the accumulator.
+**Alternatives considered:** Rounding only the UI (rejected — label would still lie); dropping the troop accumulator and always granting `Math.round(raw)` whole troops (rejected — fractional tenths like 3.5 are still meant to bank); rounding gold with a gold accumulator (rejected — out of scope).
+
+---
+
 ## 2026-08-26 — Players are called players, not commanders
 **Decision:** User-facing copy, default names, and docs refer to match participants as **players**. Fallback in-game name is `Player`. Deleted accounts anonymize as `Former Player`. The forfeit/rejoin overlay title is **Player update**. Internal persisted field `GameState.commanderStatusNotices` is unchanged so in-progress `state_json` still loads. **Command Center** and the historical Palm OS title **Strategic Commander** are not player labels and stay as they are.
 **Rationale:** Commander was leftover product language. The engine, API, and UI already model `Player` / `game_players`.

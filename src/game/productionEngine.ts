@@ -55,6 +55,26 @@ export const FACTORY_GOLD_OUTPUT: Record<PlanetClass, number> = {
   P: 3.125,
 };
 
+/** Round to one decimal so slider labels and production credit the same value. */
+export function roundToTenth(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+export function computeFactoryOutputs(
+  factories: number,
+  planetClass: PlanetClass,
+  productionSlider: number,
+): { troops: number; gold: number } {
+  return {
+    troops: roundToTenth(
+      factories * FACTORY_TROOP_OUTPUT[planetClass] * productionSlider,
+    ),
+    gold: roundToTenth(
+      factories * FACTORY_GOLD_OUTPUT[planetClass] * (1 - productionSlider),
+    ),
+  };
+}
+
 function countActiveBuildings(
   planet: Planet,
   type: Planet['buildings'][number]['type'],
@@ -108,10 +128,11 @@ export function runProduction(
     const factories = countActiveBuildings(planet, 'factory', currentRound);
     const labs = countActiveBuildings(planet, 'researchLab', currentRound);
 
-    const rawTroopOutput =
-      factories * FACTORY_TROOP_OUTPUT[planet.class] * planet.productionSlider;
-    const rawGoldOutput =
-      factories * FACTORY_GOLD_OUTPUT[planet.class] * (1 - planet.productionSlider);
+    const { troops: rawTroopOutput, gold: rawGoldOutput } = computeFactoryOutputs(
+      factories,
+      planet.class,
+      planet.productionSlider,
+    );
 
     let troopAccumulator = planet.troopAccumulator + rawTroopOutput;
     const wholeTroops = Math.floor(troopAccumulator);

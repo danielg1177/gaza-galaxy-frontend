@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-08-26 (player terminology — commanders → players)
+2026-09-02 (production slider tenth-rounding matches troop credit)
 
 ## Overall Status
 
@@ -10,6 +10,7 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Production slider vs garrison mismatch: `runProduction` rounds factory troop and gold output to the nearest tenth (`computeFactoryOutputs`) before the troop accumulator / gold floor, using the same helper as the planet-modal label.
 - Player terminology: user-facing copy, default names, and deleted-account labels say **player** / `Player` / `Former Player` (not commander). Overlay title **Player update**. Persisted `commanderStatusNotices` unchanged.
 - Phase 79: Chat report + hide (ConversationModal ··· / long-press; `POST .../report`; artisan hide-message)
 - Phase 78: Account deletion (Settings) and communication-only block (Friends + Find Game confirm)
@@ -229,6 +230,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit Game** / **Exit to Home** first, **Forfeit**, **End Game** last; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-09-02: Production slider label and `runProduction` share `computeFactoryOutputs` / `roundToTenth` so a displayed `4.0 troops/turn` is the value added to `troopAccumulator` (fixes `.toFixed(1)` showing 4.0 while an unrounded 3.96 floored to 3 troops).
 - 2026-08-26: Blocked chat send shows a reason banner in ConversationModal (`can_send` / `cannot_send_reason` from GET messages; web-safe alert on other send failures).
 - 2026-08-26: Players are called players, not commanders — UI copy, default name `Player`, deleted-account `Former Player`, overlay **Player update**. `GameState.commanderStatusNotices` key kept for existing saves.
 - 2026-08-26: Phase 78–79 — Settings **Delete account** (`DELETE /auth/account`). Block hides chat, search, friend requests, and game invites, but not shared games; Find Game confirms before joining a lobby that already has a blocked player. Chat ··· / long-press Report and Block.

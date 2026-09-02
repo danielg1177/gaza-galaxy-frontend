@@ -10,6 +10,16 @@
 
 ---
 
+### ~~Slider showed 4.0 troops/turn but garrison gained 3~~ (2026-09-02, resolved 2026-09-02)
+
+**Symptom:** Dragging the gold–troops slider until the live label read `4.0 troops/turn` could still add only 3 ships on the next production tick.
+
+**Root cause:** The modal rounded the raw product with `.toFixed(1)` for display only. `runProduction` added the unrounded value (e.g. 3.96) to `troopAccumulator` and `Math.floor`ed it.
+
+**Fix:** `roundToTenth` / `computeFactoryOutputs` round troop and gold output to one decimal before the accumulator and gold floor. The planet modal and Rules slider use the same helper.
+
+---
+
 ### ~~Async: knocking out the other human immediately returns the turn to the attacker~~ (2026-08-19, resolved 2026-08-19)
 
 **Symptom:** In a 2-human + AI async game, the attacker opens their turn and sees they captured the other human's home planet. Ending the turn immediately sends a "Your Turn!" push and shows Command Center as their turn again. The knocked-out human never gets a farewell turn.
@@ -347,6 +357,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-09-02: Resolved slider `4.0 troops/turn` vs 3 garrisoned — `computeFactoryOutputs` / `roundToTenth` before troop accumulator and gold floor.
 - 2026-08-19: Resolved async knockout skipping the eliminated human's farewell turn and looping the attacker (Phase 73, Task 258).
 - 2026-08-19: Resolved pass-and-play knockout skip of the first player after a round-wrap elimination, plus local knockout flipping the async submit overlay (Phase 69, Task 252).
 - 2026-08-19: Resolved stacked battle report overlays — in-tree overlay + derived visibility (Phase 68, Task 251). Phase 46's `lastOpenedTurnKeyRef` effect was not sufficient.
