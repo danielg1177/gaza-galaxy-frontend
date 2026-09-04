@@ -418,6 +418,559 @@ function placePlanetsRing(
   return positions;
 }
 
+/**
+ * Crescent shape: an open horseshoe band. Empty bay on one side, rim on the other.
+ * Rotation is seeded so the opening faces a different direction each game.
+ */
+function placePlanetsCrescent(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const virtualCx = virtualWidth / 2;
+  const virtualCy = virtualHeight / 2;
+  const maxRadius = Math.min(virtualWidth, virtualHeight) * 0.45;
+  const innerRadius = maxRadius * 0.36;
+  const ringWidth = maxRadius * 0.48;
+  const arcSpan = Math.PI * (1.2 + rng() * 0.4); // 216°–288° of planets
+  const rotation = rng() * 2 * Math.PI;
+  const positions: Position[] = [];
+
+  const outerRadius = innerRadius + ringWidth;
+  const inCrescent = (p: Position): boolean => {
+    const r = Math.hypot(p.x - virtualCx, p.y - virtualCy);
+    if (r < innerRadius || r > outerRadius) return false;
+    let a = Math.atan2(p.y - virtualCy, p.x - virtualCx) - rotation;
+    while (a < 0) a += 2 * Math.PI;
+    while (a >= 2 * Math.PI) a -= 2 * Math.PI;
+    return a <= arcSpan;
+  };
+
+  for (let i = 0; i < planetCount; i++) {
+    let placed = false;
+    for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+      const angle = rotation + rng() * arcSpan;
+      const radius = innerRadius + rng() * ringWidth;
+      const x = Math.round(virtualCx + Math.cos(angle) * radius);
+      const y = Math.round(virtualCy + Math.sin(angle) * radius);
+
+      if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
+      if (!isFarEnough({ x, y }, positions, virtualMinDistance)) continue;
+
+      positions.push({ x, y });
+      placed = true;
+      break;
+    }
+    if (!placed && positions.length > 0) {
+      const candidate = growConstrainedOrFallback(
+        rng,
+        positions,
+        positions,
+        virtualWidth,
+        virtualHeight,
+        virtualMinDistance,
+        inCrescent,
+      );
+      if (candidate !== null) {
+        positions.push(candidate);
+        placed = true;
+      }
+    }
+    if (!placed) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (crescent shape)`,
+      );
+    }
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
+function growFromParents(
+  rng: () => number,
+  parents: Position[],
+  placed: Position[],
+  virtualWidth: number,
+  virtualHeight: number,
+  virtualMinDistance: number,
+  accept: (candidate: Position) => boolean,
+): Position | null {
+  const parent = parents[Math.floor(rng() * parents.length)];
+  const dist = 2.5 + rng() * 7;
+  const angle = rng() * 2 * Math.PI;
+  const x = Math.round(parent.x + Math.cos(angle) * dist);
+  const y = Math.round(parent.y + Math.sin(angle) * dist);
+  if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) return null;
+  const candidate = { x, y };
+  if (!accept(candidate)) return null;
+  if (!isFarEnough(candidate, placed, virtualMinDistance)) return null;
+  return candidate;
+}
+
+/**
+ * Try region-constrained growth, then unconstrained organic growth so a tight
+ * shape cannot abort map generation.
+ */
+function growConstrainedOrFallback(
+  rng: () => number,
+  parents: Position[],
+  placed: Position[],
+  virtualWidth: number,
+  virtualHeight: number,
+  virtualMinDistance: number,
+  accept: (candidate: Position) => boolean,
+): Position | null {
+  for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+    const candidate = growFromParents(
+      rng,
+      parents,
+      placed,
+      virtualWidth,
+      virtualHeight,
+      virtualMinDistance,
+      accept,
+    );
+    if (candidate !== null) return candidate;
+  }
+  for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+    const candidate = growFromParents(
+      rng,
+      placed,
+      placed,
+      virtualWidth,
+      virtualHeight,
+      virtualMinDistance,
+      () => true,
+    );
+    if (candidate !== null) return candidate;
+  }
+  return null;
+}
+
+function distanceToPolyline(point: Position, waypoints: Position[]): number {
+  let min = Infinity;
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const ax = waypoints[i].x;
+    const ay = waypoints[i].y;
+    const bx = waypoints[i + 1].x;
+    const by = waypoints[i + 1].y;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((point.x - ax) * dx + (point.y - ay) * dy) / lenSq));
+    const px = ax + dx * t;
+    const py = ay + dy * t;
+    min = Math.min(min, Math.hypot(point.x - px, point.y - py));
+  }
+  return min;
+}
+
+/**
+ * Binary shape: two organic-growth cores on opposite sides of the map.
+ * Connectivity bridges form the corridor chokepoint when the cores stay apart.
+ */
+function placePlanetsBinary(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const virtualCx = virtualWidth / 2;
+  const virtualCy = virtualHeight / 2;
+  const extent = Math.min(virtualWidth, virtualHeight);
+  const axis = rng() * Math.PI;
+  const sep = extent * 0.28;
+  const seeds: Position[] = [
+    { x: Math.round(virtualCx + Math.cos(axis) * sep), y: Math.round(virtualCy + Math.sin(axis) * sep) },
+    { x: Math.round(virtualCx - Math.cos(axis) * sep), y: Math.round(virtualCy - Math.sin(axis) * sep) },
+  ];
+  const coreN = Math.ceil(planetCount / 2);
+  const maxClusterR = Math.max(extent * 0.3, virtualMinDistance * Math.sqrt(coreN / Math.PI) * 2.6);
+  const clusters: Position[][] = [[seeds[0]], [seeds[1]]];
+  const positions: Position[] = [seeds[0], seeds[1]];
+
+  for (let i = 2; i < planetCount; i++) {
+    const ci = i % 2;
+    const candidate = growConstrainedOrFallback(
+      rng,
+      clusters[ci],
+      positions,
+      virtualWidth,
+      virtualHeight,
+      virtualMinDistance,
+      (p) => euclideanDistance(p, seeds[ci]) <= maxClusterR,
+    );
+    if (candidate === null) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (binary shape)`,
+      );
+    }
+    positions.push(candidate);
+    clusters[ci].push(candidate);
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
+/**
+ * Ribbon shape: a winding S-curve of planets grown along a polyline spine.
+ * Long theater, meet-in-the-middle fights.
+ */
+function placePlanetsRibbon(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const virtualCx = virtualWidth / 2;
+  const virtualCy = virtualHeight / 2;
+  const extent = Math.min(virtualWidth, virtualHeight);
+  const heading = rng() * Math.PI;
+  const phase = rng() * 2 * Math.PI;
+  const waves = 1.25 + rng() * 0.7;
+  const length = extent * 0.88;
+  const amplitude = extent * (0.22 + rng() * 0.08);
+  const waypointCount = 8;
+  const waypoints: Position[] = [];
+  for (let i = 0; i < waypointCount; i++) {
+    const t = i / (waypointCount - 1);
+    const along = (t - 0.5) * length;
+    const across = Math.sin(t * waves * Math.PI + phase) * amplitude;
+    waypoints.push({
+      x: Math.round(virtualCx + along * Math.cos(heading) - across * Math.sin(heading)),
+      y: Math.round(virtualCy + along * Math.sin(heading) + across * Math.cos(heading)),
+    });
+  }
+
+  let spineLen = 0;
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    spineLen += euclideanDistance(waypoints[i], waypoints[i + 1]);
+  }
+  const packedHalfW = (planetCount * virtualMinDistance * virtualMinDistance * 1.6) / (2 * Math.max(spineLen, 1));
+  const halfWidth = Math.max(extent * 0.11, packedHalfW);
+  const positions: Position[] = [waypoints[0]];
+
+  for (let i = 1; i < planetCount; i++) {
+    const candidate = growConstrainedOrFallback(
+      rng,
+      positions,
+      positions,
+      virtualWidth,
+      virtualHeight,
+      virtualMinDistance,
+      (p) => distanceToPolyline(p, waypoints) <= halfWidth,
+    );
+    if (candidate === null) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (ribbon shape)`,
+      );
+    }
+    positions.push(candidate);
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
+/**
+ * Halo shape: two concentric rings — a small inner prize ring and a
+ * thicker outer band, with a void between them.
+ */
+function placePlanetsHalo(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const virtualCx = virtualWidth / 2;
+  const virtualCy = virtualHeight / 2;
+  const maxRadius = Math.min(virtualWidth, virtualHeight) * 0.45;
+  const innerR0 = maxRadius * 0.1;
+  const innerR1 = maxRadius * 0.32;
+  const outerR0 = maxRadius * 0.58;
+  const outerR1 = maxRadius * 0.96;
+  const innerMid = (innerR0 + innerR1) / 2;
+  const innerCap = Math.max(
+    4,
+    Math.floor(((2 * Math.PI * innerMid) / virtualMinDistance) * 0.7),
+  );
+  const innerCount = Math.min(Math.max(4, Math.round(planetCount * 0.26)), innerCap);
+  const innerSeed: Position = {
+    x: Math.round(virtualCx + innerMid),
+    y: Math.round(virtualCy),
+  };
+  const outerSeed: Position = {
+    x: Math.round(virtualCx + (outerR0 + outerR1) / 2),
+    y: Math.round(virtualCy),
+  };
+  const innerPlanets: Position[] = [innerSeed];
+  const outerPlanets: Position[] = [outerSeed];
+  const positions: Position[] = [innerSeed, outerSeed];
+
+  for (let i = 2; i < planetCount; i++) {
+    const inner = innerPlanets.length < innerCount;
+    const parents = inner ? innerPlanets : outerPlanets;
+    const r0 = inner ? innerR0 : outerR0;
+    const r1 = inner ? innerR1 : outerR1;
+    const candidate = growConstrainedOrFallback(
+      rng,
+      parents,
+      positions,
+      virtualWidth,
+      virtualHeight,
+      virtualMinDistance,
+      (p) => {
+        const r = Math.hypot(p.x - virtualCx, p.y - virtualCy);
+        return r >= r0 && r <= r1;
+      },
+    );
+    if (candidate === null) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (halo shape)`,
+      );
+    }
+    positions.push(candidate);
+    if (inner) innerPlanets.push(candidate);
+    else outerPlanets.push(candidate);
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
+/**
+ * Broken ring: an annular band with 2–3 seeded gaps (gates).
+ * Connectivity fills those gaps with 3-lane bridges.
+ */
+function placePlanetsBrokenRing(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const virtualCx = virtualWidth / 2;
+  const virtualCy = virtualHeight / 2;
+  const maxRadius = Math.min(virtualWidth, virtualHeight) * 0.45;
+  const innerRadius = maxRadius * 0.4;
+  const ringWidth = maxRadius * 0.48;
+  const outerRadius = innerRadius + ringWidth;
+  const gateCount = 2 + Math.floor(rng() * 2); // 2–3
+  const gateWidth = 0.38 + rng() * 0.18; // ~22°–32°
+  const rotation = rng() * 2 * Math.PI;
+
+  const inArc = (p: Position): boolean => {
+    const r = Math.hypot(p.x - virtualCx, p.y - virtualCy);
+    if (r < innerRadius || r > outerRadius) return false;
+    let a = Math.atan2(p.y - virtualCy, p.x - virtualCx) - rotation;
+    while (a < 0) a += 2 * Math.PI;
+    while (a >= 2 * Math.PI) a -= 2 * Math.PI;
+    const step = (2 * Math.PI) / gateCount;
+    for (let g = 0; g < gateCount; g++) {
+      const start = g * step;
+      let rel = a - start;
+      if (rel < 0) rel += 2 * Math.PI;
+      if (rel < gateWidth) return false;
+    }
+    return true;
+  };
+
+  const positions: Position[] = [];
+  for (let i = 0; i < planetCount; i++) {
+    let placed = false;
+    for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+      const angle = rng() * 2 * Math.PI;
+      const radius = innerRadius + rng() * ringWidth;
+      const x = Math.round(virtualCx + Math.cos(angle) * radius);
+      const y = Math.round(virtualCy + Math.sin(angle) * radius);
+      const cand = { x, y };
+      if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
+      if (!inArc(cand)) continue;
+      if (!isFarEnough(cand, positions, virtualMinDistance)) continue;
+      positions.push(cand);
+      placed = true;
+      break;
+    }
+    if (!placed && positions.length > 0) {
+      const candidate = growConstrainedOrFallback(
+        rng,
+        positions,
+        positions,
+        virtualWidth,
+        virtualHeight,
+        virtualMinDistance,
+        inArc,
+      );
+      if (candidate !== null) {
+        positions.push(candidate);
+        placed = true;
+      }
+    }
+    if (!placed) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (broken_ring shape)`,
+      );
+    }
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
+/**
+ * Crossroads: two crossing diameters (X) or three rays from the centre (Y).
+ * The junction is the contested prize; each arm is a starting theater.
+ */
+function placePlanetsCrossroads(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const virtualCx = virtualWidth / 2;
+  const virtualCy = virtualHeight / 2;
+  const extent = Math.min(virtualWidth, virtualHeight);
+  const heading = rng() * Math.PI;
+  const threeWay = rng() < 0.45;
+  const armLen = extent * 0.42;
+  const polylines: Position[][] = [];
+
+  if (threeWay) {
+    for (let i = 0; i < 3; i++) {
+      const angle = heading + (i * 2 * Math.PI) / 3;
+      polylines.push([
+        { x: Math.round(virtualCx), y: Math.round(virtualCy) },
+        {
+          x: Math.round(virtualCx + Math.cos(angle) * armLen),
+          y: Math.round(virtualCy + Math.sin(angle) * armLen),
+        },
+      ]);
+    }
+  } else {
+    for (let i = 0; i < 2; i++) {
+      const angle = heading + (i * Math.PI) / 2;
+      polylines.push([
+        {
+          x: Math.round(virtualCx - Math.cos(angle) * armLen),
+          y: Math.round(virtualCy - Math.sin(angle) * armLen),
+        },
+        {
+          x: Math.round(virtualCx + Math.cos(angle) * armLen),
+          y: Math.round(virtualCy + Math.sin(angle) * armLen),
+        },
+      ]);
+    }
+  }
+
+  let spineLen = 0;
+  for (const line of polylines) {
+    spineLen += euclideanDistance(line[0], line[1]);
+  }
+  const packedHalfW = (planetCount * virtualMinDistance * virtualMinDistance * 1.6) / (2 * Math.max(spineLen, 1));
+  const halfWidth = Math.max(extent * 0.1, packedHalfW);
+  const nearAnyArm = (p: Position): boolean =>
+    polylines.some((line) => distanceToPolyline(p, line) <= halfWidth);
+
+  const positions: Position[] = [{ x: Math.round(virtualCx), y: Math.round(virtualCy) }];
+  for (let i = 1; i < planetCount; i++) {
+    const candidate = growConstrainedOrFallback(
+      rng,
+      positions,
+      positions,
+      virtualWidth,
+      virtualHeight,
+      virtualMinDistance,
+      nearAnyArm,
+    );
+    if (candidate === null) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (crossroads shape)`,
+      );
+    }
+    positions.push(candidate);
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
+/**
+ * Clover: three organic lobes equally spaced around a small hub.
+ * More regular than cluster; each leaf is its own theater.
+ */
+function placePlanetsClover(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const virtualCx = virtualWidth / 2;
+  const virtualCy = virtualHeight / 2;
+  const extent = Math.min(virtualWidth, virtualHeight);
+  const rotation = rng() * 2 * Math.PI;
+  const sep = extent * 0.26;
+  const lobeN = Math.ceil(planetCount / 3);
+  const maxLobeR = Math.max(extent * 0.22, virtualMinDistance * Math.sqrt(lobeN / Math.PI) * 2.4);
+  const hub: Position = { x: Math.round(virtualCx), y: Math.round(virtualCy) };
+  const seeds: Position[] = [];
+  for (let i = 0; i < 3; i++) {
+    const angle = rotation + (i * 2 * Math.PI) / 3;
+    seeds.push({
+      x: Math.round(virtualCx + Math.cos(angle) * sep),
+      y: Math.round(virtualCy + Math.sin(angle) * sep),
+    });
+  }
+
+  const clusters: Position[][] = seeds.map((s) => [s]);
+  const positions: Position[] = [hub, ...seeds];
+
+  for (let i = positions.length; i < planetCount; i++) {
+    const ci = i % 3;
+    const candidate = growConstrainedOrFallback(
+      rng,
+      clusters[ci],
+      positions,
+      virtualWidth,
+      virtualHeight,
+      virtualMinDistance,
+      (p) => euclideanDistance(p, seeds[ci]) <= maxLobeR,
+    );
+    if (candidate === null) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (clover shape)`,
+      );
+    }
+    positions.push(candidate);
+    clusters[ci].push(candidate);
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
 function enforceMinimumSpacing(positions: Position[], width: number, height: number): void {
   const minX = PLANET_EDGE_PADDING;
   const maxX = width - 1 - PLANET_EDGE_PADDING;
@@ -450,6 +1003,25 @@ function enforceMinimumSpacing(positions: Position[], width: number, height: num
 }
 
 const CONNECTIVITY_RANGE = 11; // must match BASE_FLEET_RANGE_CLICKS in movementEngine.ts
+const BRIDGE_LANE_COUNT = 3;
+const BRIDGE_LANE_SPACING = 3; // clicks between parallel planets on a bridge
+
+function tryInsertBridgePlanet(positions: Position[], parent: number[], x: number, y: number): boolean {
+  for (let r = 0; r <= 3; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+        const cand = { x: x + dx, y: y + dy };
+        if (isFarEnough(cand, positions, MIN_PLANET_DISTANCE)) {
+          positions.push(cand);
+          parent.push(positions.length - 1);
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
 
 function ensureConnectivity(positions: Position[]): void {
   const parent = positions.map((_, i) => i);
@@ -472,6 +1044,7 @@ function ensureConnectivity(positions: Position[]): void {
   }
   rebuildUnion();
   const MAX_BRIDGE_ITERATIONS = 50;
+  const laneHalf = (BRIDGE_LANE_COUNT - 1) / 2;
   for (let iter = 0; iter < MAX_BRIDGE_ITERATIONS; iter++) {
     const roots = new Set(positions.map((_, i) => find(i)));
     if (roots.size <= 1) break;
@@ -490,86 +1063,135 @@ function ensureConnectivity(positions: Position[]): void {
       }
     }
     if (bestA === -1) break;
+    const gapX = positions[bestB].x - positions[bestA].x;
+    const gapY = positions[bestB].y - positions[bestA].y;
+    const gapLen = Math.hypot(gapX, gapY) || 1;
+    const perpX = -gapY / gapLen;
+    const perpY = gapX / gapLen;
     const steps = Math.ceil(minDist / CONNECTIVITY_RANGE);
     const bridges = steps - 1;
     for (let k = 1; k <= bridges; k++) {
       const t = k / steps;
-      const bx = Math.round(positions[bestA].x + t * (positions[bestB].x - positions[bestA].x));
-      const by = Math.round(positions[bestA].y + t * (positions[bestB].y - positions[bestA].y));
-      let placed = false;
-      outer: for (let r = 0; r <= 3; r++) {
-        for (let dx = -r; dx <= r; dx++) {
-          for (let dy = -r; dy <= r; dy++) {
-            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-            const cand = { x: bx + dx, y: by + dy };
-            if (isFarEnough(cand, positions, MIN_PLANET_DISTANCE)) {
-              positions.push(cand);
-              parent.push(positions.length - 1);
-              placed = true;
-              break outer;
-            }
-          }
-        }
-      }
-      if (!placed) {
-        // Skip this bridge slot rather than forcing a planet inside MIN_PLANET_DISTANCE.
-        continue;
+      const bx = positions[bestA].x + t * gapX;
+      const by = positions[bestA].y + t * gapY;
+      for (let lane = -laneHalf; lane <= laneHalf; lane++) {
+        const lx = Math.round(bx + perpX * lane * BRIDGE_LANE_SPACING);
+        const ly = Math.round(by + perpY * lane * BRIDGE_LANE_SPACING);
+        tryInsertBridgePlanet(positions, parent, lx, ly);
       }
     }
     rebuildUnion();
   }
 }
 
+function placeByShape(
+  shape: GalaxyShape,
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+): Position[] {
+  if (shape === 'dense_core') {
+    return placePlanetsDenseCore(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'ring') {
+    return placePlanetsRing(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'cluster') {
+    return placePlanetsCluster(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'spiral') {
+    return placePlanetsSpiral(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'crescent') {
+    return placePlanetsCrescent(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'binary') {
+    return placePlanetsBinary(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'ribbon') {
+    return placePlanetsRibbon(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'halo') {
+    return placePlanetsHalo(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'broken_ring') {
+    return placePlanetsBrokenRing(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'crossroads') {
+    return placePlanetsCrossroads(rng, planetCount, width, height, virtualMinDistance);
+  }
+  if (shape === 'clover') {
+    return placePlanetsClover(rng, planetCount, width, height, virtualMinDistance);
+  }
+  return placePlanetsScattered(rng, planetCount, width, height, virtualMinDistance);
+}
+
+function tryLayout(
+  shape: GalaxyShape,
+  seed: number,
+  consumeShapeRoll: boolean,
+  width: number,
+  height: number,
+  planetCount: number,
+  seedOffset: number,
+): { positions: Position[]; rng: () => number } | null {
+  const virtualMinDistance = MIN_PLANET_DISTANCE * 2;
+  for (let attempt = 0; attempt < MAX_SPACING_ATTEMPTS; attempt++) {
+    const rng = mulberry32(seed + seedOffset + attempt);
+    if (consumeShapeRoll) {
+      rng();
+    }
+    try {
+      const positions = placeByShape(shape, rng, planetCount, width, height, virtualMinDistance);
+      enforceMinimumSpacing(positions, width, height);
+      ensureConnectivity(positions);
+      enforceMinimumSpacing(positions, width, height);
+      if (minPairwiseDistance(positions) >= MIN_PLANET_DISTANCE) {
+        return { positions, rng };
+      }
+    } catch {
+      // Tight shapes can fail a single attempt; retry with a new sub-seed.
+    }
+  }
+  return null;
+}
+
 export function generateMap(config: MapConfig): GameMap {
   const { seed, width, height, planetCount } = config;
 
   const shapeRng = mulberry32(seed);
-  const shapes: GalaxyShape[] = ['scattered', 'dense_core', 'ring', 'cluster', 'spiral'];
+  const shapes: GalaxyShape[] = [
+    'scattered',
+    'dense_core',
+    'ring',
+    'cluster',
+    'spiral',
+    'crescent',
+    'binary',
+    'ribbon',
+    'halo',
+    'broken_ring',
+    'crossroads',
+    'clover',
+  ];
   const shape: GalaxyShape = config.galaxyShape ?? shapes[Math.floor(shapeRng() * shapes.length)];
+  const consumeShapeRoll = !config.galaxyShape;
 
-  let positions: Position[] | null = null;
-  let rng = mulberry32(seed);
-
-  for (let attempt = 0; attempt < MAX_SPACING_ATTEMPTS; attempt++) {
-    rng = mulberry32(seed + attempt);
-    if (!config.galaxyShape) {
-      rng(); // consume shape-roll draw (shape fixed from seed above)
-    }
-
-    // Pre-normalize canvas is 2× the final grid — use a higher virtual floor during placement.
-    const virtualMinDistance = MIN_PLANET_DISTANCE * 2;
-
-    try {
-      if (shape === 'dense_core') {
-        positions = placePlanetsDenseCore(rng, planetCount, width, height, virtualMinDistance);
-      } else if (shape === 'ring') {
-        positions = placePlanetsRing(rng, planetCount, width, height, virtualMinDistance);
-      } else if (shape === 'cluster') {
-        positions = placePlanetsCluster(rng, planetCount, width, height, virtualMinDistance);
-      } else if (shape === 'spiral') {
-        positions = placePlanetsSpiral(rng, planetCount, width, height, virtualMinDistance);
-      } else {
-        positions = placePlanetsScattered(rng, planetCount, width, height, virtualMinDistance);
-      }
-
-      enforceMinimumSpacing(positions, width, height);
-      ensureConnectivity(positions);
-      enforceMinimumSpacing(positions, width, height);
-
-      if (minPairwiseDistance(positions) >= MIN_PLANET_DISTANCE) {
-        break;
-      }
-      positions = null;
-    } catch {
-      positions = null;
-    }
+  let layout = tryLayout(shape, seed, consumeShapeRoll, width, height, planetCount, 0);
+  // Constrained shapes can fail spacing after normalize; never abort a new game.
+  if (layout === null && shape !== 'scattered') {
+    layout = tryLayout('scattered', seed, false, width, height, planetCount, 10_000);
   }
 
-  if (positions === null || minPairwiseDistance(positions) < MIN_PLANET_DISTANCE) {
+  if (layout === null) {
     throw new Error(
       `Failed to generate map with minimum planet spacing of ${MIN_PLANET_DISTANCE} clicks after ${MAX_SPACING_ATTEMPTS} attempts`,
     );
   }
+
+  const { positions, rng } = layout;
 
   // Build planet objects from positions (name, class, buildings all drawn from rng here)
   const planets: Planet[] = positions.map((pos, i) => ({

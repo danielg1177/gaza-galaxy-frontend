@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Four new galaxy shapes
+**Completed:** 2026-09-04
+**Files modified:** `src/game/types.ts`, `src/game/mapGenerator.ts`, `docs/systems/map-generation.md`, `docs/development/current-state.md`, `docs/tasks/completed.md`, `docs/backend-build-instructions.md`, backend `docs/backend/validation.md`, `docs/backend/game-state.md`, `docs/backend-build-instructions.md`
+**Notes:** Added `crescent`, `binary`, `ribbon`, and `halo` to `GalaxyShape` and the seeded random picker. Later the same day: `broken_ring`, `crossroads`, `clover`. Placement stays on the 2× virtual canvas with min-distance, normalize, spacing, and 11-click connectivity unchanged. Spawn placer is unchanged. Follow-up: constrained shapes spill leftover planets with unconstrained growth, and `generateMap` falls back to `scattered` if spacing still fails (fixes launch throw after 25 attempts).
+
+---
 ## Production slider tenth-rounding matches troop credit
 **Completed:** 2026-09-02
 **Files modified:** `src/game/productionEngine.ts`, `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, `docs/systems/production.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/development/known-issues.md`, `docs/tasks/completed.md`

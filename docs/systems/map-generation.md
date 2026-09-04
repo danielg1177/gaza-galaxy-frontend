@@ -47,8 +47,8 @@ This produces varied irregular galaxy shapes (chains, arms, clusters) per seed (
 After shape placement and bounding-box normalization, `ensureConnectivity(positions)` runs **before** planet objects are built.
 
 - Treats planets as nodes in an undirected graph: an edge exists when Euclidean distance ≤ **11 clicks** (matches `BASE_FLEET_RANGE_CLICKS` in `movementEngine.ts`).
-- If Union-Find finds more than one component, repeatedly connects the two closest planets in different components by inserting **bridge planets** along the line between them.
-- Bridge count for a gap of distance `d`: `ceil(d / 11) - 1` intermediate positions at equal parametric steps; each bridge is placed at the rounded midpoint, with a small shell search (radius 0–3) for `MIN_PLANET_DISTANCE` clearance; if none found, that bridge slot is skipped (connectivity no longer overrides spacing).
+- If Union-Find finds more than one component, repeatedly connects the two closest planets in different components by inserting a **3-lane bridge** along the line between them (centre spine plus one planet on each side, 3 clicks apart). Tight gaps may place only 1–2 of the three lanes.
+- Bridge stations for a gap of distance `d`: `ceil(d / 11) - 1` rows at equal parametric steps; each lane uses a small shell search (radius 0–3) for `MIN_PLANET_DISTANCE` clearance; if none found, that lane is skipped (connectivity no longer overrides spacing).
 - Bridge planets receive normal RNG-driven name, class, and attributes when `positions.map(...)` builds `Planet` objects (they append to the positions array).
 - Safety cap: 50 bridge iterations per map.
 - `spawnPlacer` is unaffected (reads final `planets[].position` only).
@@ -64,6 +64,13 @@ The shape controls the planet placement algorithm used.
 | `ring` | Annular band — planets in a ring (inner void ~40% of radius, ring thickness ~45%); empty centre and outer fringe |
 | `cluster` | 3–5 independent blobs of planets scattered across the map; Gaussian spread per cluster; creates natural chokepoints between groups |
 | `spiral` | Two curved logarithmic arms winding outward from the centre; spine radius uniform [8%, 96%] of max; Gaussian lateral scatter σ ≈ 10% of max radius; curve factor 0.045 rad/unit |
+| `crescent` | Open horseshoe band (arc span 216°–288°); seeded rotation so the bay faces a different direction each game; empty interior on the open side |
+| `binary` | Two organic-growth cores on opposite sides of the map; `ensureConnectivity` forms the corridor chokepoint when the cores stay apart |
+| `ribbon` | Single winding S-curve of planets grown along a sine-wave spine (1.25–1.95 waves); long linear theater, meet-in-the-middle fights |
+| `halo` | Two concentric rings — a tight inner prize ring (~30% of planets) and a thicker outer band, with a void between them; `ensureConnectivity` adds spoke bridges when the gap exceeds fleet range |
+| `broken_ring` | Annular band with 2–3 seeded angular gaps (gates ~22°–32°); connectivity fills the gaps with 3-lane bridges |
+| `crossroads` | Two crossing diameters (X) or three rays from the centre (Y); junction is the contested prize |
+| `clover` | Three organic lobes equally spaced around a small hub; more regular than `cluster` |
 
 ### Minimum Distance Rule
 ```
@@ -162,6 +169,10 @@ Opponent **gold** and **researchPoints** remain visible in the player list for n
 - What is the target planet count range per player count?
 
 ## Changelog
+- 2026-09-04: Three more galaxy shapes — `broken_ring` (ring with gates), `crossroads` (X or Y junction), `clover` (three lobes + hub).
+- 2026-09-04: Connectivity bridges are 3 lanes wide (centre + two flanks, 3-click spacing) instead of a single-file line, so corridors can hold two or three planets across.
+- 2026-09-04: Constrained shapes (`crescent`, `binary`, `ribbon`, `halo`) spill leftover planets with unconstrained organic growth when the region fills, and `generateMap` falls back to `scattered` if a shape still fails spacing — launch no longer throws after 25 attempts.
+- 2026-09-04: Four new galaxy shapes — `crescent` (open horseshoe), `binary` (twin cores + corridor), `ribbon` (winding S-curve), `halo` (double ring with void). Later the same day: `broken_ring`, `crossroads`, `clover`. `GalaxyShape` includes all twelve picker values.
 - 2026-06-04: `arms` shape removed; `cluster` (3–5 Gaussian blobs) and `spiral` (2 logarithmic curved arms) added; `GalaxyShape` type updated to `'scattered' | 'dense_core' | 'ring' | 'cluster' | 'spiral'`.
 - 2026-05-31: Task 171 fix — `MIN_PLANET_DISTANCE` now enforced in **final grid coordinates** after uniform normalize + `enforceMinimumSpacing`; connectivity bridge forced-placement removed; fixes sub-2.5 pairs (e.g. 1.4 clicks) caused by normalize compression and integer rounding.
 - 2026-05-31: Task 171 — `MIN_PLANET_DISTANCE` 4→2.5; `growthPosition` parent offset `4 + rng() * 7` → `2.5 + rng() * 7` ([2.5, 9.5] clicks, mean ~6.0); ~1.5 clicks closer on average; algorithms unchanged.

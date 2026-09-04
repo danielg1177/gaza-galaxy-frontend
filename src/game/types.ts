@@ -90,7 +90,19 @@ export type TurnEvent =
  */
 export type PlayMode = 'passAndPlay' | 'asyncMultiplayer';
 
-export type GalaxyShape = 'scattered' | 'dense_core' | 'ring' | 'cluster' | 'spiral';
+export type GalaxyShape =
+  | 'scattered'
+  | 'dense_core'
+  | 'ring'
+  | 'cluster'
+  | 'spiral'
+  | 'crescent'
+  | 'binary'
+  | 'ribbon'
+  | 'halo'
+  | 'broken_ring'
+  | 'crossroads'
+  | 'clover';
 
 export type MapSize = 'small' | 'medium' | 'large';
 
