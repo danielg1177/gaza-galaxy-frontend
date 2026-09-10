@@ -12,7 +12,16 @@ import {
 import { FACTORY_GOLD_COST, RESEARCH_LAB_GOLD_COST } from './productionEngine';
 import { runProduction } from './productionEngine';
 import { isAiControlled } from './playerControl';
-import type { BuildingType, Fleet, GameMap, GameState, Planet, Player, TurnEvent } from './types';
+import type {
+  BuildingType,
+  Fleet,
+  GameMap,
+  GameState,
+  Planet,
+  Player,
+  ScheduledMovement,
+  TurnEvent,
+} from './types';
 
 export type ResolveTurnResult = GameState & { events: TurnEvent[] };
 
@@ -223,6 +232,186 @@ function processSendFleet(
   return { map: updatedMap, fleets: [...fleets, fleet] };
 }
 
+export function scheduledMovementId(fromPlanetId: string, toPlanetId: string): string {
+  return `${fromPlanetId}:${toPlanetId}`;
+}
+
+export function resolveScheduledShipCount(
+  amount: number | 'all',
+  available: number,
+): number {
+  if (available < 1) {
+    return 0;
+  }
+  if (amount === 'all') {
+    return available;
+  }
+  return Math.max(0, Math.min(Math.floor(amount), available));
+}
+
+/**
+ * Drops standing orders whose origin is no longer owned by the scheduler,
+ * whose owner has been eliminated, or whose planets no longer exist.
+ * Capture cancels immediately so a later recapture does not resume them.
+ */
+export function pruneScheduledMovements(
+  movements: ScheduledMovement[],
+  map: GameMap,
+  players: Player[],
+): ScheduledMovement[] {
+  const eliminatedIds = new Set(
+    players.filter((player) => player.isEliminated).map((player) => player.id),
+  );
+  return movements.filter((movement) => {
+    if (eliminatedIds.has(movement.ownerId)) {
+      return false;
+    }
+    const origin = findPlanet(map, movement.fromPlanetId);
+    if (origin === undefined || origin.owner !== movement.ownerId) {
+      return false;
+    }
+    const destination = findPlanet(map, movement.toPlanetId);
+    if (destination === undefined || destination.id === origin.id) {
+      return false;
+    }
+    return true;
+  });
+}
+
+export function collectScheduledQueueOrders(
+  state: GameState,
+  playerId: string,
+  existingQueued: Array<{ fromPlanetId: string; toPlanetId: string; shipCount: number }>,
+): Array<{ fromPlanetId: string; toPlanetId: string; shipCount: number }> {
+  const player = state.players.find((p) => p.id === playerId);
+  const range = effectiveRange(player?.techLevel ?? 0);
+  const movements = pruneScheduledMovements(
+    state.scheduledMovements ?? [],
+    state.map,
+    state.players,
+  ).filter((movement) => movement.ownerId === playerId);
+
+  const occupied = new Set(
+    existingQueued.map((order) => `${order.fromPlanetId}:${order.toPlanetId}`),
+  );
+  const reservedByPlanet: Record<string, number> = {};
+  for (const order of existingQueued) {
+    reservedByPlanet[order.fromPlanetId] =
+      (reservedByPlanet[order.fromPlanetId] ?? 0) + order.shipCount;
+  }
+
+  const orders: Array<{ fromPlanetId: string; toPlanetId: string; shipCount: number }> = [];
+  for (const movement of movements) {
+    const pair = `${movement.fromPlanetId}:${movement.toPlanetId}`;
+    if (occupied.has(pair)) {
+      continue;
+    }
+    const origin = findPlanet(state.map, movement.fromPlanetId);
+    const destination = findPlanet(state.map, movement.toPlanetId);
+    if (origin === undefined || destination === undefined) {
+      continue;
+    }
+    if (!isInRange(origin.position, destination.position, range)) {
+      continue;
+    }
+    const available = origin.shipCount - (reservedByPlanet[origin.id] ?? 0);
+    const shipCount = resolveScheduledShipCount(movement.amount, available);
+    if (shipCount < 1) {
+      continue;
+    }
+    orders.push({
+      fromPlanetId: movement.fromPlanetId,
+      toPlanetId: movement.toPlanetId,
+      shipCount,
+    });
+    occupied.add(pair);
+    reservedByPlanet[origin.id] = (reservedByPlanet[origin.id] ?? 0) + shipCount;
+  }
+  return orders;
+}
+
+function dispatchScheduledFleet(
+  map: GameMap,
+  fleets: Fleet[],
+  movement: ScheduledMovement,
+  players: Player[],
+  turnNumber: number,
+  roundNumber: number,
+  fleetIndex: number,
+): { map: GameMap; fleets: Fleet[] } {
+  const origin = findPlanet(map, movement.fromPlanetId);
+  const destination = findPlanet(map, movement.toPlanetId);
+  if (
+    origin === undefined ||
+    destination === undefined ||
+    origin.owner !== movement.ownerId ||
+    origin.id === destination.id
+  ) {
+    return { map, fleets };
+  }
+
+  const shipCount = resolveScheduledShipCount(movement.amount, origin.shipCount);
+  if (shipCount < 1) {
+    return { map, fleets };
+  }
+
+  const player = players.find((p) => p.id === movement.ownerId);
+  const range = effectiveRange(player?.techLevel ?? 0);
+  const speed = effectiveSpeed(player?.techLevel ?? 0);
+  if (!isInRange(origin.position, destination.position, range)) {
+    return { map, fleets };
+  }
+
+  const turnsRemaining = computeTurnsInTransit(origin.position, destination.position, speed);
+  const updatedMap: GameMap = {
+    ...map,
+    planets: map.planets.map((planet) =>
+      planet.id === movement.fromPlanetId
+        ? { ...planet, shipCount: planet.shipCount - shipCount }
+        : planet,
+    ),
+  };
+  const fleet = createFleet(
+    movement.ownerId,
+    shipCount,
+    movement.fromPlanetId,
+    movement.toPlanetId,
+    turnsRemaining,
+    turnNumber,
+    fleetIndex,
+    roundNumber,
+  );
+  return { map: updatedMap, fleets: [...fleets, fleet] };
+}
+
+function applyScheduledMovementsForPlayer(
+  map: GameMap,
+  fleets: Fleet[],
+  movements: ScheduledMovement[],
+  playerId: string,
+  players: Player[],
+  turnNumber: number,
+  roundNumber: number,
+): { map: GameMap; fleets: Fleet[] } {
+  let nextMap = map;
+  let nextFleets = fleets;
+  const owned = movements.filter((movement) => movement.ownerId === playerId);
+  for (const movement of owned) {
+    const result = dispatchScheduledFleet(
+      nextMap,
+      nextFleets,
+      movement,
+      players,
+      turnNumber,
+      roundNumber,
+      nextFleets.length,
+    );
+    nextMap = result.map;
+    nextFleets = result.fleets;
+  }
+  return { map: nextMap, fleets: nextFleets };
+}
+
 function processBuild(
   map: GameMap,
   players: Player[],
@@ -393,6 +582,11 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
   }
 
   fleets = stillInTransit;
+  let scheduledMovements = pruneScheduledMovements(
+    state.scheduledMovements ?? [],
+    map,
+    players,
+  );
 
   // Process BUILD actions before fleet dispatch so gold deductions are applied first.
   const buildActions = input.actions.filter(
@@ -533,11 +727,35 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
         }
       }
     }
+    scheduledMovements = pruneScheduledMovements(scheduledMovements, map, players);
   }
 
   let roundNumber = state.roundNumber;
   if (isRoundWrap) {
     roundNumber += 1;
+  }
+
+  scheduledMovements = pruneScheduledMovements(scheduledMovements, map, players);
+
+  const nextTurnNumber = state.turnNumber + 1;
+  // Humans see standing orders as queued departures on their own turn. AI and
+  // sitting-out slots have no queue UI, so dispatch when they become current.
+  if (status === 'active') {
+    const nextPlayer = players.find((p) => p.id === currentPlayerId);
+    if (nextPlayer !== undefined && isAiControlled(nextPlayer, state.playMode)) {
+      const applied = applyScheduledMovementsForPlayer(
+        map,
+        fleets,
+        scheduledMovements,
+        currentPlayerId,
+        players,
+        nextTurnNumber,
+        roundNumber,
+      );
+      map = applied.map;
+      fleets = applied.fleets;
+      scheduledMovements = pruneScheduledMovements(scheduledMovements, map, players);
+    }
   }
 
   // Update AI fog-of-war memory for the player who just took their turn.
@@ -550,7 +768,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
       map,
       players,
       fleets,
-      turnNumber: state.turnNumber + 1,
+      turnNumber: nextTurnNumber,
       roundNumber,
       currentPlayerId,
       seed: state.seed,
@@ -561,6 +779,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
       commanderStatusNotices: state.commanderStatusNotices,
       pendingFarewellPlayerIds: state.pendingFarewellPlayerIds,
       knockoutResumePlayerId: state.knockoutResumePlayerId,
+      scheduledMovements,
     };
     aiStates = {
       ...aiStates,
@@ -572,7 +791,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     map,
     players,
     fleets,
-    turnNumber: state.turnNumber + 1,
+    turnNumber: nextTurnNumber,
     roundNumber,
     currentPlayerId,
     seed: state.seed,
@@ -583,6 +802,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     commanderStatusNotices: state.commanderStatusNotices,
     pendingFarewellPlayerIds: state.pendingFarewellPlayerIds,
     knockoutResumePlayerId: state.knockoutResumePlayerId,
+    scheduledMovements,
     events,
   };
 }

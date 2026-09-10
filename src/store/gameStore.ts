@@ -15,6 +15,8 @@ import { HOME_PLANET_CLASS_CONFIG, placeSpawns } from '../game/spawnPlacer';
 import {
   resolveTurn,
   advanceToNextNonEliminatedPlayer,
+  scheduledMovementId,
+  collectScheduledQueueOrders,
   type PlayerAction,
   type ResolveTurnResult,
   type TurnInput,
@@ -30,6 +32,7 @@ import type {
   Planet,
   PlayMode,
   Player,
+  ScheduledMovement,
   TurnEvent,
 } from '../game/types';
 import { useMemo } from 'react';
@@ -126,6 +129,7 @@ export interface GameStore {
   selectedPlanetId: string | null;
   pendingFleet: PendingFleet | null;
   queuedOrders: PendingFleet[];
+  seededScheduleTurnKey: string | null;
   showingLockScreen: boolean;
   turnReport: TurnEvent[];
   /** Per-player archive of combat events not yet shown to that player. Populated at endTurn; cleared when the player starts their next turn (at their own endTurn call). */
@@ -174,6 +178,13 @@ export interface GameStore {
   cancelBuildOrder: (planetId: string, buildingIndex: number) => void;
   demolishBuilding: (planetId: string, buildingIndex: number) => void;
   setProductionSlider: (planetId: string, value: number) => void;
+  upsertScheduledMovement: (
+    fromPlanetId: string,
+    toPlanetId: string,
+    amount: number | 'all',
+  ) => void;
+  cancelScheduledMovement: (id: string) => void;
+  seedQueuedOrdersFromSchedules: () => void;
   endTurn: () => void;
   advanceStagedAiTurn: () => void;
   forfeitCurrentPlayer: () => void;
@@ -217,6 +228,10 @@ function drainStaleFleets(state: GameState): GameState {
     // drain stale turnsRemaining=0 fleets that may have persisted before the fix
     fleets: state.fleets.filter((fleet) => fleet.turnsRemaining > 0),
   };
+}
+
+function scheduleTurnKey(recordId: string, state: GameState): string {
+  return `${recordId}-r${state.roundNumber}-t${state.turnNumber}-${state.currentPlayerId}`;
 }
 
 /**
@@ -412,6 +427,9 @@ function buildVisibleState(state: GameState, viewingPlayerId: string): GameState
       }),
     },
     fleets: state.fleets.filter((fleet) => fleet.ownerId === viewingPlayerId),
+    scheduledMovements: (state.scheduledMovements ?? []).filter(
+      (movement) => movement.ownerId === viewingPlayerId,
+    ),
   };
 }
 
@@ -741,8 +759,10 @@ function commitPassAndPlayResolvedTurn(
     eliminatedPlayerPendingKnockout: pendingKnockout,
     pendingFarewellPlayerIds: passAndPlayHandoff.pendingFarewellIds,
     isResolvingAiTurns: false,
+    seededScheduleTurnKey: null,
     ...(showLock ? { showingLockScreen: true } : { showingLockScreen: false }),
   });
+  get().seedQueuedOrdersFromSchedules();
 }
 
 function runSittingOutAiTurn(
@@ -1025,6 +1045,7 @@ export function generateInitialGameState(config: GameConfig, seed: number): Game
     playMode: config.playMode,
     status: 'active',
     winnerId: null,
+    scheduledMovements: [],
   };
   for (const player of players) {
     if (player.isAI) {
@@ -1093,6 +1114,7 @@ export const useGameStore = create<GameStore>()(
   selectedPlanetId: null,
   pendingFleet: null,
   queuedOrders: [] as PendingFleet[],
+  seededScheduleTurnKey: null as string | null,
   showingLockScreen: false,
   turnReport: [],
   playerBattleArchiveByPlayerId: {},
@@ -1199,7 +1221,9 @@ export const useGameStore = create<GameStore>()(
       showingAiObserver: false,
       pendingAiTurnInput: null,
       pendingAiPlayerId: null,
+      seededScheduleTurnKey: null,
     });
+    get().seedQueuedOrdersFromSchedules();
   },
 
   loadAsyncGame: (detail) => {
@@ -1358,7 +1382,11 @@ export const useGameStore = create<GameStore>()(
       showingAiObserver: false,
       pendingAiTurnInput: null,
       pendingAiPlayerId: null,
+      seededScheduleTurnKey: hasMidTurnSave ? scheduleTurnKey(recordId, state) : null,
     });
+    if (!hasMidTurnSave && detail.isMyTurn) {
+      get().seedQueuedOrdersFromSchedules();
+    }
   },
 
   deleteGame: (id) => {
@@ -1616,6 +1644,111 @@ export const useGameStore = create<GameStore>()(
     });
   },
 
+  upsertScheduledMovement: (fromPlanetId, toPlanetId, amount) => {
+    const record = get().getActiveRecord();
+    if (record === null) {
+      return;
+    }
+    const gameState = record.state;
+    const currentPlayerId = gameState.currentPlayerId;
+    const origin = gameState.map.planets.find((p) => p.id === fromPlanetId);
+    const destination = gameState.map.planets.find((p) => p.id === toPlanetId);
+    if (
+      origin === undefined ||
+      destination === undefined ||
+      origin.owner !== currentPlayerId ||
+      fromPlanetId === toPlanetId
+    ) {
+      return;
+    }
+    const normalizedAmount: ScheduledMovement['amount'] =
+      amount === 'all' ? 'all' : Math.max(1, Math.floor(amount));
+    const id = scheduledMovementId(fromPlanetId, toPlanetId);
+    const nextMovement: ScheduledMovement = {
+      id,
+      ownerId: currentPlayerId,
+      fromPlanetId,
+      toPlanetId,
+      amount: normalizedAmount,
+    };
+    const existing = gameState.scheduledMovements ?? [];
+    const withoutPair = existing.filter((movement) => movement.id !== id);
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id
+          ? {
+              ...g,
+              state: {
+                ...g.state,
+                scheduledMovements: [...withoutPair, nextMovement],
+              },
+            }
+          : g,
+      ),
+    });
+  },
+
+  cancelScheduledMovement: (id) => {
+    const record = get().getActiveRecord();
+    if (record === null) {
+      return;
+    }
+    const currentPlayerId = record.state.currentPlayerId;
+    const existing = record.state.scheduledMovements ?? [];
+    const next = existing.filter(
+      (movement) => !(movement.id === id && movement.ownerId === currentPlayerId),
+    );
+    if (next.length === existing.length) {
+      return;
+    }
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id
+          ? {
+              ...g,
+              state: {
+                ...g.state,
+                scheduledMovements: next,
+              },
+            }
+          : g,
+      ),
+    });
+  },
+
+  seedQueuedOrdersFromSchedules: () => {
+    const record = get().getActiveRecord();
+    if (record === null || record.state.status !== 'active') {
+      return;
+    }
+    const gameState = record.state;
+    const currentPlayer = gameState.players.find((p) => p.id === gameState.currentPlayerId);
+    if (
+      currentPlayer === undefined ||
+      currentPlayer.isEliminated ||
+      isAiControlled(currentPlayer, gameState.playMode) ||
+      needsForfeitPrompt(currentPlayer, gameState.playMode)
+    ) {
+      return;
+    }
+    const key = scheduleTurnKey(record.id, gameState);
+    if (get().seededScheduleTurnKey === key) {
+      return;
+    }
+    const existingQueued = get().queuedOrders.filter(
+      (order) => !('type' in order && (order as { type?: string }).type === 'BUILD'),
+    );
+    const additions = collectScheduledQueueOrders(
+      gameState,
+      currentPlayer.id,
+      existingQueued,
+    );
+    set({
+      queuedOrders: [...get().queuedOrders, ...additions],
+      seededScheduleTurnKey: key,
+    });
+  },
+
   endTurn: () => {
     const record = get().getActiveRecord();
     if (record === null || record.state.status !== 'active') {
@@ -1831,11 +1964,16 @@ export const useGameStore = create<GameStore>()(
       playerTurnReportByPlayerId: newTurnReport,
       eliminatedPlayerPendingKnockout: pendingKnockout,
       pendingFarewellPlayerIds: newPendingFarewellIds,
+      seededScheduleTurnKey: null,
       ...(showLock ? { showingLockScreen: true } : {}),
       // For async games start the submission flag in the same atomic update so
       // that the battle-report modal closes before React can paint a stale frame.
       ...(isAsync ? { isSubmittingTurn: true } : {}),
     });
+
+    if (!isAsync) {
+      get().seedQueuedOrdersFromSchedules();
+    }
 
     if (!isAsync || !asyncGameId) {
       return;
@@ -2150,8 +2288,10 @@ export const useGameStore = create<GameStore>()(
       ),
       eliminatedPlayerPendingKnockout: pendingKnockout,
       pendingFarewellPlayerIds: newPendingFarewellIds,
+      seededScheduleTurnKey: null,
       ...(showLock ? { showingLockScreen: true } : {}),
     });
+    get().seedQueuedOrdersFromSchedules();
   },
 
   forfeitCurrentPlayer: () => {
@@ -2249,6 +2389,7 @@ export const useGameStore = create<GameStore>()(
       selectedPlanetId: null,
       pendingFleet: null,
     });
+    get().seedQueuedOrdersFromSchedules();
   },
 
   dismissCommanderStatusNotice: () => {

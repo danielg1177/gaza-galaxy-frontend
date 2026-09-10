@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Scheduled troop movements every turn
+**Completed:** 2026-09-10
+**Files modified:** `src/game/types.ts`, `src/game/turnEngine.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, `docs/systems/movement.md`, `docs/systems/turn-engine.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/completed.md`, `docs/gameplay/rules.md`, backend `docs/backend/game-state.md`, `docs/backend/turn-engine.md`
+**Notes:** Send Fleet modal ⟳ toggles every-turn settings (fixed count defaulting to this send, or All). `GameState.scheduledMovements` persist in `state_json`. Engine applies the next player's standing orders after advancing `currentPlayerId` (and after round-wrap production) so fleets are already in transit when the turn opens. Origin capture or owner elimination cancels immediately; recapture does not restore. Short garrison sends `min(requested, available)`. Map shows an orange ⟳ badge on owned origin planets. Planet detail and the expanded modal can cancel a schedule.
+
+---
 ## Four new galaxy shapes
 **Completed:** 2026-09-04
 **Files modified:** `src/game/types.ts`, `src/game/mapGenerator.ts`, `docs/systems/map-generation.md`, `docs/development/current-state.md`, `docs/tasks/completed.md`, `docs/backend-build-instructions.md`, backend `docs/backend/validation.md`, `docs/backend/game-state.md`, `docs/backend-build-instructions.md`

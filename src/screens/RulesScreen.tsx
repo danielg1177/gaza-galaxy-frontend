@@ -240,6 +240,9 @@ export default function RulesScreen() {
             Dispatch fleets from one planet to another across the galaxy. Transit time is measured in turns and depends on the distance between planets.
           </Text>
           <Text style={styles.bodyText}>
+            When sending a fleet, tap the repeat icon to schedule that route every turn. You can set a fixed troop count or send all remaining ships. The order fires at the start of your next turns so you do not have to revisit the planet. If the origin planet is captured, the schedule is canceled and does not resume if you take the planet back. If too few ships are garrisoned for a fixed count, whatever is there is sent.
+          </Text>
+          <Text style={styles.bodyText}>
             On arrival, your fleet will:
           </Text>
           <View style={styles.bulletList}>

@@ -164,6 +164,19 @@ export interface VisiblePlanet {
 }
 
 /**
+ * A standing order that dispatches ships from an owned planet every turn
+ * until the origin is captured or the player cancels it.
+ */
+export interface ScheduledMovement {
+  id: string;
+  ownerId: string;
+  fromPlanetId: string;
+  toPlanetId: string;
+  /** Fixed troop count, or `'all'` to send the entire garrison each turn. */
+  amount: number | 'all';
+}
+
+/**
  * A group of ships in transit from one planet toward another, owned by a single player.
  */
 export interface Fleet {
@@ -289,4 +302,10 @@ export interface GameState {
    * in pass-and-play.
    */
   knockoutResumePlayerId?: string;
+  /**
+   * Standing fleet orders. Applied at the start of the owning player's turn
+   * (when they become `currentPlayerId`). Dropped if the origin planet is
+   * captured — recapture does not restore them. Absent on older saves.
+   */
+  scheduledMovements?: ScheduledMovement[];
 }

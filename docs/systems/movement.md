@@ -105,6 +105,17 @@ Simulates one turn of fleet movement for all fleets:
 
 Fleet dispatch is initiated in `GameScreen` via touch-and-drag from an owned planet to a destination planet. On release over a valid in-range target, a ship-count modal confirms the order; the default count is `min(1, max)` where `max` is garrison minus other queued outbound from that planet this turn (so a 0-garrison origin opens at 0). The stepper supports − / + / **All**, and the ship count is **tappable** to open a numeric `TextInput` (digits only, clamped to `0…max` on blur or keyboard submit). Confirm also clamps to `0…max` before queueing. `gameStore.confirmPendingFleet` calls `queueOrder` (appends to `queuedOrders` without resolving the turn). The player presses **End Turn** to call `endTurn()`, which batches all queued orders as `SEND_FLEET` actions plus `END_TURN` in one `resolveTurn` call.
 
+### Scheduled movements
+
+Standing orders (`GameState.scheduledMovements`) repeat a route every turn without another drag.
+
+- The Send Fleet / Edit Fleet modal has an icon-only repeat control (left of **Ships**). Tapping it expands settings: a per-turn troop count (defaults to this send) and **All**. Confirm with the panel open upserts the order for that origin → destination. If a schedule already exists, the panel stays closed and a compact row (smaller icon on the left, **Scheduled Troop Movements (will send every turn)**, delete ✕) can reopen settings or cancel the standing order.
+- At the start of a **human** turn, standing orders are seeded into `queuedOrders` (skipping routes already queued, e.g. a mid-turn save). They render as pending-departure markers slightly off the origin, same as a send the player just queued. Opening the send modal to that destination loads the scheduled/queued count so it can be adjusted. The first automatic dispatch is the owner's **next** turn, submitted with End Turn.
+- AI and sitting-out slots have no queue UI; `resolveTurn` still dispatches their remaining schedules when they become current (after round-wrap production/arrivals).
+- Lenient dispatch: out of range or 0 ships skips that turn; a fixed count sends `min(amount, garrison)`.
+- If the origin planet is captured (owner no longer the scheduler) or the scheduler is eliminated, the order is pruned immediately. Recapture does not restore it.
+- Fog of war: only the viewing player's schedules are visible. Owned origin planets with a schedule show a small orange repeat badge at the **top-left** of the planet.
+
 ### Fleet visualization (`GameScreen`)
 
 In-transit fleets render on an SVG overlay (`react-native-svg`) sized to the map canvas, above planet nodes and below the pinch/pan gesture layer.
@@ -135,6 +146,7 @@ No randomness. Same positions and fleet list always produce the same transit tim
 
 ## Changelog
 
+- 2026-09-10: Scheduled movements — `GameState.scheduledMovements`; send-fleet ⟳ panel; apply on next-player turn start; origin capture cancels; orange map badge.
 - 2026-06-03: Box-select multi-fleet dispatch — circular selection icon toggle enables box-draw gesture mode; dragging draws a selection rectangle over the map (pan blocked during draw); on release, all owned planets with troops or queued orders inside the box are selected (teal ring highlight); tapping any planet queues all selected troops there via `queueOrder`; out-of-range planets show "Too far for some troops" warning; tapping empty space or toggling the button exits the mode; End Turn also clears mode.
 - 2026-06-03: Bug fix — drag dispatch from 0-troop planet opens modal at 0 ships; Confirm clamps to `modalMaxShips` (cannot queue outbound fleet when garrison is 0).
 - 2026-06-02: In-transit fleet tap tooltip — auto-dismiss after 4s with fade; manual **✕** dismiss in `GameScreen`.

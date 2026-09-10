@@ -4,7 +4,7 @@
 **Implemented** in `src/game/turnEngine.ts`.
 
 ## Overview
-Orchestrates the resolution of a single player turn. Applies that player's fleet dispatches, resolves eligible arrivals at turn start, checks elimination/victory, advances turn order, and applies round-gated simulation ticks (fleet transit + production) only when the player order wraps after a full cycle.
+Orchestrates the resolution of a single player turn. Applies that player's fleet dispatches, resolves eligible arrivals at turn start, checks elimination/victory, advances turn order, applies round-gated simulation ticks (fleet transit + production) only when the player order wraps after a full cycle, then dispatches the **next** player's scheduled movements so they are in transit when that turn opens.
 
 ## Public API
 
@@ -65,6 +65,7 @@ When `advanceFleets` brings a fleet to `turnsRemaining: 0` on **round wrap**, `t
    - Group `arrived` fleets by destination, merge same-owner fleets at each destination (summed `shipCount`), and sort so the current planet owner's merged fleet resolves first. After grouping, each destination checks total combatants (unique arriving owners + 1 if the garrison owner is not arriving). If ≥ 3, `resolveMultiwayCombat` is called once for that destination (one `combatRngCounter` slot). If ≤ 2, the existing `resolveArrival` sequential path runs unchanged. Apply optional `players` / `fleets` updates; keep only `inTransit` in `fleets`
    - The defending planet's owner receives production before any attacker lands; a player who captures a planet does not receive its production on the turn of capture.
 9. **Advance round** — if wrap occurred, `roundNumber += 1`.
+9a. **Prune + apply scheduled movements** — drop standing orders whose origin is no longer owned by the scheduler, whose owner is eliminated, or whose planets are missing (`pruneScheduledMovements`). If the game is still `active` and the **new** `currentPlayerId` is AI-controlled, dispatch their remaining `scheduledMovements` (lenient: skip if 0 ships or out of range; fixed count sends `min(amount, garrison)`; `'all'` sends the full garrison). Human players instead get those orders seeded into `queuedOrders` at turn start (`seedQueuedOrdersFromSchedules`) so they appear as pending departures until End Turn. Recapture does not restore a pruned order.
 
 ## Turn Order Logic
 - Players are ordered by their index in `state.players`.
@@ -112,6 +113,7 @@ Async ⋮ **Forfeit** uses the same `isAiControlled` loop. The store discards qu
 `loadGame` and `loadAsyncGame` call **`drainStaleFleets`**, which removes any fleet with `turnsRemaining <= 0` from `GameState.fleets` before the match resumes. Under normal play, round-wrap resolution leaves only `turnsRemaining > 0` fleets in state; persisted saves from before that invariant (or corrupted state) could otherwise re-enter the early-arrivals block at the next turn start and produce a phantom second combat on the same planet.
 
 ## Changelog
+- 2026-09-10: Scheduled movements — `pruneScheduledMovements` after combat/elimination; apply next player's `scheduledMovements` after turn advance and round wrap (step 9a). `resolveTurn` copies `scheduledMovements` through the result snapshot.
 - 2026-08-26: Overlay title **Player update**; rejoin copy "has rejoined." Persisted field remains `commanderStatusNotices`.
 - 2026-08-19: **Task 258** — async knockout farewells include deferred/self wrap-kills; persist farewell queue on `GameState`; `acknowledgeKnockout` keeps the match active while AIs remain.
 - 2026-08-19: **Task 257** — `resolveTurn` preserves `commanderStatusNotices`; forfeit/rejoin briefings survive AI play-out and async submit.

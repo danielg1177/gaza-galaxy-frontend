@@ -2,6 +2,13 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-09-10 — Scheduled movements live on GameState and fire when the owner becomes current
+**Decision:** Standing fleet orders are `ScheduledMovement[]` on `GameState` (opaque `state_json`). They are upserted from the send-fleet modal when the ⟳ panel is open on Confirm. `resolveTurn` prunes any order whose origin is no longer owned by the scheduler (or whose owner is eliminated), then — after advancing to the next player and after round-wrap production/arrivals — dispatches that next player's remaining orders. Fixed counts send `min(amount, garrison)`; `'all'` sends the full garrison; 0 ships skips that turn but keeps the order. Recapture does not restore a pruned order.
+**Rationale:** Applying at the end of the previous player's resolution means the owner sees the fleets already in transit at turn start, matching “turns begin with the troops being sent.” Storing on `GameState` needs no backend schema or API change. Pruning on capture (not lazily on next apply) is required so taking the planet back does not resume the old conveyor.
+**Alternatives considered:** Queuing the standing order only when the owner presses End Turn (rejected — troops would still sit on the planet during the turn); one schedule per origin planet (rejected — multiple destinations from one world is useful; the map badge is still one icon); a new API table for schedules (rejected — engine state already serializes with the match).
+
+---
+
 ## 2026-09-02 — Factory output rounds to the nearest tenth before credit
 **Decision:** `runProduction` credits `roundToTenth(factories × class output × slider)` for troops and gold (`computeFactoryOutputs`). The planet-modal live label and the Rules screen example use the same helper. Whole troops still come from flooring `troopAccumulator`; gold is still `Math.floor` after the tenth round.
 **Rationale:** The slider displayed one decimal via `.toFixed(1)` while production used the unrounded product, so `4.0 troops/turn` could add 3.96 and yield 3 ships that round. Rounding at credit time makes the label the value that actually enters the accumulator.

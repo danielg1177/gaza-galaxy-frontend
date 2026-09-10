@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-09-04 (map launch no longer throws on constrained galaxy shapes)
+2026-09-10 (scheduled troop movements every turn)
 
 ## Overall Status
 
@@ -10,6 +10,7 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Scheduled troop movements: send-fleet modal ⟳ icon expands every-turn settings (fixed count defaulting to this send, or **All**). Orders persist on `GameState.scheduledMovements` and dispatch when that player becomes current (visible at turn start). Capture of the origin cancels the schedule (recapture does not restore). Insufficient garrison sends whatever is there. Owned origin planets show a small orange ⟳ badge at the top-right.
 - Four new galaxy shapes in the seeded picker: `crescent` (horseshoe), `binary` (twin cores + corridor), `ribbon` (winding S-curve), `halo` (double ring). Same spacing, connectivity, and spawn pipeline as the existing five.
 - Production slider vs garrison mismatch: `runProduction` rounds factory troop and gold output to the nearest tenth (`computeFactoryOutputs`) before the troop accumulator / gold floor, using the same helper as the planet-modal label.
 - Player terminology: user-facing copy, default names, and deleted-account labels say **player** / `Player` / `Former Player` (not commander). Overlay title **Player update**. Persisted `commanderStatusNotices` unchanged.

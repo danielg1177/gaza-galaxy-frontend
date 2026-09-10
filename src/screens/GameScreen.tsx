@@ -17,7 +17,7 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { PlatformSlider } from '../components/PlatformSlider';
 import { ShipIcon, SPACE_SHIP_IMAGE } from '../components/ShipIcon';
-import Svg, { Circle, G, Image as SvgImage, Line, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, G, Image as SvgImage, Line, Path, Text as SvgText } from 'react-native-svg';
 import Animated, {
   runOnJS,
   runOnUI,
@@ -40,8 +40,9 @@ import {
   effectiveSpeed,
   isInRange,
 } from '../game/movementEngine';
+import { scheduledMovementId, resolveScheduledShipCount } from '../game/turnEngine';
 import { mulberry32 } from '../game/mapGenerator';
-import type { BuildingType, Fleet, OwnerId, Planet, Player, TurnEvent } from '../game/types';
+import type { BuildingType, Fleet, OwnerId, Planet, Player, ScheduledMovement, TurnEvent } from '../game/types';
 import { needsForfeitPrompt, nextCommanderStatusNoticeFor } from '../game/playerControl';
 import { getFriendRequests } from '../services/friendsService';
 import { ApiError } from '../services/apiClient';
@@ -124,6 +125,28 @@ function parseFleetShipCountFromDraft(
     return fallback;
   }
   return Math.min(modalMaxShips, Math.max(0, parsed));
+}
+
+const SCHEDULE_AMOUNT_MAX = 99999;
+
+function parseScheduleAmountFromDraft(draft: string, fallback: number): number {
+  const trimmed = draft.trim();
+  const parsed = trimmed === '' ? fallback : parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(SCHEDULE_AMOUNT_MAX, Math.max(1, parsed));
+}
+
+function RepeatIcon({ color, size = 18 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"
+        fill={color}
+      />
+    </Svg>
+  );
 }
 
 type CombatTurnEvent = Extract<TurnEvent, { kind: 'combat' }>;
@@ -886,6 +909,11 @@ const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANE
 const SHIP_COUNT_ABOVE_GAP = 0;
 const SHIP_COUNT_RIGHT_INSET = Math.max(1, Math.round((3 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_BATTLE_ICON_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
+const SCHEDULE_BADGE_SIZE = Math.max(
+  6,
+  Math.round((11 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE * 0.6),
+);
+const SCHEDULE_BADGE_COLOR = '#e67e22';
 const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(2, Math.round((3 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_BOX_SELECT_RING_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
@@ -1396,6 +1424,7 @@ const PlanetNode = React.memo(function PlanetNode({
   isBoxSelected,
   adjustedShipCount,
   hadBattleThisTurn,
+  hasScheduledMovement,
 }: {
   planet: Planet;
   color: string;
@@ -1405,6 +1434,7 @@ const PlanetNode = React.memo(function PlanetNode({
   isBoxSelected: boolean;
   adjustedShipCount: number;
   hadBattleThisTurn: boolean;
+  hasScheduledMovement: boolean;
 }) {
   const highlighted = isSelected || isDragOrigin;
   const pulse = useRef(new RNAnimated.Value(0)).current;
@@ -1520,6 +1550,22 @@ const PlanetNode = React.memo(function PlanetNode({
         >
           {adjustedShipCount}
         </Text>
+      )}
+      {isOwned && hasScheduledMovement && (
+        <View
+          style={[
+            styles.planetScheduleBadge,
+            {
+              left: circleLeft - SCHEDULE_BADGE_SIZE * 0.55,
+              top: circleTop - SCHEDULE_BADGE_SIZE * 0.55,
+              width: SCHEDULE_BADGE_SIZE,
+              height: SCHEDULE_BADGE_SIZE,
+              borderRadius: SCHEDULE_BADGE_SIZE / 2,
+            },
+          ]}
+        >
+          <RepeatIcon color="#ffffff" size={Math.max(7, SCHEDULE_BADGE_SIZE - 4)} />
+        </View>
       )}
       {hadBattleThisTurn && (
         <Text
@@ -1788,6 +1834,8 @@ export default function GameScreen() {
   const cancelBuildOrder = useGameStore((s) => s.cancelBuildOrder);
   const demolishBuilding = useGameStore((s) => s.demolishBuilding);
   const setProductionSlider = useGameStore((s) => s.setProductionSlider);
+  const upsertScheduledMovement = useGameStore((s) => s.upsertScheduledMovement);
+  const cancelScheduledMovement = useGameStore((s) => s.cancelScheduledMovement);
   const { currentUser } = useAuthStore();
   const activeGameId = useGameStore((s) => s.activeGameId);
   const activeRecord = useGameStore((s) => {
@@ -1866,7 +1914,13 @@ export default function GameScreen() {
   const [editingOrderIndex, setEditingOrderIndex] = useState<number | null>(null);
   const [isEditingFleetShipCount, setIsEditingFleetShipCount] = useState(false);
   const [fleetShipCountDraft, setFleetShipCountDraft] = useState('');
+  const [schedulePanelOpen, setSchedulePanelOpen] = useState(false);
+  const [scheduleAmount, setScheduleAmount] = useState<number | 'all'>(1);
+  const [isEditingScheduleAmount, setIsEditingScheduleAmount] = useState(false);
+  const [scheduleAmountDraft, setScheduleAmountDraft] = useState('');
+  const [hasTouchedCurrentShipCount, setHasTouchedCurrentShipCount] = useState(false);
   const fleetShipCountInputRef = useRef<TextInput>(null);
+  const scheduleAmountInputRef = useRef<TextInput>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const mapAreaRef = useRef<View>(null);
   const mapAreaWindowRef = useRef({ x: 0, y: 0 });
@@ -2193,6 +2247,31 @@ export default function GameScreen() {
     [gameState?.map.planets, pendingFleet?.toPlanetId],
   );
 
+  const scheduledMovements = gameState?.scheduledMovements ?? [];
+
+  const scheduledOriginPlanetIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const movement of scheduledMovements) {
+      ids.add(movement.fromPlanetId);
+    }
+    return ids;
+  }, [scheduledMovements]);
+
+  const existingScheduleForPending = useMemo((): ScheduledMovement | undefined => {
+    if (pendingFleet === null) {
+      return undefined;
+    }
+    const id = scheduledMovementId(pendingFleet.fromPlanetId, pendingFleet.toPlanetId);
+    return scheduledMovements.find((movement) => movement.id === id);
+  }, [pendingFleet, scheduledMovements]);
+
+  const selectedPlanetSchedules = useMemo(() => {
+    if (selectedPlanetId === null) {
+      return [];
+    }
+    return scheduledMovements.filter((movement) => movement.fromPlanetId === selectedPlanetId);
+  }, [scheduledMovements, selectedPlanetId]);
+
   const pendingTransitInfo = useMemo(() => {
     if (
       pendingOriginPlanet === undefined ||
@@ -2497,8 +2576,29 @@ export default function GameScreen() {
     if (pendingFleet === null) {
       setIsEditingFleetShipCount(false);
       setFleetShipCountDraft('');
+      setSchedulePanelOpen(false);
+      setIsEditingScheduleAmount(false);
+      setScheduleAmountDraft('');
+      setHasTouchedCurrentShipCount(false);
+      return;
     }
-  }, [pendingFleet]);
+    setHasTouchedCurrentShipCount(false);
+    if (existingScheduleForPending !== undefined) {
+      setSchedulePanelOpen(false);
+      setScheduleAmount(existingScheduleForPending.amount);
+    } else {
+      setSchedulePanelOpen(false);
+      setScheduleAmount(pendingFleet.shipCount < 1 ? 1 : pendingFleet.shipCount);
+    }
+    setIsEditingScheduleAmount(false);
+    setScheduleAmountDraft('');
+  }, [pendingFleet?.fromPlanetId, pendingFleet?.toPlanetId, existingScheduleForPending?.id]);
+
+  useEffect(() => {
+    if (isEditingScheduleAmount) {
+      scheduleAmountInputRef.current?.focus();
+    }
+  }, [isEditingScheduleAmount]);
 
   useEffect(() => {
     if (isEditingFleetShipCount) {
@@ -2517,10 +2617,77 @@ export default function GameScreen() {
       modalMaxShips,
       pendingFleet.shipCount,
     );
+    setHasTouchedCurrentShipCount(true);
     setPendingFleet({ ...pendingFleet, shipCount });
     setIsEditingFleetShipCount(false);
     setFleetShipCountDraft('');
   }, [pendingFleet, fleetShipCountDraft, modalMaxShips, setPendingFleet]);
+
+  const currentCountFromSchedule = useCallback(
+    (amount: number | 'all'): number => {
+      if (amount === 'all') {
+        return modalMaxShips;
+      }
+      return Math.min(modalMaxShips, Math.max(0, amount));
+    },
+    [modalMaxShips],
+  );
+
+  const applyScheduleAmountChange = useCallback(
+    (next: number | 'all') => {
+      setScheduleAmount(next);
+      if (!hasTouchedCurrentShipCount && pendingFleet !== null) {
+        setPendingFleet({
+          ...pendingFleet,
+          shipCount: currentCountFromSchedule(next),
+        });
+      }
+    },
+    [
+      currentCountFromSchedule,
+      hasTouchedCurrentShipCount,
+      pendingFleet,
+      setPendingFleet,
+    ],
+  );
+
+  const applyScheduleAmountFromDraft = useCallback(() => {
+    const fallback = scheduleAmount === 'all' ? 1 : scheduleAmount;
+    const next = parseScheduleAmountFromDraft(scheduleAmountDraft, fallback);
+    applyScheduleAmountChange(next);
+    setIsEditingScheduleAmount(false);
+    setScheduleAmountDraft('');
+  }, [applyScheduleAmountChange, scheduleAmount, scheduleAmountDraft]);
+
+  const handleSaveSchedule = () => {
+    if (pendingFleet === null) {
+      return;
+    }
+    let amount: number | 'all' = scheduleAmount;
+    if (isEditingScheduleAmount && amount !== 'all') {
+      amount = parseScheduleAmountFromDraft(scheduleAmountDraft, amount);
+    }
+    if (isEditingScheduleAmount) {
+      applyScheduleAmountChange(amount);
+      setIsEditingScheduleAmount(false);
+      setScheduleAmountDraft('');
+    }
+    upsertScheduledMovement(pendingFleet.fromPlanetId, pendingFleet.toPlanetId, amount);
+    setSchedulePanelOpen(false);
+  };
+
+  const toggleSchedulePanel = () => {
+    if (schedulePanelOpen) {
+      setSchedulePanelOpen(false);
+      setIsEditingScheduleAmount(false);
+      setScheduleAmountDraft('');
+      return;
+    }
+    setSchedulePanelOpen(true);
+    if (existingScheduleForPending === undefined && pendingFleet !== null) {
+      setScheduleAmount(pendingFleet.shipCount < 1 ? 1 : pendingFleet.shipCount);
+    }
+  };
 
   const resolvedFleetShipCount =
     pendingFleet === null
@@ -3247,10 +3414,18 @@ export default function GameScreen() {
           .filter((o) => !isBuildOrder(o) && o.fromPlanetId === fromPlanetId)
           .reduce((sum, o) => sum + o.shipCount, 0);
         const maxShips = Math.max(0, originPlanet.shipCount - shipsAlreadyQueuedFromOrigin);
+        const scheduled = (gameState.scheduledMovements ?? []).find(
+          (movement) =>
+            movement.fromPlanetId === fromPlanetId && movement.toPlanetId === destPlanet.id,
+        );
+        const shipCount =
+          scheduled !== undefined
+            ? resolveScheduledShipCount(scheduled.amount, maxShips)
+            : Math.min(1, maxShips);
         setPendingFleet({
           fromPlanetId,
           toPlanetId: destPlanet.id,
-          shipCount: Math.min(1, maxShips),
+          shipCount,
         });
       }
     },
@@ -4087,6 +4262,7 @@ export default function GameScreen() {
                   hadBattleThisTurn={
                     battlePlanetKeys.has(planet.id) || battlePlanetKeys.has(planet.name)
                   }
+                  hasScheduledMovement={scheduledOriginPlanetIds.has(planet.id)}
                 />
               ))}
               <FleetLayer
@@ -4116,7 +4292,9 @@ export default function GameScreen() {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editingOrderIndex !== null ? 'Edit Fleet' : 'Send Fleet'}</Text>
+            <Text style={styles.modalTitle}>
+              {editingOrderIndex !== null ? 'Edit Fleet' : 'Send Fleet'}
+            </Text>
             {pendingOriginPlanet !== undefined && pendingDestPlanet !== undefined && (
               <Text style={styles.modalRoute}>
                 {pendingOriginPlanet.name} → {pendingDestPlanet.name}
@@ -4130,7 +4308,26 @@ export default function GameScreen() {
               </Text>
             )}
             <View style={styles.stepperRow}>
-              <Text style={styles.sectionHint}>Ships</Text>
+              <View style={styles.shipCountHeaderRow}>
+                {existingScheduleForPending === undefined && (
+                  <Pressable
+                    onPress={toggleSchedulePanel}
+                    hitSlop={8}
+                    style={[
+                      styles.scheduleToggleBtn,
+                      schedulePanelOpen && styles.scheduleToggleBtnActive,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Schedule this movement every turn"
+                  >
+                    <RepeatIcon
+                      color={schedulePanelOpen ? '#ffffff' : SCHEDULE_BADGE_COLOR}
+                      size={18}
+                    />
+                  </Pressable>
+                )}
+                <Text style={[styles.sectionHint, styles.shipCountHeaderLabel]}>Ships</Text>
+              </View>
               <View style={styles.stepperControls}>
                 <Pressable
                   style={styles.stepperBtn}
@@ -4138,6 +4335,7 @@ export default function GameScreen() {
                     setIsEditingFleetShipCount(false);
                     setFleetShipCountDraft('');
                     if (pendingFleet !== null) {
+                      setHasTouchedCurrentShipCount(true);
                       setPendingFleet({
                         ...pendingFleet,
                         shipCount: Math.max(0, pendingFleet.shipCount - 1),
@@ -4169,6 +4367,7 @@ export default function GameScreen() {
                       if (pendingFleet === null) {
                         return;
                       }
+                      setHasTouchedCurrentShipCount(true);
                       setFleetShipCountDraft(String(pendingFleet.shipCount));
                       setIsEditingFleetShipCount(true);
                     }}
@@ -4183,6 +4382,7 @@ export default function GameScreen() {
                     setIsEditingFleetShipCount(false);
                     setFleetShipCountDraft('');
                     if (pendingFleet !== null) {
+                      setHasTouchedCurrentShipCount(true);
                       setPendingFleet({
                         ...pendingFleet,
                         shipCount: Math.min(modalMaxShips, pendingFleet.shipCount + 1),
@@ -4207,6 +4407,7 @@ export default function GameScreen() {
                     setIsEditingFleetShipCount(false);
                     setFleetShipCountDraft('');
                     if (pendingFleet !== null) {
+                      setHasTouchedCurrentShipCount(true);
                       setPendingFleet({
                         ...pendingFleet,
                         shipCount: modalMaxShips,
@@ -4234,6 +4435,138 @@ export default function GameScreen() {
                 <Text style={styles.stepperMax}>max {modalMaxShips}</Text>
               </View>
             </View>
+            {existingScheduleForPending !== undefined && !schedulePanelOpen && (
+              <View style={styles.scheduleSummaryRow}>
+                <Pressable
+                  onPress={toggleSchedulePanel}
+                  style={styles.scheduleSummaryOpen}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open scheduled movement settings"
+                >
+                  <View style={styles.scheduleToggleBtnCompact}>
+                    <RepeatIcon color={SCHEDULE_BADGE_COLOR} size={11} />
+                  </View>
+                  <Text style={styles.scheduleSummaryText}>
+                    Scheduled Troop Movements (will send every turn)
+                    {' · '}
+                    {existingScheduleForPending.amount === 'all'
+                      ? 'All'
+                      : existingScheduleForPending.amount}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => cancelScheduledMovement(existingScheduleForPending.id)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete scheduled movement"
+                >
+                  <Text style={styles.scheduleCancelIcon}>✕</Text>
+                </Pressable>
+              </View>
+            )}
+            {schedulePanelOpen && (
+              <View style={styles.scheduleSettings}>
+                <Text style={styles.scheduleSettingsTitle}>
+                  Scheduled Troop Movements (will send every turn)
+                </Text>
+                <View style={styles.stepperControls}>
+                  <Pressable
+                    style={styles.stepperBtn}
+                    onPress={() => {
+                      setIsEditingScheduleAmount(false);
+                      setScheduleAmountDraft('');
+                      if (scheduleAmount === 'all') {
+                        const fallback =
+                          pendingFleet !== null && pendingFleet.shipCount > 0
+                            ? pendingFleet.shipCount
+                            : 1;
+                        applyScheduleAmountChange(fallback);
+                        return;
+                      }
+                      applyScheduleAmountChange(Math.max(1, scheduleAmount - 1));
+                    }}
+                  >
+                    <Text style={styles.stepperBtnText}>−</Text>
+                  </Pressable>
+                  {isEditingScheduleAmount ? (
+                    <TextInput
+                      ref={scheduleAmountInputRef}
+                      style={styles.stepperValueInput}
+                      value={scheduleAmountDraft}
+                      onChangeText={(text) =>
+                        setScheduleAmountDraft(text.replace(/[^0-9]/g, ''))
+                      }
+                      onBlur={applyScheduleAmountFromDraft}
+                      onSubmitEditing={applyScheduleAmountFromDraft}
+                      keyboardType="number-pad"
+                      selectTextOnFocus
+                      maxLength={String(SCHEDULE_AMOUNT_MAX).length}
+                    />
+                  ) : (
+                    <Pressable
+                      style={styles.stepperValuePressable}
+                      onPress={() => {
+                        if (scheduleAmount === 'all') {
+                          return;
+                        }
+                        setScheduleAmountDraft(String(scheduleAmount));
+                        setIsEditingScheduleAmount(true);
+                      }}
+                      disabled={scheduleAmount === 'all'}
+                    >
+                      <Text style={styles.stepperValue}>
+                        {scheduleAmount === 'all' ? 'All' : scheduleAmount}
+                      </Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={styles.stepperBtn}
+                    onPress={() => {
+                      setIsEditingScheduleAmount(false);
+                      setScheduleAmountDraft('');
+                      if (scheduleAmount === 'all') {
+                        return;
+                      }
+                      applyScheduleAmountChange(
+                        Math.min(SCHEDULE_AMOUNT_MAX, scheduleAmount + 1),
+                      );
+                    }}
+                    disabled={scheduleAmount === 'all'}
+                  >
+                    <Text style={styles.stepperBtnText}>+</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.stepperAllBtn,
+                      scheduleAmount === 'all' && styles.scheduleAllBtnActive,
+                    ]}
+                    onPress={() => {
+                      setIsEditingScheduleAmount(false);
+                      setScheduleAmountDraft('');
+                      applyScheduleAmountChange('all');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.stepperAllBtnText,
+                        scheduleAmount === 'all' && styles.scheduleAllBtnTextActive,
+                      ]}
+                    >
+                      All
+                    </Text>
+                  </Pressable>
+                  <Text style={[styles.stepperMax, styles.scheduleStepperMaxSpacer]}>
+                    max {modalMaxShips}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.saveScheduleBtn}
+                  onPress={handleSaveSchedule}
+                >
+                  <Text style={styles.saveScheduleBtnText}>Save Schedule</Text>
+                </Pressable>
+              </View>
+            )}
             <View style={styles.modalActions}>
               <Pressable
                 style={[styles.modalBtn, styles.modalBtnSecondary]}
@@ -4332,6 +4665,33 @@ export default function GameScreen() {
                 <Text style={styles.troopsSummaryLabel}>troops</Text>
               </View>
             </View>
+
+            {!showingAiObserver && selectedPlanetSchedules.length > 0 && (
+              <View style={styles.planetScheduleList}>
+                {selectedPlanetSchedules.map((movement) => {
+                  const destName =
+                    gameState?.map.planets.find((p) => p.id === movement.toPlanetId)?.name ??
+                    movement.toPlanetId;
+                  const amountLabel =
+                    movement.amount === 'all' ? 'all' : String(movement.amount);
+                  return (
+                    <View key={movement.id} style={styles.planetScheduleRow}>
+                      <Text style={styles.planetScheduleRowText}>
+                        ⟳ every turn → {destName} ({amountLabel})
+                      </Text>
+                      <Pressable
+                        onPress={() => cancelScheduledMovement(movement.id)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel scheduled movement"
+                      >
+                        <Text style={styles.scheduleCancelIcon}>✕</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
 
             {!showingAiObserver && (
               <View style={styles.buildChipRow}>
@@ -5528,6 +5888,13 @@ const styles = StyleSheet.create({
     fontSize: PLANET_BATTLE_ICON_FONT_SIZE,
     lineHeight: PLANET_BATTLE_ICON_FONT_SIZE + 2,
   },
+  planetScheduleBadge: {
+    position: 'absolute',
+    backgroundColor: SCHEDULE_BADGE_COLOR,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
   planetModalStack: {
     width: '90%',
     maxWidth: 360,
@@ -5734,6 +6101,16 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     letterSpacing: 0.5,
   },
+  shipCountHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 8,
+    marginBottom: 4,
+  },
+  shipCountHeaderLabel: {
+    marginBottom: 0,
+  },
   stepperRow: {
     marginBottom: 10,
   },
@@ -5861,6 +6238,110 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textAlign: 'center',
     marginBottom: 8,
+  },
+  scheduleToggleBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: SCHEDULE_BADGE_COLOR,
+    backgroundColor: '#fff4ea',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleToggleBtnActive: {
+    backgroundColor: SCHEDULE_BADGE_COLOR,
+    borderColor: SCHEDULE_BADGE_COLOR,
+  },
+  scheduleToggleBtnCompact: {
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: SCHEDULE_BADGE_COLOR,
+    backgroundColor: '#fff4ea',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleSettings: {
+    marginTop: 4,
+    marginBottom: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  scheduleSettingsTitle: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    letterSpacing: 0.5,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  scheduleSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 10,
+  },
+  scheduleSummaryOpen: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  scheduleSummaryText: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  scheduleStepperMaxSpacer: {
+    opacity: 0,
+  },
+  saveScheduleBtn: {
+    marginTop: 12,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: SCHEDULE_BADGE_COLOR,
+  },
+  saveScheduleBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  scheduleCancelIcon: {
+    color: COLORS.defeat,
+    fontSize: 16,
+    fontWeight: '700',
+    paddingHorizontal: 4,
+  },
+  scheduleAllBtnActive: {
+    backgroundColor: SCHEDULE_BADGE_COLOR,
+    borderColor: SCHEDULE_BADGE_COLOR,
+    opacity: 1,
+  },
+  scheduleAllBtnTextActive: {
+    color: '#ffffff',
+  },
+  planetScheduleList: {
+    width: '100%',
+    marginBottom: 10,
+    gap: 6,
+  },
+  planetScheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  planetScheduleRowText: {
+    color: COLORS.text,
+    fontSize: 12,
+    flex: 1,
   },
   knockoutBanner: {
     color: '#cc3300',

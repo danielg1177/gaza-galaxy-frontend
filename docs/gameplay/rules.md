@@ -53,6 +53,7 @@ Research speed is NOT affected by planet class.
 - On arrival:
   - Neutral planet → captured immediately
   - Enemy planet → combat resolved
+- A send can be scheduled to repeat every turn (fixed count or all remaining ships). It fires at the start of that player's later turns. Capturing the origin planet cancels the schedule; taking the planet back does not restore it. If too few ships are present for a fixed count, whatever is there is sent.
 
 ## Combat
 - Automatic — no player decisions during battle
@@ -63,5 +64,6 @@ Research speed is NOT affected by planet class.
 - Last player with an un-captured home planet wins
 
 ## Changelog
+- 2026-09-10: Scheduled repeating fleet orders (fixed count or all remaining ships; cancel on origin capture).
 - 2026-06-05: Added Fog of War section; removed standalone Home Planets section (covered under Objective, Elimination, and Victory).
 - 2026-05-27: Initial rules documented from project-spec.md.
