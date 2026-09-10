@@ -690,6 +690,8 @@ Phase 46 (Task 213) did not stop stacked battle reports. The copies were `react-
 ---
 
 ## Changelog
+- 2026-09-10: Last remaining sitting-in human can Delete after other humans forfeit.
+- 2026-09-10: Command Center per-card ⋮ menu — Chat, Edit, Play Again, Forfeit, Delete. Play Again (settings only, new map; non-host swaps with creator). Forfeit from lobby.
 - 2026-08-26: Player terminology — UI and docs call them players, not commanders; default `Player`; deleted-account `Former Player`; overlay **Player update**.
 - 2026-08-26: Phase 79 complete (Tasks 269–270) — report message in ConversationModal; `message_reports` + hide artisan command.
 - 2026-08-26: Phase 78 complete (Tasks 266–268) — account deletion; communication-only block; Find Game confirm when a blocked player is already seated.

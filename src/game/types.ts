@@ -102,7 +102,12 @@ export type GalaxyShape =
   | 'halo'
   | 'broken_ring'
   | 'crossroads'
-  | 'clover';
+  | 'clover'
+  | 'coil'
+  | 'barred'
+  | 'hourglass'
+  | 'lanes'
+  | 'asterisk';
 
 export type MapSize = 'small' | 'medium' | 'large';
 

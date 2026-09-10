@@ -914,6 +914,10 @@ const SCHEDULE_BADGE_SIZE = Math.max(
   Math.round((11 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE * 0.6),
 );
 const SCHEDULE_BADGE_COLOR = '#e67e22';
+const SCHEDULE_ROUTE_START_GAP = PLANET_SIZE / 2 + 2;
+const SCHEDULE_ROUTE_END_GAP = PLANET_SIZE / 2 + 6;
+const SCHEDULE_ROUTE_ARROW_LENGTH = 10;
+const SCHEDULE_ROUTE_ARROW_HALF_WIDTH = 4.5;
 const PLANET_HIGHLIGHT_BORDER_WIDTH = Math.max(2, Math.round((3 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_BOX_SELECT_RING_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
@@ -1147,6 +1151,53 @@ function planetCenterPx(planet: Planet): { x: number; y: number } {
   return {
     x: planet.position.x * CELL_SIZE + CELL_SIZE / 2,
     y: planet.position.y * CELL_SIZE + CELL_SIZE / 2,
+  };
+}
+
+function scheduledRouteGeometry(
+  originPlanet: Planet,
+  destPlanet: Planet,
+): {
+  startX: number;
+  startY: number;
+  lineEndX: number;
+  lineEndY: number;
+  tipX: number;
+  tipY: number;
+  arrowPath: string;
+} | null {
+  const originCenter = planetCenterPx(originPlanet);
+  const destCenter = planetCenterPx(destPlanet);
+  const dx = destCenter.x - originCenter.x;
+  const dy = destCenter.y - originCenter.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  const minLength =
+    SCHEDULE_ROUTE_START_GAP + SCHEDULE_ROUTE_END_GAP + SCHEDULE_ROUTE_ARROW_LENGTH;
+  if (length < minLength) {
+    return null;
+  }
+  const ux = dx / length;
+  const uy = dy / length;
+  const startX = originCenter.x + ux * SCHEDULE_ROUTE_START_GAP;
+  const startY = originCenter.y + uy * SCHEDULE_ROUTE_START_GAP;
+  const tipX = destCenter.x - ux * SCHEDULE_ROUTE_END_GAP;
+  const tipY = destCenter.y - uy * SCHEDULE_ROUTE_END_GAP;
+  const lineEndX = tipX - ux * SCHEDULE_ROUTE_ARROW_LENGTH;
+  const lineEndY = tipY - uy * SCHEDULE_ROUTE_ARROW_LENGTH;
+  const px = -uy * SCHEDULE_ROUTE_ARROW_HALF_WIDTH;
+  const py = ux * SCHEDULE_ROUTE_ARROW_HALF_WIDTH;
+  const leftX = lineEndX + px;
+  const leftY = lineEndY + py;
+  const rightX = lineEndX - px;
+  const rightY = lineEndY - py;
+  return {
+    startX,
+    startY,
+    lineEndX,
+    lineEndY,
+    tipX,
+    tipY,
+    arrowPath: `M ${tipX} ${tipY} L ${leftX} ${leftY} L ${rightX} ${rightY} Z`,
   };
 }
 
@@ -1686,6 +1737,7 @@ function FleetLayer({
   fleets,
   planets,
   queuedOrders,
+  scheduledMovements,
   humanPlayerId,
   players,
   mapPixelWidth,
@@ -1694,6 +1746,7 @@ function FleetLayer({
   fleets: Fleet[];
   planets: Planet[];
   queuedOrders: PendingFleet[];
+  scheduledMovements: ScheduledMovement[];
   humanPlayerId: string;
   players: Player[];
   mapPixelWidth: number;
@@ -1706,6 +1759,32 @@ function FleetLayer({
       style={styles.fleetLayer}
       pointerEvents="none"
     >
+      {scheduledMovements.map((movement) => {
+        const originPlanet = planets.find((p) => p.id === movement.fromPlanetId);
+        const destPlanet = planets.find((p) => p.id === movement.toPlanetId);
+        if (originPlanet === undefined || destPlanet === undefined) {
+          return null;
+        }
+        const geometry = scheduledRouteGeometry(originPlanet, destPlanet);
+        if (geometry === null) {
+          return null;
+        }
+        return (
+          <G key={`schedule-${movement.id}`}>
+            <Line
+              x1={geometry.startX}
+              y1={geometry.startY}
+              x2={geometry.lineEndX}
+              y2={geometry.lineEndY}
+              stroke={SCHEDULE_BADGE_COLOR}
+              strokeWidth={1.5}
+              strokeDasharray="3 3"
+              opacity={0.85}
+            />
+            <Path d={geometry.arrowPath} fill={SCHEDULE_BADGE_COLOR} opacity={0.95} />
+          </G>
+        );
+      })}
       {fleets.map((fleet) => {
         const originPlanet = planets.find((p) => p.id === fleet.originPlanetId);
         const destPlanet = planets.find((p) => p.id === fleet.destinationPlanetId);
@@ -4269,6 +4348,7 @@ export default function GameScreen() {
                 fleets={fleets}
                 planets={map.planets}
                 queuedOrders={queuedOrders}
+                scheduledMovements={scheduledMovements}
                 humanPlayerId={humanPlayer.id}
                 players={players}
                 mapPixelWidth={mapPixelWidth}
@@ -4292,6 +4372,22 @@ export default function GameScreen() {
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
+            <Pressable
+              onPress={toggleSchedulePanel}
+              hitSlop={8}
+              style={[
+                styles.scheduleToggleBtn,
+                styles.scheduleToggleBtnCorner,
+                schedulePanelOpen && styles.scheduleToggleBtnActive,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Schedule this movement every turn"
+            >
+              <RepeatIcon
+                color={schedulePanelOpen ? '#ffffff' : SCHEDULE_BADGE_COLOR}
+                size={18}
+              />
+            </Pressable>
             <Text style={styles.modalTitle}>
               {editingOrderIndex !== null ? 'Edit Fleet' : 'Send Fleet'}
             </Text>
@@ -4308,26 +4404,7 @@ export default function GameScreen() {
               </Text>
             )}
             <View style={styles.stepperRow}>
-              <View style={styles.shipCountHeaderRow}>
-                {existingScheduleForPending === undefined && (
-                  <Pressable
-                    onPress={toggleSchedulePanel}
-                    hitSlop={8}
-                    style={[
-                      styles.scheduleToggleBtn,
-                      schedulePanelOpen && styles.scheduleToggleBtnActive,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Schedule this movement every turn"
-                  >
-                    <RepeatIcon
-                      color={schedulePanelOpen ? '#ffffff' : SCHEDULE_BADGE_COLOR}
-                      size={18}
-                    />
-                  </Pressable>
-                )}
-                <Text style={[styles.sectionHint, styles.shipCountHeaderLabel]}>Ships</Text>
-              </View>
+              <Text style={styles.sectionHint}>Ships</Text>
               <View style={styles.stepperControls}>
                 <Pressable
                   style={styles.stepperBtn}
@@ -6101,16 +6178,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     letterSpacing: 0.5,
   },
-  shipCountHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 8,
-    marginBottom: 4,
-  },
-  shipCountHeaderLabel: {
-    marginBottom: 0,
-  },
   stepperRow: {
     marginBottom: 10,
   },
@@ -6230,6 +6297,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     padding: 20,
+    position: 'relative',
   },
   modalTitle: {
     color: COLORS.text,
@@ -6248,6 +6316,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff4ea',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  scheduleToggleBtnCorner: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 2,
   },
   scheduleToggleBtnActive: {
     backgroundColor: SCHEDULE_BADGE_COLOR,

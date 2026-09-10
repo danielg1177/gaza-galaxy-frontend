@@ -83,13 +83,16 @@ Settings → **Delete account** (current password). Live campaigns continue with
 - Also lists local pass-and-play games (Zustand-only)
 - Turn alert badges on async game cards (see Turn Alerts section)
 - Pending game invites section or badge for unanswered invites
-- **Delete game (creator only):** when `created_by_user_id` on the list payload equals the authenticated user, each async card shows a **Delete** control. Confirmation alert → `DELETE /api/games/{id}` → card removed from lobby state and any matching local `GameRecord` (`asyncGameId`) dropped from Zustand. No status gate (waiting, in progress, and finished may all be deleted by the creator). Non-creators never see the control.
+- **Card ⋮ menu:** each Command Center game (async, Solo, Pass & Play) has a three-dot control instead of face buttons. Async order: **Chat** (unread badge on the ⋮), creator **Edit**, **Play Again**, **Forfeit** (or **Rejoin** when sitting out), **Delete** (creator, or the last remaining sitting-in human). Local: **Play Again**, **Delete**.
+- **Play Again:** same as filling Create Game with that roster, map size, campaign name, and game type, then launching. New seed/map (AI names regenerate). Does not copy state, fleets, or the old map. If the caller did not create the original, they swap seats with the original creator so they own the new game. Extra humans must still be accepted friends (`POST /games`).
+- **Forfeit from Command Center:** any sitting-in human member of an in-progress async game. Off-turn: `POST /games/{id}/forfeit`. On-turn: load the game, run the existing AI-submit-then-forfeit path, stay on Command Center.
+- **Delete game:** in the ⋮ menu for the creator (`created_by_user_id` equals the authenticated user), or for the sole remaining sitting-in human after every other human has forfeited (AI slots do not count). Confirmation alert → `DELETE /api/games/{id}` → card removed from lobby state and any matching local `GameRecord` (`asyncGameId`) dropped from Zustand. No status gate (waiting, in progress, and finished may all be deleted). If two or more humans are still sitting in, only the creator sees **Delete**.
 
 ### Async Game Creation
 When the user selects "Async Multiplayer" / Play with Friends in the new-game setup, a **Fill seats** control chooses the fill model:
 
 **Invite friends (default)**
-1. Human player slots (other than slot 0 — the creator) show a friend picker instead of a name text input
+1. Human player slots (other than slot 0 — the creator) show a friend picker instead of a name text input. Opening the picker re-fetches `GET /friends` so the list matches friends added or removed since setup was opened.
 2. Slot 0 defaults to the current user's username (read from auth store) — user may rename it
 3. Each human slot the creator fills with a friend shows that friend's username as the slot name (editable by the creator)
 4. AI slots remain unchanged (generated name; difficulty is always hard)
@@ -232,7 +235,7 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 - **Async:** confirmation → `POST /games/{id}/end` → `resetGame()` → Home. Backend sets `status = finished` with no winner and notifies other humans (`event: game_ended`). Command Center shows the existing **FINISHED** card (unknown outcome). Opening it is `isViewingFinishedGame` with status-bar copy **Game ended**.
 - **Pass-and-play / solo:** confirmation → `resetGame()` (local record removed) → Home. No API call.
 
-**Delete** remains creator-only on the Command Center. **Forfeit** remains sit-out with AI control.
+**Delete** on the Command Center is the creator, or the last remaining sitting-in human after others forfeit. **Forfeit** remains sit-out with AI control.
 
 ## Player forfeit/rejoin briefing (Task 257)
 
@@ -241,6 +244,9 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 ---
 
 ## Changelog
+- 2026-09-10: Last remaining sitting-in human can **Delete** after other humans forfeit (Command Center ⋮ + `DELETE /games/{id}`). Creator still can in any status.
+- 2026-09-10: Invite friends picker re-fetches `GET /friends` each time it is opened during Create Game.
+- 2026-09-10: Command Center per-card ⋮ menu (Chat, Edit, Play Again, Forfeit, Delete). Play Again creates a fresh match from settings only (new map); non-host swaps with the original creator. Forfeit from the lobby for any sitting-in member.
 - 2026-08-26: Blocked send in a two-human game replaces the chat composer with the server reason (`can_send` / `cannot_send_reason`).
 - 2026-08-26: User-facing copy refers to players (not commanders); default name `Player`; deleted accounts `Former Player`; overlay title **Player update**.
 - 2026-08-26: Account deletion + communication-only block; Find Game confirm for blocked players in a lobby; chat report.

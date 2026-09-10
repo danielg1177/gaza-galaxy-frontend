@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-09-10 (scheduled troop movements every turn)
+2026-09-10 (last remaining human can delete after forfeit)
 
 ## Overall Status
 
@@ -10,6 +10,10 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Last remaining sitting-in human can delete an async game after other humans forfeit: Command Center ⋮ **Delete** via `canDeleteAsyncGame`; `DELETE /games/{id}` allows creator or sole sitting-in human. AI slots do not count.
+- Create Game friend picker re-fetches `GET /friends` each time a human seat's "Select a friend" control is opened, so newly accepted or removed friends appear without leaving the setup screen.
+- Command Center ⋮ menu: Play Again (same players / map size / name / type, new randomized map; non-host swaps seats with the original creator), Forfeit from the lobby for any sitting-in human of an in-progress async game, action buttons no longer sit on the card face.
+- Five more galaxy shapes: `coil`, `barred`, `hourglass`, `lanes`, `asterisk` (picker now has 17 layouts).
 - Scheduled troop movements: send-fleet modal ⟳ icon expands every-turn settings (fixed count defaulting to this send, or **All**). Orders persist on `GameState.scheduledMovements` and dispatch when that player becomes current (visible at turn start). Capture of the origin cancels the schedule (recapture does not restore). Insufficient garrison sends whatever is there. Owned origin planets show a small orange ⟳ badge at the top-right.
 - Four new galaxy shapes in the seeded picker: `crescent` (horseshoe), `binary` (twin cores + corridor), `ribbon` (winding S-curve), `halo` (double ring). Same spacing, connectivity, and spawn pipeline as the existing five.
 - Production slider vs garrison mismatch: `runProduction` rounds factory troop and gold output to the nearest tenth (`computeFactoryOutputs`) before the troop accumulator / gold floor, using the same helper as the planet-modal label.
@@ -228,10 +232,14 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/game/validationEngine.ts` | Stub only |
 | `src/game/index.ts` | Re-exports all modules |
 | `src/store/gameStore.ts` | Zustand store — `isAsyncGame()` keyed on `asyncGameId`; `loadAsyncGame` forces `playMode: 'asyncMultiplayer'` and overlays `is_forfeited`; async `endTurn` / forfeit submit (`submitTurn`, `isSubmittingTurn`, `shouldReturnHome`); local pass-and-play unchanged |
-| `src/screens/HomeScreen.tsx` | Command Center lobby — async games with alert badges + priority sort; tappable only when `isMyTurn`; sitting-out cards show **Rejoin**; creator-only **Delete** per async card (`DELETE /api/games/{id}`); **Pass & Play** section lists all local `GameRecord`s (`asyncGameId == null`); per-card `getGame` loading; game invites; Find Game badge = open + pending lobbies; auto campaign names from roster unless the field was edited; `AppTopBar` (Friends + Logout) |
+| `src/screens/HomeScreen.tsx` | Command Center lobby — async games with alert badges + priority sort; tappable only when `isMyTurn`; per-card ⋮ menu (Chat, Edit, Play Again, Forfeit, Delete); Play Again recreates from settings only (swap caller into host seat if they did not create the original); any sitting-in member can Forfeit; **Pass & Play** / **Solos** cards use the same ⋮ menu; per-card `getGame` loading; game invites; Find Game badge = open + pending lobbies; auto campaign names from roster unless the field was edited; Invite friends picker refreshes `GET /friends` on open; `AppTopBar` (Friends + Logout) |
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit Game** / **Exit to Home** first, **Forfeit**, **End Game** last; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-09-10: Create Game Invite friends picker re-fetches `GET /friends` whenever a seat's "Select a friend" control is opened (stale list if friends changed after entering setup).
+- 2026-09-10: Last remaining sitting-in human can Delete an async game after other humans forfeit (`canDeleteAsyncGame` + `DELETE /games/{id}`).
+- 2026-09-10: Command Center ⋮ menu per game card — order Chat, Edit, Play Again, Forfeit, Delete; Play Again (same settings, new map); Forfeit for any sitting-in member of an in-progress async game.
+- 2026-09-10: Five more galaxy shapes — `coil`, `barred`, `hourglass`, `lanes`, `asterisk`.
 - 2026-09-04: Three more galaxy shapes — `broken_ring`, `crossroads`, `clover`.
 - 2026-09-04: Connectivity bridges are three planets wide (spine + two flanks) instead of a single-file line.
 - 2026-09-04: Map launch crash fix — constrained galaxy shapes no longer throw `Failed to generate map with minimum planet spacing of 2.5 clicks after 25 attempts`; leftover planets grow unconstrained, and `generateMap` falls back to `scattered` if spacing still fails.

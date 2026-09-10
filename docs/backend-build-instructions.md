@@ -550,7 +550,7 @@ Auth required.
 
 **Validation:**
 - `name`: required | string | max:100
-- `map_config`: required object with `mapSize` (small|medium|large), `mapWidth` (int > 0), `mapHeight` (int > 0), `planetCount` (int 2–100), `seed` (int), `galaxyShape` (scattered|dense_core|ring|cluster|spiral|crescent|binary|ribbon|halo|broken_ring|crossroads|clover)
+- `map_config`: required object with `mapSize` (small|medium|large), `mapWidth` (int > 0), `mapHeight` (int > 0), `planetCount` (int 2–100), `seed` (int), `galaxyShape` (scattered|dense_core|ring|cluster|spiral|crescent|binary|ribbon|halo|broken_ring|crossroads|clover|coil|barred|hourglass|lanes|asterisk)
 - `player_slots`: required array, length 2–8
 - Each slot: `type` (human|ai), `user_id` (nullable int for humans), `name` (string max 50), `difficulty` (easy|normal|hard, only for ai type)
 - All human `user_id`s (non-null, non-creator) must be IDs of users who are **accepted friends** of the authenticated creator
@@ -616,11 +616,11 @@ Auth required. User must be a member of this game (check `game_players`).
 ---
 
 #### `DELETE /api/games/{id}`
-Auth required. Must be the creator. Only when `status = 'waiting'`.
+Auth required. Caller must be a member. Allowed for the creator in any status, or for the sole remaining sitting-in human (every other human has forfeited; AI does not count).
 
 **Logic:**
-1. Verify `games.creator_id = me`. 403 if not.
-2. Verify `games.status = 'waiting'`. 422 if not.
+1. Verify caller is in `game_players`. 403 `{ "message": "Forbidden" }` if not.
+2. Verify caller is the creator **or** the only sitting-in human left. 403 `{ "message": "Only the creator or the last remaining human player can delete this game" }` if not.
 3. Delete game (cascades to `game_players`, `game_invites`, `turns`).
 
 **Response (200):** `{ "message": "Game deleted" }`

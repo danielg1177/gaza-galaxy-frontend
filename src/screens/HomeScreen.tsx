@@ -25,9 +25,11 @@ import { EditGameNameModal } from '../components/EditGameNameModal';
 import { ApiError } from '../services/apiClient';
 import {
   acceptInvite,
+  canDeleteAsyncGame,
   createGame,
   declineInvite,
   deleteGame as deleteApiGame,
+  forfeitGame,
   getGame,
   isCurrentUserGameCreator,
   listGames,
@@ -38,6 +40,11 @@ import {
   type ApiGame,
   type ApiInvite,
 } from '../services/gamesService';
+import {
+  buildPlayAgainSlots,
+  canForfeitAsyncGame,
+  resolveMapSize,
+} from '../services/playAgain';
 import { useAuthStore } from '../store/authStore';
 import { generateInitialGameState, useGameStore, type GameConfig, type GameRecord, type PlayerSlot } from '../store/gameStore';
 
@@ -231,30 +238,18 @@ function AsyncGameCard({
   anyCardLoading,
   currentUserId,
   currentUsername,
-  canDelete,
-  isDeleting,
-  isRejoining,
   finalBattleViewedByGameId,
   onPress,
-  onDelete,
-  onEdit,
-  onChat,
-  onRejoin,
+  onOpenMenu,
 }: {
   game: ApiGame;
   isLoading: boolean;
   anyCardLoading: boolean;
   currentUserId: number | undefined;
   currentUsername: string | undefined;
-  canDelete: boolean;
-  isDeleting: boolean;
-  isRejoining: boolean;
   finalBattleViewedByGameId: Record<string, boolean>;
   onPress: () => void;
-  onDelete: () => void;
-  onEdit: () => void;
-  onChat: () => void;
-  onRejoin: () => void;
+  onOpenMenu: () => void;
 }) {
   const playerNames = game.players.map((player) => player.inGameName).join(', ');
   const localPlayerForfeited = isLocalPlayerForfeited(
@@ -331,58 +326,21 @@ function AsyncGameCard({
     }
   })();
 
-  const editControl = canDelete ? (
+  const menuControl = (
     <Pressable
       style={({ pressed }) => [
-        styles.asyncGameEditButton,
-        pressed && styles.asyncGameEditButtonPressed,
+        styles.gameCardMenuButton,
+        pressed && styles.gameCardMenuButtonPressed,
       ]}
       onPress={(event) => {
         event.stopPropagation();
-        onEdit();
+        onOpenMenu();
       }}
-      disabled={isDeleting || anyCardLoading || isLoading}
+      disabled={anyCardLoading || isLoading}
       hitSlop={8}
+      accessibilityLabel="Game actions"
     >
-      <Text style={styles.asyncGameEditButtonText}>Edit</Text>
-    </Pressable>
-  ) : null;
-
-  const deleteControl = canDelete ? (
-    <Pressable
-      style={({ pressed }) => [
-        styles.asyncGameDeleteButton,
-        pressed && styles.asyncGameDeleteButtonPressed,
-      ]}
-      onPress={(event) => {
-        event.stopPropagation();
-        onDelete();
-      }}
-      disabled={isDeleting || anyCardLoading}
-      hitSlop={8}
-    >
-      {isDeleting ? (
-        <ActivityIndicator size="small" color="#c0392b" />
-      ) : (
-        <Text style={styles.asyncGameDeleteButtonText}>Delete</Text>
-      )}
-    </Pressable>
-  ) : null;
-
-  const chatControl = isAsyncMultiplayerApiGame(game) ? (
-    <Pressable
-      style={({ pressed }) => [
-        styles.asyncGameChatButton,
-        pressed && styles.asyncGameChatButtonPressed,
-      ]}
-      onPress={(event) => {
-        event.stopPropagation();
-        onChat();
-      }}
-      disabled={anyCardLoading}
-      hitSlop={8}
-    >
-      <Text style={styles.asyncGameChatButtonText}>💬</Text>
+      <Text style={styles.gameCardMenuButtonText}>⋮</Text>
       {game.unreadMessageCount > 0 && (
         <View style={styles.chatUnreadBadge}>
           <Text style={styles.chatUnreadBadgeText}>
@@ -391,28 +349,7 @@ function AsyncGameCard({
         </View>
       )}
     </Pressable>
-  ) : null;
-
-  const rejoinControl = localPlayerForfeited ? (
-    <Pressable
-      style={({ pressed }) => [
-        styles.asyncGameEditButton,
-        pressed && styles.asyncGameEditButtonPressed,
-      ]}
-      onPress={(event) => {
-        event.stopPropagation();
-        onRejoin();
-      }}
-      disabled={isRejoining || anyCardLoading || isLoading}
-      hitSlop={8}
-    >
-      {isRejoining ? (
-        <ActivityIndicator size="small" color={COLORS.accent} />
-      ) : (
-        <Text style={styles.asyncGameEditButtonText}>Rejoin</Text>
-      )}
-    </Pressable>
-  ) : null;
+  );
 
   const content = (
     <View style={styles.asyncGameCardBody}>
@@ -431,23 +368,12 @@ function AsyncGameCard({
           <ActivityIndicator style={styles.asyncGameCardLoader} color={COLORS.accent} />
         )}
       </View>
-      {(badge != null ||
-        chatControl != null ||
-        rejoinControl != null ||
-        editControl != null ||
-        deleteControl != null) && (
-        <View style={styles.asyncGameCardActions}>
-          <View style={styles.asyncGameCardActionsTop}>
-            {badge}
-            {chatControl}
-            {rejoinControl}
-            {editControl}
-          </View>
-          {deleteControl != null && (
-            <View style={styles.asyncGameCardActionsBottom}>{deleteControl}</View>
-          )}
+      <View style={styles.asyncGameCardActions}>
+        <View style={styles.asyncGameCardActionsTop}>
+          {badge}
+          {menuControl}
         </View>
-      )}
+      </View>
     </View>
   );
 
@@ -459,10 +385,10 @@ function AsyncGameCard({
     <Pressable
       style={({ pressed }) => [
         ...cardStyle,
-        pressed && !isLoading && !isDeleting && styles.gameCardPressed,
+        pressed && !isLoading && styles.gameCardPressed,
       ]}
       onPress={onPress}
-      disabled={isLoading || isDeleting || anyCardLoading}
+      disabled={isLoading || anyCardLoading}
     >
       {content}
     </Pressable>
@@ -473,11 +399,11 @@ function AsyncGameCard({
 function GameCard({
   record,
   onPress,
-  onDelete,
+  onOpenMenu,
 }: {
   record: GameRecord;
   onPress: () => void;
-  onDelete?: () => void;
+  onOpenMenu: () => void;
 }) {
   const { state } = record;
   const humanPlayer = state.players.find((p) => !p.isAI);
@@ -491,23 +417,6 @@ function GameCard({
   if (state.status === 'finished' && humanId !== undefined) {
     outcomeLabel = state.winnerId === humanId ? 'VICTORY' : 'DEFEAT';
   }
-
-  const deleteControl =
-    onDelete != null ? (
-      <Pressable
-        style={({ pressed }) => [
-          styles.asyncGameDeleteButton,
-          pressed && styles.asyncGameDeleteButtonPressed,
-        ]}
-        onPress={(event) => {
-          event.stopPropagation();
-          onDelete();
-        }}
-        hitSlop={8}
-      >
-        <Text style={styles.asyncGameDeleteButtonText}>Delete</Text>
-      </Pressable>
-    ) : null;
 
   return (
     <Pressable
@@ -530,11 +439,22 @@ function GameCard({
             )}
           </View>
         </View>
-        {deleteControl != null && (
-          <View style={styles.asyncGameCardActions}>
-            <View style={styles.asyncGameCardActionsBottom}>{deleteControl}</View>
-          </View>
-        )}
+        <View style={styles.asyncGameCardActions}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.gameCardMenuButton,
+              pressed && styles.gameCardMenuButtonPressed,
+            ]}
+            onPress={(event) => {
+              event.stopPropagation();
+              onOpenMenu();
+            }}
+            hitSlop={8}
+            accessibilityLabel="Game actions"
+          >
+            <Text style={styles.gameCardMenuButtonText}>⋮</Text>
+          </Pressable>
+        </View>
       </View>
     </Pressable>
   );
@@ -553,6 +473,10 @@ export default function HomeScreen() {
   const finalBattleViewedByGameId = useGameStore((s) => s.finalBattleViewedByGameId);
   const deleteLocalGame = useGameStore((s) => s.deleteGame);
   const setNotificationBadgeCount = useGameStore((s) => s.setNotificationBadgeCount);
+  const forfeitCurrentPlayer = useGameStore((s) => s.forfeitCurrentPlayer);
+  const isResolvingAiTurns = useGameStore((s) => s.isResolvingAiTurns);
+  const isSubmittingTurn = useGameStore((s) => s.isSubmittingTurn);
+  const clearReturnHome = useGameStore((s) => s.clearReturnHome);
 
   const localGames = useMemo(
     () => games.filter((record) => record.asyncGameId == null),
@@ -594,13 +518,19 @@ export default function HomeScreen() {
   const [loadingGameId, setLoadingGameId] = useState<number | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<number | null>(null);
   const [rejoiningGameId, setRejoiningGameId] = useState<number | null>(null);
+  const [forfeitingGameId, setForfeitingGameId] = useState<number | null>(null);
+  const [cardMenu, setCardMenu] = useState<
+    { kind: 'async'; id: number } | { kind: 'local'; id: string } | null
+  >(null);
   /** Games created this session when the list API omits creator fields. */
   const [sessionCreatedGameIds, setSessionCreatedGameIds] = useState<Set<number>>(
     () => new Set(),
   );
   const isFirstAsyncGamesLoad = useRef(true);
+  const friendsRequestIdRef = useRef(0);
   const [friendPickerSlotIndex, setFriendPickerSlotIndex] = useState<number | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
 
   const sortedAsyncGames = useMemo(
     () =>
@@ -611,21 +541,37 @@ export default function HomeScreen() {
   );
   const findGameBadgeCount = openGameCount + pendingLobbyCount;
 
+  const refreshFriends = useCallback(async () => {
+    const requestId = ++friendsRequestIdRef.current;
+    setFriendsLoading(true);
+    try {
+      const list = await getFriends();
+      if (requestId !== friendsRequestIdRef.current) {
+        return;
+      }
+      setFriends(list);
+    } catch {
+      // Keep the last successful list so a failed refresh does not empty the picker.
+    } finally {
+      if (requestId === friendsRequestIdRef.current) {
+        setFriendsLoading(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (playMode !== 'asyncMultiplayer') {
       setFriendPickerSlotIndex(null);
       return;
     }
 
-    void (async () => {
-      try {
-        const list = await getFriends();
-        setFriends(list);
-      } catch {
-        setFriends([]);
-      }
-    })();
-  }, [playMode]);
+    void refreshFriends();
+  }, [playMode, refreshFriends]);
+
+  const openFriendPicker = (index: number) => {
+    setFriendPickerSlotIndex(index);
+    void refreshFriends();
+  };
 
   useEffect(() => {
     if (gameNameDirty) {
@@ -824,6 +770,20 @@ export default function HomeScreen() {
     () => asyncGames.find((game) => game.id === selectedChatGameId) ?? null,
     [asyncGames, selectedChatGameId],
   );
+  const openAsyncMenuGame = useMemo(
+    () =>
+      cardMenu?.kind === 'async'
+        ? (asyncGames.find((game) => game.id === cardMenu.id) ?? null)
+        : null,
+    [asyncGames, cardMenu],
+  );
+  const openLocalMenuRecord = useMemo(
+    () =>
+      cardMenu?.kind === 'local'
+        ? (localGames.find((record) => record.id === cardMenu.id) ?? null)
+        : null,
+    [localGames, cardMenu],
+  );
   const [editingGameName, setEditingGameName] = useState('');
   const [isEditingGame, setIsEditingGame] = useState(false);
 
@@ -908,33 +868,164 @@ export default function HomeScreen() {
     </Modal>
   );
 
-  const handleLaunch = () => {
-    const { width, height, planetCount } = computeMapDimensions(mapSize, playerSlots.length);
-    const playerName = (playerSlots[0]?.name ?? '').trim() || DEFAULT_PLAYER_NAME;
-    const campaignName = resolveCampaignName(gameName, playerSlots, usesOpenLobbyName);
+  const renderCardAction = (
+    label: string,
+    onPress: () => void,
+    options?: { danger?: boolean; badge?: string },
+  ) => (
+    <Pressable
+      style={({ pressed }) => [
+        styles.homeMenuItem,
+        pressed && styles.homeMenuItemPressed,
+      ]}
+      onPress={onPress}
+    >
+      <Text
+        style={[
+          styles.homeMenuItemText,
+          options?.danger === true && styles.gameCardMenuDangerText,
+        ]}
+      >
+        {label}
+      </Text>
+      {options?.badge != null && (
+        <View style={styles.homeMenuBadge}>
+          <Text style={styles.homeMenuBadgeText}>{options.badge}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
 
-    if (playMode === 'passAndPlay') {
+  const renderGameCardMenu = () => {
+    const asyncGame = openAsyncMenuGame;
+    const localRecord = openLocalMenuRecord;
+    const visible = asyncGame != null || localRecord != null;
+    const isCreator =
+      asyncGame != null &&
+      isCurrentUserGameCreator(asyncGame, currentUser?.id, currentUser?.username);
+    const canDelete =
+      asyncGame != null &&
+      canDeleteAsyncGame(asyncGame, currentUser?.id, currentUser?.username);
+    const localForfeited =
+      asyncGame != null &&
+      isLocalPlayerForfeited(asyncGame, currentUser?.id, currentUser?.username);
+    const canForfeit =
+      asyncGame != null &&
+      canForfeitAsyncGame(asyncGame, currentUser?.id, currentUser?.username);
+    const unread =
+      asyncGame != null && asyncGame.unreadMessageCount > 0
+        ? asyncGame.unreadMessageCount > 99
+          ? '99+'
+          : String(asyncGame.unreadMessageCount)
+        : undefined;
+
+    return (
+      <Modal
+        visible={visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCardMenu(null)}
+      >
+        <Pressable
+          style={styles.cardMenuModalBackdrop}
+          onPress={() => setCardMenu(null)}
+        >
+          <Pressable style={styles.homeMenuDropdown} onPress={() => {}}>
+            {asyncGame != null && (
+              <>
+                {renderCardAction(
+                  'Chat',
+                  () => {
+                    setCardMenu(null);
+                    setSelectedChatGameId(asyncGame.id);
+                  },
+                  unread != null ? { badge: unread } : undefined,
+                )}
+                {isCreator && (
+                  <>
+                    <View style={styles.homeMenuDivider} />
+                    {renderCardAction('Edit', () => handleEditAsyncGame(asyncGame))}
+                  </>
+                )}
+                <View style={styles.homeMenuDivider} />
+                {renderCardAction('Play Again', () => handlePlayAgainAsync(asyncGame))}
+                {localForfeited && (
+                  <>
+                    <View style={styles.homeMenuDivider} />
+                    {renderCardAction('Rejoin', () => handleRejoinAsyncGame(asyncGame))}
+                  </>
+                )}
+                {canForfeit && (
+                  <>
+                    <View style={styles.homeMenuDivider} />
+                    {renderCardAction(
+                      'Forfeit',
+                      () => handleForfeitAsyncGame(asyncGame),
+                      { danger: true },
+                    )}
+                  </>
+                )}
+                {canDelete && (
+                  <>
+                    <View style={styles.homeMenuDivider} />
+                    {renderCardAction(
+                      deletingGameId === asyncGame.id ? 'Deleting…' : 'Delete',
+                      () => handleDeleteAsyncGame(asyncGame),
+                      { danger: true },
+                    )}
+                  </>
+                )}
+              </>
+            )}
+            {localRecord != null && (
+              <>
+                {renderCardAction('Play Again', () => handlePlayAgainLocal(localRecord))}
+                <View style={styles.homeMenuDivider} />
+                {renderCardAction(
+                  'Delete',
+                  () => handleDeleteLocalGame(localRecord),
+                  { danger: true },
+                )}
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+    );
+  };
+
+  const launchCampaign = (
+    campaignName: string,
+    slots: PlayerSlot[],
+    size: MapSize,
+    mode: 'passAndPlay' | 'asyncMultiplayer',
+    lobbyFill: 'invite' | 'open' = 'invite',
+  ) => {
+    const { width, height, planetCount } = computeMapDimensions(size, slots.length);
+    const playerName = (slots[0]?.name ?? '').trim() || DEFAULT_PLAYER_NAME;
+
+    if (mode === 'passAndPlay') {
       startNewGame({
         playerName,
         gameName: campaignName,
-        playerSlots,
-        mapSize,
+        playerSlots: slots,
+        mapSize: size,
         mapWidth: width,
         mapHeight: height,
         planetCount,
-        playMode,
+        playMode: mode,
       });
       navigation.navigate('Game');
       return;
     }
 
-    const allOpponentsAreAI = playerSlots.slice(1).every((slot) => slot.type === 'ai');
-    if (allOpponentsAreAI && playMode === 'asyncMultiplayer') {
+    const allOpponentsAreAI = slots.slice(1).every((slot) => slot.type === 'ai');
+    if (allOpponentsAreAI) {
       startNewGame({
         playerName,
         gameName: campaignName,
-        playerSlots,
-        mapSize,
+        playerSlots: slots,
+        mapSize: size,
         mapWidth: width,
         mapHeight: height,
         planetCount,
@@ -945,9 +1036,9 @@ export default function HomeScreen() {
     }
 
     const isOpenLobby =
-      playMode === 'asyncMultiplayer' &&
-      fillMode === 'open' &&
-      playerSlots.slice(1).some((slot) => slot.type === 'human');
+      mode === 'asyncMultiplayer' &&
+      lobbyFill === 'open' &&
+      slots.slice(1).some((slot) => slot.type === 'human');
 
     if (isOpenLobby) {
       const seed = Date.now();
@@ -957,8 +1048,8 @@ export default function HomeScreen() {
           await createGame({
             name: campaignName,
             playMode: 'async_multiplayer',
-            mapConfig: { mapSize, mapWidth: width, mapHeight: height, planetCount, seed },
-            playerSlots: playerSlots.map((slot, index) => ({
+            mapConfig: { mapSize: size, mapWidth: width, mapHeight: height, planetCount, seed },
+            playerSlots: slots.map((slot, index) => ({
               type: slot.type,
               userId: null,
               name:
@@ -978,13 +1069,11 @@ export default function HomeScreen() {
       return;
     }
 
-    // Async multiplayer invite path — generate the initial state client-side and create on the backend.
-    // The backend stores state_json directly so no engine script is required.
     const seed = Date.now();
     const config: GameConfig = {
       playerName,
-      playerSlots,
-      mapSize,
+      playerSlots: slots,
+      mapSize: size,
       mapWidth: width,
       mapHeight: height,
       planetCount,
@@ -998,8 +1087,8 @@ export default function HomeScreen() {
         const response = await createGame({
           name: campaignName,
           playMode: 'async_multiplayer',
-          mapConfig: { mapSize, mapWidth: width, mapHeight: height, planetCount, seed },
-          playerSlots: playerSlots.map((slot) => ({
+          mapConfig: { mapSize: size, mapWidth: width, mapHeight: height, planetCount, seed },
+          playerSlots: slots.map((slot) => ({
             type: slot.type,
             userId: slot.userId ?? null,
             name: (slot.name ?? '').trim() || (slot.type === 'ai' ? 'AI' : 'Player'),
@@ -1015,12 +1104,22 @@ export default function HomeScreen() {
           latestEvents: [],
         });
         setIsLaunching(false);
+        setIsCreating(false);
         navigation.navigate('Game');
-      } catch {
+      } catch (err) {
         setIsLaunching(false);
-        showAlert('Error', 'Could not create game. Check your connection and try again.');
+        const message =
+          err instanceof ApiError
+            ? err.message
+            : 'Could not create game. Check your connection and try again.';
+        showAlert('Error', message);
       }
     })();
+  };
+
+  const handleLaunch = () => {
+    const campaignName = resolveCampaignName(gameName, playerSlots, usesOpenLobbyName);
+    launchCampaign(campaignName, playerSlots, mapSize, playMode, fillMode);
   };
 
   const handleResume = (id: string) => {
@@ -1029,10 +1128,105 @@ export default function HomeScreen() {
   };
 
   const handleDeleteLocalGame = (record: GameRecord) => {
+    setCardMenu(null);
     showConfirm(
       'Delete Game',
       'Are you sure you want to delete this game? This cannot be undone.',
       () => deleteLocalGame(record.id),
+    );
+  };
+
+  const handlePlayAgainLocal = (record: GameRecord) => {
+    setCardMenu(null);
+    showConfirm(
+      'Play again?',
+      'Start a new game with the same players, map size, name, and type. The map will be randomized.',
+      () => {
+        const size = record.config.mapSize;
+        const slots = record.config.playerSlots;
+        const { width, height, planetCount } = computeMapDimensions(size, slots.length);
+        startNewGame({
+          playerName:
+            (slots[0]?.name ?? record.config.playerName ?? '').trim() ||
+            DEFAULT_PLAYER_NAME,
+          gameName: record.name,
+          playerSlots: slots,
+          mapSize: size,
+          mapWidth: width,
+          mapHeight: height,
+          planetCount,
+          playMode: record.config.playMode,
+        });
+        navigation.navigate('Game');
+      },
+    );
+  };
+
+  const handlePlayAgainAsync = (game: ApiGame) => {
+    setCardMenu(null);
+    if (currentUser == null) {
+      showAlert('Error', 'You need to be signed in to play again.');
+      return;
+    }
+    showConfirm(
+      'Play again?',
+      'Start a new game with the same players, map size, name, and type. The map will be randomized.',
+      () => {
+        const built = buildPlayAgainSlots(game, currentUser);
+        if ('error' in built) {
+          showAlert('Cannot play again', built.error);
+          return;
+        }
+        const size = resolveMapSize(game.mapConfig?.mapSize);
+        launchCampaign(game.name, built.slots, size, 'asyncMultiplayer', 'invite');
+      },
+    );
+  };
+
+  const handleForfeitAsyncGame = (game: ApiGame) => {
+    setCardMenu(null);
+    if (forfeitingGameId !== null) {
+      return;
+    }
+    showConfirm(
+      'Forfeit this game?',
+      'The AI will take over your empire. You leave this game until you tap Rejoin. You will not get turn alerts while sitting out.',
+      () => {
+        setForfeitingGameId(game.id);
+        void (async () => {
+          try {
+            if (!game.isMyTurn) {
+              await forfeitGame(game.id);
+              await refreshAsyncGames();
+              return;
+            }
+            const detail = await getGame(game.id);
+            if (
+              isLocalPlayerForfeited(detail, currentUser?.id, currentUser?.username) ||
+              detail.status !== 'in_progress'
+            ) {
+              await refreshAsyncGames();
+              return;
+            }
+            if (!detail.isMyTurn) {
+              await forfeitGame(detail.id);
+              await refreshAsyncGames();
+              return;
+            }
+            loadAsyncGame(detail);
+            await forfeitCurrentPlayer();
+            clearReturnHome();
+            await refreshAsyncGames();
+          } catch (err) {
+            showAlert(
+              'Could not forfeit',
+              err instanceof ApiError ? err.message : 'Try again.',
+            );
+          } finally {
+            setForfeitingGameId(null);
+          }
+        })();
+      },
     );
   };
 
@@ -1091,6 +1285,7 @@ export default function HomeScreen() {
   };
 
   const handleRejoinAsyncGame = (game: ApiGame) => {
+    setCardMenu(null);
     if (rejoiningGameId !== null) {
       return;
     }
@@ -1128,6 +1323,7 @@ export default function HomeScreen() {
   };
 
   const handleEditAsyncGame = (game: ApiGame) => {
+    setCardMenu(null);
     setEditingGameId(game.id);
     setEditingGameName(game.name);
   };
@@ -1157,6 +1353,7 @@ export default function HomeScreen() {
   };
 
   const handleDeleteAsyncGame = (game: ApiGame) => {
+    setCardMenu(null);
     showConfirm(
       'Delete Game',
       `Permanently delete "${game.name}"? This cannot be undone.`,
@@ -1331,7 +1528,7 @@ export default function HomeScreen() {
                             styles.friendPickerSelect,
                             pressed && styles.friendPickerSelectPressed,
                           ]}
-                          onPress={() => setFriendPickerSlotIndex(index)}
+                          onPress={() => openFriendPicker(index)}
                         >
                           <Text
                             style={
@@ -1570,7 +1767,12 @@ export default function HomeScreen() {
           >
             <Pressable style={styles.friendPickerModalCard} onPress={() => {}}>
               <View style={styles.friendPickerModalHeader}>
-                <Text style={styles.friendPickerModalTitle}>Pick a Friend</Text>
+                <View style={styles.friendPickerModalTitleRow}>
+                  <Text style={styles.friendPickerModalTitle}>Pick a Friend</Text>
+                  {friendsLoading ? (
+                    <ActivityIndicator size="small" color={COLORS.accent} />
+                  ) : null}
+                </View>
                 <Pressable
                   onPress={() => setFriendPickerSlotIndex(null)}
                   hitSlop={12}
@@ -1579,7 +1781,11 @@ export default function HomeScreen() {
                 </Pressable>
               </View>
 
-              {friends.length === 0 ? (
+              {friendsLoading && friends.length === 0 ? (
+                <View style={styles.friendPickerEmptyState}>
+                  <ActivityIndicator color={COLORS.accent} />
+                </View>
+              ) : friends.length === 0 ? (
                 <View style={styles.friendPickerEmptyState}>
                   <Text style={styles.friendPickerEmptyText}>
                     No friends yet — add friends first
@@ -1633,6 +1839,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       {renderHomeMenuDropdown()}
+      {renderGameCardMenu()}
       <View style={styles.lobbyContainer}>
         <ScrollView
           contentContainerStyle={styles.lobbyScrollContent}
@@ -1741,23 +1948,15 @@ export default function HomeScreen() {
                         loadingGameId !== null ||
                         deletingGameId !== null ||
                         editingGameId !== null ||
-                        rejoiningGameId !== null
+                        rejoiningGameId !== null ||
+                        forfeitingGameId !== null ||
+                        isLaunching
                       }
                       currentUserId={currentUser?.id}
                       currentUsername={currentUser?.username}
-                      canDelete={isCurrentUserGameCreator(
-                        game,
-                        currentUser?.id,
-                        currentUser?.username,
-                      )}
-                      isDeleting={deletingGameId === game.id}
-                      isRejoining={rejoiningGameId === game.id}
                       finalBattleViewedByGameId={finalBattleViewedByGameId}
                       onPress={() => handleOpenAsyncGame(game.id)}
-                      onEdit={() => handleEditAsyncGame(game)}
-                      onDelete={() => handleDeleteAsyncGame(game)}
-                      onChat={() => setSelectedChatGameId(game.id)}
-                      onRejoin={() => handleRejoinAsyncGame(game)}
+                      onOpenMenu={() => setCardMenu({ kind: 'async', id: game.id })}
                     />
                   ))}
                 </View>
@@ -1774,7 +1973,7 @@ export default function HomeScreen() {
                     key={record.id}
                     record={record}
                     onPress={() => handleResume(record.id)}
-                    onDelete={() => handleDeleteLocalGame(record)}
+                    onOpenMenu={() => setCardMenu({ kind: 'local', id: record.id })}
                   />
                 ))}
               </View>
@@ -1790,7 +1989,7 @@ export default function HomeScreen() {
                     key={record.id}
                     record={record}
                     onPress={() => handleResume(record.id)}
-                    onDelete={() => handleDeleteLocalGame(record)}
+                    onOpenMenu={() => setCardMenu({ kind: 'local', id: record.id })}
                   />
                 ))}
               </View>
@@ -1855,6 +2054,20 @@ export default function HomeScreen() {
         gameName={selectedChatGame?.name ?? ''}
         myUserId={currentUser?.id ?? 0}
       />
+      {(forfeitingGameId !== null || isLaunching) && (
+        <View style={styles.lobbyBusyOverlay} pointerEvents="auto">
+          <ActivityIndicator size="large" color={COLORS.accent} />
+          <Text style={styles.lobbyBusyOverlayText}>
+            {isLaunching
+              ? 'Creating game…'
+              : isResolvingAiTurns
+                ? 'The AI is taking over…'
+                : isSubmittingTurn
+                  ? 'Submitting turn…'
+                  : 'Sitting out…'}
+          </Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -2074,6 +2287,52 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'flex-end',
     gap: 8,
+  },
+  gameCardMenuButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: 'white',
+    minWidth: 36,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  gameCardMenuButtonPressed: {
+    opacity: 0.85,
+    borderColor: COLORS.accent,
+  },
+  gameCardMenuButtonText: {
+    color: COLORS.textMuted,
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  gameCardMenuDangerText: {
+    color: '#c0392b',
+  },
+  cardMenuModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  lobbyBusyOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(245, 240, 235, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    zIndex: 50,
+  },
+  lobbyBusyOverlayText: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   asyncGameCardActionsBottom: {
     marginTop: 'auto',
@@ -2493,6 +2752,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+  },
+  friendPickerModalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    marginRight: 12,
   },
   friendPickerModalTitle: {
     color: COLORS.text,

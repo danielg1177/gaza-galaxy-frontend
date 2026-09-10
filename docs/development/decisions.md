@@ -2,7 +2,22 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
-## 2026-09-10 — Scheduled movements live on GameState and fire when the owner becomes current
+## 2026-09-10 — Last remaining human can delete after others forfeit
+**Decision:** Command Center **Delete** and `DELETE /api/games/{id}` are allowed for the creator in any status, and also for the sole remaining sitting-in human when every other human member has forfeited. AI seats do not count. If two or more humans are still sitting in, only the creator can delete.
+**Rationale:** A friends match was stuck on the remaining player's Command Center after the host forfeited, because delete was creator-only and forfeit does not transfer host.
+**Alternatives considered:** Transferring `created_by_user_id` on forfeit (rejected — sit-out should not change host); showing Delete whenever anyone has forfeited (rejected — other sitting-in humans still own the campaign).
+
+## 2026-09-10 — Play Again copies settings only; non-host swaps with the creator
+**Decision:** Command Center **Play Again** calls the same create/launch path as Create Game with that campaign's name, map-size tier, play type, and human/AI roster. Seed, map, galaxy shape, AI names, and `state_json` are generated fresh. If the caller is not `created_by_user_id`, they swap seats with the original host so they are slot 0 (backend requires slot 0 = creator) and the old host takes their previous seat. Extra humans still must be accepted friends.
+**Rationale:** User asked for a rematch that is identical to filling Create Game, not a clone of the old board. Swapping host and caller is the only change when you rematch someone else's game.
+**Alternatives considered:** Prefilling the Create Game form and waiting for Launch (rejected — Play Again should start the match); copying `map_config` seed/dimensions (rejected — user asked for a randomized map of the same size); converting matchmaking rematches to a new open lobby (rejected — same *players*, so invite those user ids).
+
+## 2026-09-10 — Forfeit from Command Center; card actions live in a ⋮ menu
+**Decision:** Any sitting-in human can **Forfeit** from the Command Center card menu on an in-progress async game, not only from in-game ⋮ while it is their turn. Off-turn uses `POST /forfeit` only. On-turn loads the game and runs the existing AI-submit-then-forfeit path so `current_user_id` does not stall. Card ⋮ order is **Chat**, **Edit**, **Play Again**, **Forfeit**, **Delete** (Rejoin in the Forfeit slot when sitting out); unread chat badges the ⋮. FINISHED/victory styling stays on the card.
+**Rationale:** Face buttons crowded the cards. Sit-out should not require opening a game you cannot enter (waiting or already sitting out uses Rejoin). On-turn forfeit still has to submit an AI turn first (existing architecture).
+**Alternatives considered:** Leaving Chat as a face icon (rejected — user asked all action buttons into the menu); forfeit-only-on-your-turn from the lobby (rejected — user asked any member); skipping the AI submit when forfeiting on your turn (rejected — stalls the match).
+
+---## 2026-09-10 — Scheduled movements live on GameState and fire when the owner becomes current
 **Decision:** Standing fleet orders are `ScheduledMovement[]` on `GameState` (opaque `state_json`). They are upserted from the send-fleet modal when the ⟳ panel is open on Confirm. `resolveTurn` prunes any order whose origin is no longer owned by the scheduler (or whose owner is eliminated), then — after advancing to the next player and after round-wrap production/arrivals — dispatches that next player's remaining orders. Fixed counts send `min(amount, garrison)`; `'all'` sends the full garrison; 0 ships skips that turn but keeps the order. Recapture does not restore a pruned order.
 **Rationale:** Applying at the end of the previous player's resolution means the owner sees the fleets already in transit at turn start, matching “turns begin with the troops being sent.” Storing on `GameState` needs no backend schema or API change. Pruning on capture (not lazily on next apply) is required so taking the planet back does not resume the old conveyor.
 **Alternatives considered:** Queuing the standing order only when the owner presses End Turn (rejected — troops would still sit on the planet during the turn); one schedule per origin planet (rejected — multiple destinations from one world is useful; the map badge is still one icon); a new API table for schedules (rejected — engine state already serializes with the match).
@@ -66,7 +81,7 @@ This file records significant design decisions with rationale. Never delete entr
 ---
 
 ## 2026-08-19 — Any player can end the match; forfeit stays sit-out
-**Decision:** ⋮ **End Game** calls `POST /games/{id}/end` (any human member of an in-progress game). That sets `games.status = finished` with `winner_user_id` null and patches `state_json` so `status` is finished and `winnerId` is null. Pass-and-play / solo skip the API and `resetGame()` the local record. **Forfeit** remains AI sit-out. **Delete** remains creator-only row removal. The ⋮ menu lists **Exit Game** first and **End Game** last (under Forfeit). Confirmation copy: this will fully end the game for all players.
+**Decision:** ⋮ **End Game** calls `POST /games/{id}/end` (any human member of an in-progress game). That sets `games.status = finished` with `winner_user_id` null and patches `state_json` so `status` is finished and `winnerId` is null. Pass-and-play / solo skip the API and `resetGame()` the local record. **Forfeit** remains AI sit-out. ~~**Delete** remains creator-only row removal.~~ *(superseded 2026-09-10 — the last remaining sitting-in human may also delete after others forfeit.)* The ⋮ menu lists **Exit Game** first and **End Game** last (under Forfeit). Confirmation copy: this will fully end the game for all players.
 **Rationale:** Players asked to stop a match for everyone without sitting out or waiting for the creator to delete it. A null winner keeps Command Center cards as neutral **FINISHED** instead of victory/defeat.
 **Alternatives considered:** Reusing creator **Delete** (rejected — removes history and is creator-only); treating end as forfeit (rejected — the game would continue); requiring all players to agree (rejected — user asked for any player to fully end it).
 

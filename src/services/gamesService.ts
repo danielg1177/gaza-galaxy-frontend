@@ -213,6 +213,8 @@ interface GameDetailResponse {
   game: {
     id: number;
     name: string;
+    created_by_user_id?: number | string;
+    creator_id?: number | string;
     status: ApiGameRaw['status'];
     play_mode: ApiGameRaw['play_mode'];
     round_number: number;
@@ -267,7 +269,7 @@ function toOptionalUserId(value: unknown): number | undefined {
   return Number.isFinite(id) ? id : undefined;
 }
 
-/** True when the authenticated user created this game (for delete UI). */
+/** True when the authenticated user created this game (for edit / host delete UI). */
 export function isCurrentUserGameCreator(
   game: ApiGame,
   userId: number | undefined,
@@ -306,6 +308,38 @@ export function isCurrentUserGameCreator(
     ) {
       return true;
     }
+  }
+
+  return false;
+}
+
+/** True when the user may delete this async game (creator, or sole sitting-in human). */
+export function canDeleteAsyncGame(
+  game: ApiGame,
+  userId: number | undefined,
+  username?: string,
+): boolean {
+  if (isCurrentUserGameCreator(game, userId, username)) {
+    return true;
+  }
+
+  const sittingInHumans = game.players.filter(
+    (player) => !player.isAi && player.userId != null && player.isForfeited !== true,
+  );
+  if (sittingInHumans.length !== 1) {
+    return false;
+  }
+
+  const remaining = sittingInHumans[0];
+  if (userId != null && remaining.userId === Number(userId)) {
+    return true;
+  }
+  if (
+    username != null &&
+    username.trim() !== '' &&
+    remaining.inGameName.trim().toLowerCase() === username.trim().toLowerCase()
+  ) {
+    return true;
   }
 
   return false;
@@ -371,6 +405,8 @@ function mapGameDetail(data: GameDetailResponse): ApiGameDetail {
   const base = mapGame({
     id: game.id,
     name: game.name,
+    created_by_user_id: game.created_by_user_id,
+    creator_id: game.creator_id,
     status: game.status,
     play_mode: game.play_mode,
     alert_state: data.alert_state,

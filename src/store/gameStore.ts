@@ -187,7 +187,7 @@ export interface GameStore {
   seedQueuedOrdersFromSchedules: () => void;
   endTurn: () => void;
   advanceStagedAiTurn: () => void;
-  forfeitCurrentPlayer: () => void;
+  forfeitCurrentPlayer: () => Promise<void>;
   rejoinFromForfeit: () => void;
   letAiTakeForfeitTurn: (dontAskAgain: boolean) => void;
   dismissCommanderStatusNotice: () => void;
@@ -839,10 +839,10 @@ function runAsyncForfeitTurn(
   set: (partial: Partial<GameStore>) => void,
   record: GameRecord,
   playerId: string,
-): void {
+): Promise<void> {
   const asyncGameId = record.asyncGameId;
   if (asyncGameId == null) {
-    return;
+    return Promise.resolve();
   }
 
   const storeSnapshot = {
@@ -888,110 +888,116 @@ function runAsyncForfeitTurn(
     });
   };
 
-  setTimeout(() => {
-    const latest = get().getActiveRecord();
-    if (latest === null || latest.id !== record.id || latest.asyncGameId == null) {
-      set({ isResolvingAiTurns: false });
-      return;
-    }
-
-    const sittingOut = markHumanSittingOut(latest.state, playerId);
-    const aiInput = computeAiTurn(sittingOut, playerId);
-
-    let nextState: GameState;
-    let events: TurnEvent[];
-    try {
-      const aiResult = resolveTurn(sittingOut, aiInput);
-      const continued = runAiTurnsUntilHuman(aiResult);
-      nextState = continued.state;
-      events = continued.events;
-    } catch (err) {
-      console.error('[forfeit] async AI turn failed:', err);
-      restorePreSubmitSnapshot();
-      showAlert(
-        'Turn Failed',
-        err instanceof Error
-          ? err.message
-          : 'Could not let the AI take this turn. Try again.',
-      );
-      return;
-    }
-
-    const knockoutHumanIds = findNewlyEliminatedHumanIds(
-      events,
-      nextState.players,
-    );
-    const immediateKnockouts = knockoutHumanIds.filter((id) => id !== playerId);
-    let finalState = nextState;
-    if (immediateKnockouts.length > 0 && nextState.status === 'active') {
-      finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
-    }
-
-    set({
-      games: get().games.map((g) =>
-        g.id === record.id
-          ? {
-              ...g,
-              state: finalState,
-              pendingTurnReport: events,
-              pendingTurnReportAcknowledged: false,
-            }
-          : g,
-      ),
-      queuedOrders: [],
-      selectedPlanetId: null,
-      pendingFleet: null,
-      turnReport: events,
-      isResolvingAiTurns: false,
-      isSubmittingTurn: true,
-    });
-
-    void (async () => {
-      try {
-        await submitTurn(asyncGameId, {
-          actions: aiInput.actions,
-          resultingState: finalState,
-          turnNumber: preTurnNumber,
-          roundNumber: preRoundNumber,
-          events,
-        });
-        await registerSitOutOnServer(
-          asyncGameId,
-          finalState.status === 'finished',
-        );
-        get().resetGame();
-        set({ isSubmittingTurn: false, shouldReturnHome: true });
-      } catch (err) {
-        console.error('[forfeit] submitTurn failed:', err);
-        restorePreSubmitSnapshot();
-
-        const alertBody =
-          err instanceof ApiError
-            ? `Server returned ${err.status}: ${err.message}`
-            : 'Could not submit your turn. Your moves were not saved — try again.';
-
-        if (
-          err instanceof ApiError &&
-          (err.status === 409 || err.status === 403 || err.status === 422)
-        ) {
-          try {
-            const fresh = await getGame(asyncGameId);
-            get().loadAsyncGame(fresh);
-            if (!fresh.isMyTurn) {
-              set({ shouldReturnHome: true });
-            }
-          } catch (reloadErr) {
-            console.error(
-              '[forfeit] Failed to reload game after submit error:',
-              reloadErr,
-            );
-          }
-        }
-
-        showAlert('Submit Failed', alertBody);
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const latest = get().getActiveRecord();
+      if (latest === null || latest.id !== record.id || latest.asyncGameId == null) {
+        set({ isResolvingAiTurns: false });
+        resolve();
+        return;
       }
-    })();
-  }, 0);
+
+      const sittingOut = markHumanSittingOut(latest.state, playerId);
+      const aiInput = computeAiTurn(sittingOut, playerId);
+
+      let nextState: GameState;
+      let events: TurnEvent[];
+      try {
+        const aiResult = resolveTurn(sittingOut, aiInput);
+        const continued = runAiTurnsUntilHuman(aiResult);
+        nextState = continued.state;
+        events = continued.events;
+      } catch (err) {
+        console.error('[forfeit] async AI turn failed:', err);
+        restorePreSubmitSnapshot();
+        showAlert(
+          'Turn Failed',
+          err instanceof Error
+            ? err.message
+            : 'Could not let the AI take this turn. Try again.',
+        );
+        resolve();
+        return;
+      }
+
+      const knockoutHumanIds = findNewlyEliminatedHumanIds(
+        events,
+        nextState.players,
+      );
+      const immediateKnockouts = knockoutHumanIds.filter((id) => id !== playerId);
+      let finalState = nextState;
+      if (immediateKnockouts.length > 0 && nextState.status === 'active') {
+        finalState = { ...nextState, currentPlayerId: immediateKnockouts[0] };
+      }
+
+      set({
+        games: get().games.map((g) =>
+          g.id === record.id
+            ? {
+                ...g,
+                state: finalState,
+                pendingTurnReport: events,
+                pendingTurnReportAcknowledged: false,
+              }
+            : g,
+        ),
+        queuedOrders: [],
+        selectedPlanetId: null,
+        pendingFleet: null,
+        turnReport: events,
+        isResolvingAiTurns: false,
+        isSubmittingTurn: true,
+      });
+
+      void (async () => {
+        try {
+          await submitTurn(asyncGameId, {
+            actions: aiInput.actions,
+            resultingState: finalState,
+            turnNumber: preTurnNumber,
+            roundNumber: preRoundNumber,
+            events,
+          });
+          await registerSitOutOnServer(
+            asyncGameId,
+            finalState.status === 'finished',
+          );
+          get().resetGame();
+          set({ isSubmittingTurn: false, shouldReturnHome: true });
+        } catch (err) {
+          console.error('[forfeit] submitTurn failed:', err);
+          restorePreSubmitSnapshot();
+
+          const alertBody =
+            err instanceof ApiError
+              ? `Server returned ${err.status}: ${err.message}`
+              : 'Could not submit your turn. Your moves were not saved — try again.';
+
+          if (
+            err instanceof ApiError &&
+            (err.status === 409 || err.status === 403 || err.status === 422)
+          ) {
+            try {
+              const fresh = await getGame(asyncGameId);
+              get().loadAsyncGame(fresh);
+              if (!fresh.isMyTurn) {
+                set({ shouldReturnHome: true });
+              }
+            } catch (reloadErr) {
+              console.error(
+                '[forfeit] Failed to reload game after submit error:',
+                reloadErr,
+              );
+            }
+          }
+
+          showAlert('Submit Failed', alertBody);
+        } finally {
+          resolve();
+        }
+      })();
+    }, 0);
+  });
 }
 
 /**
@@ -2294,7 +2300,7 @@ export const useGameStore = create<GameStore>()(
     get().seedQueuedOrdersFromSchedules();
   },
 
-  forfeitCurrentPlayer: () => {
+  forfeitCurrentPlayer: async () => {
     const record = get().getActiveRecord();
     if (record === null || record.state.status !== 'active') {
       return;
@@ -2323,7 +2329,7 @@ export const useGameStore = create<GameStore>()(
         );
         return;
       }
-      runAsyncForfeitTurn(get, set, record, currentPlayer.id);
+      await runAsyncForfeitTurn(get, set, record, currentPlayer.id);
       return;
     }
 

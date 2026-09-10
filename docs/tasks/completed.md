@@ -1,5 +1,29 @@
 # Completed Tasks
 
+## Last remaining human can delete after forfeit
+**Completed:** 2026-09-10
+**Files modified:** `src/services/gamesService.ts`, `src/screens/HomeScreen.tsx`, backend `Game.php`, `GameController.php`, docs
+**Notes:** If the host forfeits a friends match, the other sitting-in human sees **Delete** and `DELETE /games/{id}` succeeds. Creator delete is unchanged. Two or more sitting-in humans still means creator-only delete.
+
+---
+## Create Game friend picker refreshes on open
+**Completed:** 2026-09-10
+**Files modified:** `src/screens/HomeScreen.tsx`, `docs/systems/multiplayer.md`, `docs/development/current-state.md`, `docs/tasks/completed.md`
+**Notes:** Invite friends "Select a friend" re-fetches `GET /friends` every time the picker opens. Cached list stays visible during refresh; empty first load shows a spinner instead of "No friends yet". Failed refresh keeps the last successful list.
+
+---
+## Command Center play again, forfeit, and card ⋮ menu
+**Completed:** 2026-09-10
+**Files modified:** `src/screens/HomeScreen.tsx`, `src/services/playAgain.ts`, `src/services/gamesService.ts`, `src/store/gameStore.ts`, backend `GameController.php`, docs
+**Notes:** Per-game ⋮ menu replaces face action buttons. **Play Again** launches a new game with the same name, map-size tier, type, and human/AI roster (new seed/map; AI names regenerate). Non-host rematches swap the caller into the original creator's seat. **Forfeit** is available to any sitting-in member of an in-progress async game from Command Center (off-turn API; on-turn AI submit then forfeit). List API now returns `created_by_user_id` and turn-order-sorted players.
+
+---
+## Five more galaxy shapes
+**Completed:** 2026-09-10
+**Files modified:** `src/game/types.ts`, `src/game/mapGenerator.ts`, `docs/systems/map-generation.md`, `docs/development/current-state.md`, `docs/tasks/completed.md`, `docs/backend-build-instructions.md`, backend `docs/backend/validation.md`, `docs/backend/game-state.md`, `docs/backend-build-instructions.md`
+**Notes:** Added `coil`, `barred`, `hourglass`, `lanes`, and `asterisk` to the seeded picker. Same constrained-growth + scattered fallback as the other new layouts.
+
+---
 ## Scheduled troop movements every turn
 **Completed:** 2026-09-10
 **Files modified:** `src/game/types.ts`, `src/game/turnEngine.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, `docs/systems/movement.md`, `docs/systems/turn-engine.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/completed.md`, `docs/gameplay/rules.md`, backend `docs/backend/game-state.md`, `docs/backend/turn-engine.md`

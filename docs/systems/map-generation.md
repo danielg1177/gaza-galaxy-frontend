@@ -71,6 +71,11 @@ The shape controls the planet placement algorithm used.
 | `broken_ring` | Annular band with 2–3 seeded angular gaps (gates ~22°–32°); connectivity fills the gaps with 3-lane bridges |
 | `crossroads` | Two crossing diameters (X) or three rays from the centre (Y); junction is the contested prize |
 | `clover` | Three organic lobes equally spaced around a small hub; more regular than `cluster` |
+| `coil` | Single logarithmic arm winding out from the centre (nautilus); distinct from two-arm `spiral` |
+| `barred` | Thick central bar with two short arms off the ends (barred-spiral galaxy) |
+| `hourglass` | Two overlapping lobes with a narrow waist (figure-8); distinct from separated `binary` cores |
+| `lanes` | Two or three parallel rivers of planets; distinct from the single `ribbon` |
+| `asterisk` | Four or five rays from a small hub; distinct from `crossroads` (X or Y) |
 
 ### Minimum Distance Rule
 ```
@@ -169,10 +174,11 @@ Opponent **gold** and **researchPoints** remain visible in the player list for n
 - What is the target planet count range per player count?
 
 ## Changelog
+- 2026-09-10: Five more galaxy shapes — `coil` (single winding arm), `barred` (bar + two arms), `hourglass` (figure-8), `lanes` (2–3 parallel rivers), `asterisk` (4–5 rays).
 - 2026-09-04: Three more galaxy shapes — `broken_ring` (ring with gates), `crossroads` (X or Y junction), `clover` (three lobes + hub).
 - 2026-09-04: Connectivity bridges are 3 lanes wide (centre + two flanks, 3-click spacing) instead of a single-file line, so corridors can hold two or three planets across.
 - 2026-09-04: Constrained shapes (`crescent`, `binary`, `ribbon`, `halo`) spill leftover planets with unconstrained organic growth when the region fills, and `generateMap` falls back to `scattered` if a shape still fails spacing — launch no longer throws after 25 attempts.
-- 2026-09-04: Four new galaxy shapes — `crescent` (open horseshoe), `binary` (twin cores + corridor), `ribbon` (winding S-curve), `halo` (double ring with void). Later the same day: `broken_ring`, `crossroads`, `clover`. `GalaxyShape` includes all twelve picker values.
+- 2026-09-04: Four new galaxy shapes — `crescent` (open horseshoe), `binary` (twin cores + corridor), `ribbon` (winding S-curve), `halo` (double ring with void). Later: `broken_ring`, `crossroads`, `clover`, then `coil`, `barred`, `hourglass`, `lanes`, `asterisk`. `GalaxyShape` includes all seventeen picker values.
 - 2026-06-04: `arms` shape removed; `cluster` (3–5 Gaussian blobs) and `spiral` (2 logarithmic curved arms) added; `GalaxyShape` type updated to `'scattered' | 'dense_core' | 'ring' | 'cluster' | 'spiral'`.
 - 2026-05-31: Task 171 fix — `MIN_PLANET_DISTANCE` now enforced in **final grid coordinates** after uniform normalize + `enforceMinimumSpacing`; connectivity bridge forced-placement removed; fixes sub-2.5 pairs (e.g. 1.4 clicks) caused by normalize compression and integer rounding.
 - 2026-05-31: Task 171 — `MIN_PLANET_DISTANCE` 4→2.5; `growthPosition` parent offset `4 + rng() * 7` → `2.5 + rng() * 7` ([2.5, 9.5] clicks, mean ~6.0); ~1.5 clicks closer on average; algorithms unchanged.

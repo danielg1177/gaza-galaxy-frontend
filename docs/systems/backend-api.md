@@ -325,6 +325,7 @@ Auth required.
   "games": [{
     "id": 1,
     "name": "The Final War",
+    "created_by_user_id": 1,
     "status": "active",
     "play_mode": "async_multiplayer",
     "alert_state": "your_turn",
@@ -448,20 +449,20 @@ Auth required. Caller must be the creator.
 ---
 
 #### `DELETE /api/games/{id}`
-Auth required. Caller must be in `game_players` for the game (else 403 `{ "message": "Forbidden" }`). Caller must be the creator (`created_by_user_id` / `creator_id` = me; else 403 `{ "message": "Only the creator can delete this game" }`). No status check — deletion allowed in any game status.
+Auth required. Caller must be in `game_players` for the game (else 403 `{ "message": "Forbidden" }`). Allowed if the caller is the creator (`created_by_user_id` = me) **or** the sole remaining sitting-in human (every other human member has `is_forfeited`; AI slots do not count). Else 403 `{ "message": "Only the creator or the last remaining human player can delete this game" }`. No status check — deletion allowed in any game status.
 
 **Logic:** Delete game (cascades to game_players, game_invites, turns).
 
 **Response (200):** `{ "message": "Game deleted" }`
 
-**Client:** `gamesService.deleteGame(id)`; Command Center removes the game from list state and drops any local Zustand `GameRecord` with matching `asyncGameId`.
+**Client:** `gamesService.deleteGame(id)`; Command Center shows **Delete** when `canDeleteAsyncGame` is true (creator, or only sitting-in human left after others forfeit). Removes the game from list state and drops any local Zustand `GameRecord` with matching `asyncGameId`.
 
-**List/detail field:** `GET /api/games` (and game payloads) should include `created_by_user_id` so the client can show delete only to the creator.
+**List/detail field:** `GET /api/games` (and game payloads) include `created_by_user_id` and per-player `is_forfeited` so the client can show delete to the creator or the last remaining human.
 
 ---
 
 #### `POST /api/games/{id}/end`
-Auth required. Any human member of an in-progress game (not creator-only). Distinct from **Forfeit** (sit-out; game continues) and **Delete** (creator-only row removal).
+Auth required. Any human member of an in-progress game (not creator-only). Distinct from **Forfeit** (sit-out; game continues) and **Delete** (row removal by the creator or the last remaining sitting-in human).
 
 **Logic:**
 1. Verify caller is a human `game_players` member. 403 if not.
@@ -653,6 +654,7 @@ All API responses should use a consistent envelope. Errors:
 - The Sanctum token is stored in the client's AsyncStorage and persists across app sessions (no need to re-login)
 
 ## Changelog
+- 2026-09-10: `GET /api/games` (and create/show/start payloads) include `created_by_user_id`; list players ordered by `turn_order`. Command Center Play Again / Forfeit use existing create and forfeit endpoints.
 - 2026-08-26: Chat GET returns `can_send` / `cannot_send_reason` so the composer can be replaced when every other remaining human is blocked.
 - 2026-08-26: Phase 78–79 — `DELETE /api/auth/account`; block/unblock; message report/hide.
 - 2026-08-25: Phase 75 — `PATCH /api/auth/username` and `PATCH /api/auth/password`; client Settings screen via `authStore.updateUsername` / `updatePassword`.
