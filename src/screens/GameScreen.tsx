@@ -149,6 +149,17 @@ function RepeatIcon({ color, size = 18 }: { color: string; size?: number }) {
   );
 }
 
+function WrenchIcon({ color, size = 18 }: { color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
 type CombatTurnEvent = Extract<TurnEvent, { kind: 'combat' }>;
 type MultiwayCombatTurnEvent = Extract<TurnEvent, { kind: 'multiway_combat' }>;
 type HumanCombatTurnEvent = CombatTurnEvent | MultiwayCombatTurnEvent;
@@ -909,10 +920,11 @@ const SHIP_COUNT_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANE
 const SHIP_COUNT_ABOVE_GAP = 0;
 const SHIP_COUNT_RIGHT_INSET = Math.max(1, Math.round((3 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_BATTLE_ICON_FONT_SIZE = Math.max(2, Math.round((7 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
-const SCHEDULE_BADGE_SIZE = Math.max(
+const BUILD_BADGE_SIZE = Math.max(
   6,
   Math.round((11 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE * 0.6),
 );
+const BUILD_BADGE_COLOR = '#3498db';
 const SCHEDULE_BADGE_COLOR = '#e67e22';
 const SCHEDULE_ROUTE_START_GAP = PLANET_SIZE / 2 + 2;
 const SCHEDULE_ROUTE_END_GAP = PLANET_SIZE / 2 + 6;
@@ -1475,7 +1487,7 @@ const PlanetNode = React.memo(function PlanetNode({
   isBoxSelected,
   adjustedShipCount,
   hadBattleThisTurn,
-  hasScheduledMovement,
+  hasQueuedBuildThisTurn,
 }: {
   planet: Planet;
   color: string;
@@ -1485,7 +1497,7 @@ const PlanetNode = React.memo(function PlanetNode({
   isBoxSelected: boolean;
   adjustedShipCount: number;
   hadBattleThisTurn: boolean;
-  hasScheduledMovement: boolean;
+  hasQueuedBuildThisTurn: boolean;
 }) {
   const highlighted = isSelected || isDragOrigin;
   const pulse = useRef(new RNAnimated.Value(0)).current;
@@ -1602,20 +1614,20 @@ const PlanetNode = React.memo(function PlanetNode({
           {adjustedShipCount}
         </Text>
       )}
-      {isOwned && hasScheduledMovement && (
+      {isOwned && hasQueuedBuildThisTurn && (
         <View
           style={[
-            styles.planetScheduleBadge,
+            styles.planetBuildBadge,
             {
-              left: circleLeft - SCHEDULE_BADGE_SIZE * 0.55,
-              top: circleTop - SCHEDULE_BADGE_SIZE * 0.55,
-              width: SCHEDULE_BADGE_SIZE,
-              height: SCHEDULE_BADGE_SIZE,
-              borderRadius: SCHEDULE_BADGE_SIZE / 2,
+              left: circleLeft - BUILD_BADGE_SIZE * 0.55,
+              top: circleTop - BUILD_BADGE_SIZE * 0.55,
+              width: BUILD_BADGE_SIZE,
+              height: BUILD_BADGE_SIZE,
+              borderRadius: BUILD_BADGE_SIZE / 2,
             },
           ]}
         >
-          <RepeatIcon color="#ffffff" size={Math.max(7, SCHEDULE_BADGE_SIZE - 4)} />
+          <WrenchIcon color="#ffffff" size={Math.max(7, BUILD_BADGE_SIZE - 4)} />
         </View>
       )}
       {hadBattleThisTurn && (
@@ -2327,14 +2339,6 @@ export default function GameScreen() {
   );
 
   const scheduledMovements = gameState?.scheduledMovements ?? [];
-
-  const scheduledOriginPlanetIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const movement of scheduledMovements) {
-      ids.add(movement.fromPlanetId);
-    }
-    return ids;
-  }, [scheduledMovements]);
 
   const existingScheduleForPending = useMemo((): ScheduledMovement | undefined => {
     if (pendingFleet === null) {
@@ -4341,7 +4345,9 @@ export default function GameScreen() {
                   hadBattleThisTurn={
                     battlePlanetKeys.has(planet.id) || battlePlanetKeys.has(planet.name)
                   }
-                  hasScheduledMovement={scheduledOriginPlanetIds.has(planet.id)}
+                  hasQueuedBuildThisTurn={planet.buildings.some(
+                    (building) => building.builtOnRound === currentRound,
+                  )}
                 />
               ))}
               <FleetLayer
@@ -5965,9 +5971,9 @@ const styles = StyleSheet.create({
     fontSize: PLANET_BATTLE_ICON_FONT_SIZE,
     lineHeight: PLANET_BATTLE_ICON_FONT_SIZE + 2,
   },
-  planetScheduleBadge: {
+  planetBuildBadge: {
     position: 'absolute',
-    backgroundColor: SCHEDULE_BADGE_COLOR,
+    backgroundColor: BUILD_BADGE_COLOR,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,

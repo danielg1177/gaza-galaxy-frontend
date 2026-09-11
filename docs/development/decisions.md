@@ -2,6 +2,11 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-09-11 — Same-turn build wrench; scheduled origins use dotted lines only
+**Decision:** The map no longer draws an orange ⟳ badge on planets with a scheduled troop movement. Those routes already use orange dotted lines. That top-left slot instead shows a blue wrench badge on owned planets that have at least one building with `builtOnRound === currentRound`.
+**Rationale:** The badge duplicated the dotted-line schedule cue. A same-turn build is otherwise only visible after opening the planet modal. Each player has one turn per round, so `builtOnRound === currentRound` is the queued-this-turn signal and clears after round wrap (or cancel) without a new engine field.
+**Alternatives considered:** Tracking `builtOnTurn` separately (rejected — round already matches a player's turn); leaving the ⟳ badge alongside the wrench (rejected — user asked to drop it).
+
 ## 2026-09-10 — Last remaining human can delete after others forfeit
 **Decision:** Command Center **Delete** and `DELETE /api/games/{id}` are allowed for the creator in any status, and also for the sole remaining sitting-in human when every other human member has forfeited. AI seats do not count. If two or more humans are still sitting in, only the creator can delete.
 **Rationale:** A friends match was stuck on the remaining player's Command Center after the host forfeited, because delete was creator-only and forfeit does not transfer host.
@@ -20,7 +25,8 @@ This file records significant design decisions with rationale. Never delete entr
 ---## 2026-09-10 — Scheduled movements live on GameState and fire when the owner becomes current
 **Decision:** Standing fleet orders are `ScheduledMovement[]` on `GameState` (opaque `state_json`). They are upserted from the send-fleet modal when the ⟳ panel is open on Confirm. `resolveTurn` prunes any order whose origin is no longer owned by the scheduler (or whose owner is eliminated), then — after advancing to the next player and after round-wrap production/arrivals — dispatches that next player's remaining orders. Fixed counts send `min(amount, garrison)`; `'all'` sends the full garrison; 0 ships skips that turn but keeps the order. Recapture does not restore a pruned order.
 **Rationale:** Applying at the end of the previous player's resolution means the owner sees the fleets already in transit at turn start, matching “turns begin with the troops being sent.” Storing on `GameState` needs no backend schema or API change. Pruning on capture (not lazily on next apply) is required so taking the planet back does not resume the old conveyor.
-**Alternatives considered:** Queuing the standing order only when the owner presses End Turn (rejected — troops would still sit on the planet during the turn); one schedule per origin planet (rejected — multiple destinations from one world is useful; the map badge is still one icon); a new API table for schedules (rejected — engine state already serializes with the match).
+**Alternatives considered:** Queuing the standing order only when the owner presses End Turn (rejected — troops would still sit on the planet during the turn); one schedule per origin planet (rejected — multiple destinations from one world is useful; ~~the map badge is still one icon~~ the origin is still one planet); a new API table for schedules (rejected — engine state already serializes with the match).
+**Update (2026-09-11):** The origin ⟳ map badge was removed; orange dotted route lines are the schedule indicator. The top-left planet slot is now the same-turn build wrench.
 
 ---
 

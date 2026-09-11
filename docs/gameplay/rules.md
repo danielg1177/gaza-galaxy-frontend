@@ -47,6 +47,8 @@ Research speed is NOT affected by planet class.
 - Increases tech level progression
 - Tech level improves combat effectiveness (and possibly movement speed — TBD)
 
+Owned planets with a building queued this turn show a blue wrench on the map until that player's next turn.
+
 ## Fleet Movement
 - Players dispatch fleets from one planet to another
 - Transit takes turns proportional to distance (exact formula TBD)
@@ -64,6 +66,7 @@ Research speed is NOT affected by planet class.
 - Last player with an un-captured home planet wins
 
 ## Changelog
+- 2026-09-11: Same-turn build wrench on owned planets; scheduled repeating orders use dotted map routes (planet ⟳ badge removed).
 - 2026-09-10: Scheduled repeating fleet orders (fixed count or all remaining ships; cancel on origin capture).
 - 2026-06-05: Added Fog of War section; removed standalone Home Planets section (covered under Objective, Elimination, and Victory).
 - 2026-05-27: Initial rules documented from project-spec.md.

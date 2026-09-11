@@ -106,6 +106,9 @@ export default function RulesScreen() {
               Produces ships and/or gold. You control the production split with an allocation slider—adjust it to balance military power (ships) with economic growth (gold). The amount produced depends on your planet's class.
             </Text>
           </View>
+          <Text style={styles.bodyText}>
+            A blue wrench appears next to owned planets you built on this turn. It disappears at the start of your next turn.
+          </Text>
 
           <Text style={styles.sliderExampleTitle}>Production Slider Example</Text>
           <Text style={styles.sliderExampleSubtitle}>Class A Planet · 20 Factories</Text>

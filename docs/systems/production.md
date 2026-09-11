@@ -200,8 +200,13 @@ When a planet changes owner in `combatEngine.resolveArrival` (neutral capture or
 
 `queueBuildOrder(planetId, buildingType)` in `gameStore` returns `'ok' | 'insufficient_gold' | 'no_slots' | 'not_owner'`. The planet modal surfaces **Not enough gold** when a chip tap is rejected for insufficient funds; full-slot rejections remain handled by disabled build chips (Task 50).
 
+### Same-turn build map marker
+
+Owned planets with at least one building where `builtOnRound === currentRound` show a small blue wrench badge at the **top-left** of the planet node (`GameScreen` `PlanetNode`). Each player has one turn per round, so the marker is a same-turn reminder: it appears as soon as a factory or research lab is queued and disappears on the owner's next turn (after round wrap, those buildings are active: `builtOnRound < currentRound`). Cancelling the last same-round building on that planet removes the badge immediately. Fog of war strips `buildings` on non-owned planets, so opponents never see the wrench.
+
 ## Changelog
 
+- 2026-09-11: Map shows a blue wrench on owned planets with a same-round queued build (`builtOnRound === currentRound`); gone next turn after round wrap / cancel.
 - 2026-09-02: Factory troop and gold output now round to the nearest tenth (`roundToTenth` / `computeFactoryOutputs`) before the troop accumulator and gold floor, matching the slider label so `4.0 troops/turn` yields 4 troops rather than flooring an unrounded `3.96` to 3.
 - 2026-06-01: Removed all `troop_produced` UI — no Battle Report cards or ⋮ Report Production section; store no longer routes the event to per-player turn reports.
 - 2026-06-01: ~~Bug fix — `troop_produced` routed to planet owner only in `playerTurnReportByPlayerId`.~~ *(superseded — UI removed entirely)*

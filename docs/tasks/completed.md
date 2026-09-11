@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Same-turn build wrench; scheduled-origin planet badge removed
+**Completed:** 2026-09-11
+**Files modified:** `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, docs
+**Notes:** Owned planets with a building queued this turn (`builtOnRound === currentRound`) show a blue wrench badge at the top-left of the map node. The marker is gone on the owner's next turn (round wrap activates the building) or when the last same-round build on that planet is cancelled. The orange ⟳ badge on scheduled-origin planets was removed; orange dotted route lines remain.
+
+---
 ## Last remaining human can delete after forfeit
 **Completed:** 2026-09-10
 **Files modified:** `src/services/gamesService.ts`, `src/screens/HomeScreen.tsx`, backend `Game.php`, `GameController.php`, docs
@@ -27,7 +33,7 @@
 ## Scheduled troop movements every turn
 **Completed:** 2026-09-10
 **Files modified:** `src/game/types.ts`, `src/game/turnEngine.ts`, `src/store/gameStore.ts`, `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, `docs/systems/movement.md`, `docs/systems/turn-engine.md`, `docs/development/current-state.md`, `docs/development/decisions.md`, `docs/tasks/completed.md`, `docs/gameplay/rules.md`, backend `docs/backend/game-state.md`, `docs/backend/turn-engine.md`
-**Notes:** Send Fleet modal ⟳ toggles every-turn settings (fixed count defaulting to this send, or All). `GameState.scheduledMovements` persist in `state_json`. Engine applies the next player's standing orders after advancing `currentPlayerId` (and after round-wrap production) so fleets are already in transit when the turn opens. Origin capture or owner elimination cancels immediately; recapture does not restore. Short garrison sends `min(requested, available)`. Map shows an orange ⟳ badge on owned origin planets. Planet detail and the expanded modal can cancel a schedule.
+**Notes:** Send Fleet modal ⟳ toggles every-turn settings (fixed count defaulting to this send, or All). `GameState.scheduledMovements` persist in `state_json`. Engine applies the next player's standing orders after advancing `currentPlayerId` (and after round-wrap production) so fleets are already in transit when the turn opens. Origin capture or owner elimination cancels immediately; recapture does not restore. Short garrison sends `min(requested, available)`. ~~Map shows an orange ⟳ badge on owned origin planets.~~ *(removed 2026-09-11 — orange dotted route lines remain)*. Planet detail and the expanded modal can cancel a schedule.
 
 ---
 ## Four new galaxy shapes
