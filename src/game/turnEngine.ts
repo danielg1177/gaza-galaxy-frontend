@@ -249,6 +249,17 @@ export function resolveScheduledShipCount(
   return Math.max(0, Math.min(Math.floor(amount), available));
 }
 
+/** Fixed counts dispatch before `'all'` so All sends whatever is left on the origin. */
+function sortScheduledMovementsForDispatch(
+  movements: ScheduledMovement[],
+): ScheduledMovement[] {
+  return [...movements].sort((a, b) => {
+    const aAll = a.amount === 'all' ? 1 : 0;
+    const bAll = b.amount === 'all' ? 1 : 0;
+    return aAll - bAll;
+  });
+}
+
 /**
  * Drops standing orders whose origin is no longer owned by the scheduler,
  * whose owner has been eliminated, or whose planets no longer exist.
@@ -285,11 +296,13 @@ export function collectScheduledQueueOrders(
 ): Array<{ fromPlanetId: string; toPlanetId: string; shipCount: number }> {
   const player = state.players.find((p) => p.id === playerId);
   const range = effectiveRange(player?.techLevel ?? 0);
-  const movements = pruneScheduledMovements(
-    state.scheduledMovements ?? [],
-    state.map,
-    state.players,
-  ).filter((movement) => movement.ownerId === playerId);
+  const movements = sortScheduledMovementsForDispatch(
+    pruneScheduledMovements(
+      state.scheduledMovements ?? [],
+      state.map,
+      state.players,
+    ).filter((movement) => movement.ownerId === playerId),
+  );
 
   const occupied = new Set(
     existingQueued.map((order) => `${order.fromPlanetId}:${order.toPlanetId}`),
@@ -395,7 +408,9 @@ function applyScheduledMovementsForPlayer(
 ): { map: GameMap; fleets: Fleet[] } {
   let nextMap = map;
   let nextFleets = fleets;
-  const owned = movements.filter((movement) => movement.ownerId === playerId);
+  const owned = sortScheduledMovementsForDispatch(
+    movements.filter((movement) => movement.ownerId === playerId),
+  );
   for (const movement of owned) {
     const result = dispatchScheduledFleet(
       nextMap,
