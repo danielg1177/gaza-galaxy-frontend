@@ -427,9 +427,13 @@ function buildVisibleState(state: GameState, viewingPlayerId: string): GameState
       }),
     },
     fleets: state.fleets.filter((fleet) => fleet.ownerId === viewingPlayerId),
-    scheduledMovements: (state.scheduledMovements ?? []).filter(
-      (movement) => movement.ownerId === viewingPlayerId,
-    ),
+    scheduledMovements: (state.scheduledMovements ?? []).filter((movement) => {
+      if (movement.ownerId !== viewingPlayerId) {
+        return false;
+      }
+      const origin = state.map.planets.find((planet) => planet.id === movement.fromPlanetId);
+      return origin !== undefined && origin.owner === viewingPlayerId;
+    }),
   };
 }
 

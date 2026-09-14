@@ -1777,6 +1777,9 @@ function FleetLayer({
         if (originPlanet === undefined || destPlanet === undefined) {
           return null;
         }
+        if (originPlanet.owner !== movement.ownerId) {
+          return null;
+        }
         const geometry = scheduledRouteGeometry(originPlanet, destPlanet);
         if (geometry === null) {
           return null;

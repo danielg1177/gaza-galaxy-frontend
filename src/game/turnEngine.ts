@@ -261,24 +261,24 @@ function sortScheduledMovementsForDispatch(
 }
 
 /**
- * Drops standing orders whose origin is no longer owned by the scheduler,
- * whose owner has been eliminated, or whose planets no longer exist.
- * Capture cancels immediately so a later recapture does not resume them.
+ * Drops standing orders whose **origin** is no longer owned by the scheduler,
+ * or whose planets no longer exist.
+ * Capture of one origin must not cancel schedules on any other planet.
+ * Recapture does not restore a dropped order.
  */
 export function pruneScheduledMovements(
   movements: ScheduledMovement[],
   map: GameMap,
-  players: Player[],
+  _players?: Player[],
 ): ScheduledMovement[] {
-  const eliminatedIds = new Set(
-    players.filter((player) => player.isEliminated).map((player) => player.id),
-  );
   return movements.filter((movement) => {
-    if (eliminatedIds.has(movement.ownerId)) {
+    const origin = findPlanet(map, movement.fromPlanetId);
+    if (origin === undefined) {
       return false;
     }
-    const origin = findPlanet(map, movement.fromPlanetId);
-    if (origin === undefined || origin.owner !== movement.ownerId) {
+    // Exact origin ownership only. Do not wipe a player's other origins if they
+    // are marked eliminated, and do not cancel because the destination changed hands.
+    if (origin.owner !== movement.ownerId) {
       return false;
     }
     const destination = findPlanet(map, movement.toPlanetId);

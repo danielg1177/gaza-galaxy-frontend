@@ -309,8 +309,9 @@ export interface GameState {
   knockoutResumePlayerId?: string;
   /**
    * Standing fleet orders. Applied at the start of the owning player's turn
-   * (when they become `currentPlayerId`). Dropped if the origin planet is
-   * captured — recapture does not restore them. Absent on older saves.
+   * (when they become `currentPlayerId`). Dropped only if **that order's origin**
+   * is captured — other planets' schedules stay. Recapture does not restore them.
+   * Absent on older saves.
    */
   scheduledMovements?: ScheduledMovement[];
 }

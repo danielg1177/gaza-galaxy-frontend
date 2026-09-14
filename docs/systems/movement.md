@@ -113,7 +113,7 @@ Standing orders (`GameState.scheduledMovements`) repeat a route every turn witho
 - At the start of a **human** turn, standing orders are seeded into `queuedOrders` (skipping routes already queued, e.g. a mid-turn save). They render as pending-departure markers slightly off the origin, same as a send the player just queued. Opening the send modal to that destination loads the scheduled/queued count so it can be adjusted. The first automatic dispatch is the owner's **next** turn, submitted with End Turn.
 - AI and sitting-out slots have no queue UI; `resolveTurn` still dispatches their remaining schedules when they become current (after round-wrap production/arrivals).
 - Lenient dispatch: out of range or 0 ships skips that turn; a fixed count sends `min(amount, garrison)`. If the same origin has both a fixed count and **All**, the fixed send always runs first and **All** sends the remainder.
-- If the origin planet is captured (owner no longer the scheduler) or the scheduler is eliminated, the order is pruned immediately. Recapture does not restore it.
+- If the **origin** planet is captured (owner no longer the scheduler), only standing orders **from that planet** are pruned. Schedules on the player's other planets are left alone. Recapture does not restore a pruned order. If the scheduler is eliminated, remaining origins are forfeited to neutral and those orders drop the same way.
 - Fog of war: only the viewing player's schedules are visible. Scheduled routes render as orange dotted lines on the map. ~~Owned origin planets with a schedule show a small orange repeat badge at the **top-left** of the planet.~~ *(removed 2026-09-11 — the dotted line is the schedule indicator)*
 
 ### Fleet visualization (`GameScreen`)
