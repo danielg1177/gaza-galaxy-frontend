@@ -90,24 +90,31 @@ export type TurnEvent =
  */
 export type PlayMode = 'passAndPlay' | 'asyncMultiplayer';
 
-export type GalaxyShape =
-  | 'scattered'
-  | 'dense_core'
-  | 'ring'
-  | 'cluster'
-  | 'spiral'
-  | 'crescent'
-  | 'binary'
-  | 'ribbon'
-  | 'halo'
-  | 'broken_ring'
-  | 'crossroads'
-  | 'clover'
-  | 'coil'
-  | 'barred'
-  | 'hourglass'
-  | 'lanes'
-  | 'asterisk';
+export const GALAXY_SHAPES = [
+  'scattered',
+  'dense_core',
+  'ring',
+  'cluster',
+  'spiral',
+  'crescent',
+  'binary',
+  'ribbon',
+  'halo',
+  'broken_ring',
+  'crossroads',
+  'clover',
+  'coil',
+  'barred',
+  'hourglass',
+  'lanes',
+  'asterisk',
+] as const;
+
+export type GalaxyShape = (typeof GALAXY_SHAPES)[number];
+
+export function isGalaxyShape(value: string | undefined): value is GalaxyShape {
+  return value != null && (GALAXY_SHAPES as readonly string[]).includes(value);
+}
 
 export type MapSize = 'small' | 'medium' | 'large';
 

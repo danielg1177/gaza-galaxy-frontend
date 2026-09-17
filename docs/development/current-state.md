@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-09-11 (same-turn build wrench on map; scheduled-movement planet badge removed)
+2026-09-17 (map previews, corridor width, random bridges)
 
 ## Overall Status
 
@@ -10,10 +10,15 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Create Game map-type preview shows a generated 6-player large-map SVG for the selected shape, with “The shape shown is an estimate.” under the row (hidden for Random). Arms stay at least two planets across; connectivity bridges scatter in a three-planet-wide corridor instead of stair-step lanes.
+- Large 6-player maps: `cluster`, `ribbon`, `halo`, `broken_ring`, `crossroads`, `barred`, `hourglass`, and `asterisk` were blobs or silent `scattered` fallbacks. Thin shapes now sample along their spines; spacing nudges at least one grid cell so normalize/round no longer discards the layout.
+- Coil maps were a blob with a small centre: the arm barely wound and planets grew in a fat tube around it. Coil now samples a logarithmic nautilus arm (~1.7–2.4 turns) the same way spiral samples its two arms.
+- Lanes maps were one thick line: placement only seeded the first river, so the others never filled. Each river is now seeded and grown separately, with a wider gap and a capped band width.
+- Create Game map type: dropdown after map size with **Random** (default) plus all 17 galaxy shapes, and a same-height preview of a generated 6-player large map (`?` for Random). ~~gray outline preview (`?` for Random; cluster/dense_core use a zoomed-out gray dot field)~~ *(replaced 2026-09-17 with generated map SVGs)*. Random omits `galaxyShape` so `generateMap` uses the seeded picker. An explicit shape is stored on `GameConfig` and async `map_config.galaxyShape`, and is reused by Play Again and open-lobby start.
 - Same-turn build wrench on the map: owned planets with a building queued this turn (`builtOnRound === currentRound`) show a small blue wrench at the top-left of the node. It clears on the owner's next turn (round wrap activates the building) or if the last same-round build on that planet is cancelled. Scheduled-movement orange ⟳ planet badges removed; orange dotted route lines remain.
 - Last remaining sitting-in human can delete an async game after other humans forfeit: Command Center ⋮ **Delete** via `canDeleteAsyncGame`; `DELETE /games/{id}` allows creator or sole sitting-in human. AI slots do not count.
 - Create Game friend picker re-fetches `GET /friends` each time a human seat's "Select a friend" control is opened, so newly accepted or removed friends appear without leaving the setup screen.
-- Command Center ⋮ menu: Play Again (same players / map size / name / type, new randomized map; non-host swaps seats with the original creator), Forfeit from the lobby for any sitting-in human of an in-progress async game, action buttons no longer sit on the card face.
+- Command Center ⋮ menu: Play Again (same players / map size / map type / name / type, new randomized map; non-host swaps seats with the original creator), Forfeit from the lobby for any sitting-in human of an in-progress async game, action buttons no longer sit on the card face.
 - Five more galaxy shapes: `coil`, `barred`, `hourglass`, `lanes`, `asterisk` (picker now has 17 layouts).
 - Scheduled troop movements: send-fleet modal ⟳ icon expands every-turn settings (fixed count defaulting to this send, or **All**). Orders persist on `GameState.scheduledMovements` and dispatch when that player becomes current (visible at turn start). Capture of the origin cancels the schedule (recapture does not restore). Insufficient garrison sends whatever is there. Scheduled routes show as orange dotted lines on the map. ~~Owned origin planets show a small orange ⟳ badge at the top-right.~~ *(removed 2026-09-11)*
 - Four new galaxy shapes in the seeded picker: `crescent` (horseshoe), `binary` (twin cores + corridor), `ribbon` (winding S-curve), `halo` (double ring). Same spacing, connectivity, and spawn pipeline as the existing five.

@@ -26,6 +26,7 @@ import { isAiControlled, needsForfeitPrompt, enqueueCommanderStatusNotice, nextC
 import type {
   AiPlayerState,
   BuildingType,
+  GalaxyShape,
   GameMap,
   GameState,
   MapSize,
@@ -74,6 +75,8 @@ export interface GameConfig {
   mapWidth: number;
   mapHeight: number;
   planetCount: number;
+  /** When set, generateMap uses this layout. When omitted, the seed picks a random galaxy shape. */
+  galaxyShape?: GalaxyShape;
   playMode: PlayMode;
 }
 
@@ -1018,6 +1021,7 @@ export function generateInitialGameState(config: GameConfig, seed: number): Game
     height: config.mapHeight,
     planetCount: config.planetCount,
     playerCount,
+    galaxyShape: config.galaxyShape,
   });
   const humanPlayerIds: string[] = [];
   const aiPlayerIds: string[] = [];

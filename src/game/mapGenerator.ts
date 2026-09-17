@@ -1,4 +1,11 @@
-import type { GalaxyShape, GameMap, Planet, PlanetClass, Position } from './types';
+import {
+  GALAXY_SHAPES,
+  type GalaxyShape,
+  type GameMap,
+  type Planet,
+  type PlanetClass,
+  type Position,
+} from './types';
 
 export interface MapConfig {
   seed: number;
@@ -33,6 +40,28 @@ const MIN_PLANET_DISTANCE = 2.5; // minimum in final grid coordinates (matches c
 const MAX_PLACEMENT_ATTEMPTS_PER_PLANET = 2000;
 const MAX_SPACING_ATTEMPTS = 25;
 const PLANET_EDGE_PADDING = 2;
+
+/** Half-width so a corridor can fit three planets across — never a single-file line. */
+function threePlanetCorridorHalf(minDistance: number): number {
+  return minDistance;
+}
+
+/** Scatter across 2–3 banks of a corridor so it never collapses to a single-file spine. */
+function sampleCorridorOffset(
+  rng: () => number,
+  halfWidth: number,
+  minDistance: number,
+  laneCount: number,
+): number {
+  const lanes = Math.max(2, Math.round(laneCount));
+  const lane = Math.floor(rng() * lanes);
+  const lanePos =
+    lanes === 1
+      ? 0
+      : -halfWidth + (lane / (lanes - 1)) * halfWidth * 2;
+  const jitter = (rng() - 0.5) * minDistance * 0.8;
+  return Math.max(-halfWidth, Math.min(halfWidth, lanePos + jitter));
+}
 
 const PLANET_ADJECTIVES = [
   'Red', 'Far', 'Grim', 'New', 'Old', 'Dark', 'Iron', 'Cold',
@@ -216,11 +245,12 @@ function placePlanetsCluster(
   const virtualWidth = width * 2;
   const virtualHeight = height * 2;
   const clusterCount = 3 + Math.floor(rng() * 3); // 3–5 clusters
-  const spread = Math.min(virtualWidth, virtualHeight) * 0.18;
+  const spread = Math.min(virtualWidth, virtualHeight) * 0.1;
+  const minCentreSep =
+    Math.min(virtualWidth, virtualHeight) * (clusterCount <= 3 ? 0.42 : 0.34);
 
   // Place cluster centres with some minimum separation from each other
   const centres: Position[] = [];
-  const minCentreSep = Math.min(virtualWidth, virtualHeight) * 0.3;
   for (let c = 0; c < clusterCount; c++) {
     for (let attempt = 0; attempt < 500; attempt++) {
       const cx = virtualWidth * 0.12 + rng() * virtualWidth * 0.76;
@@ -290,8 +320,10 @@ function placePlanetsSpiral(
   // How many radians of twist per unit of radius (tighter = more wound)
   const curveFactor = 0.045;
   const armCount = 2;
-  // Gaussian lateral σ in virtual units
-  const lateralSigma = maxRadius * 0.1;
+  const lateralHalf = Math.max(
+    maxRadius * 0.1,
+    threePlanetCorridorHalf(virtualMinDistance),
+  );
 
   const positions: Position[] = [];
 
@@ -302,13 +334,15 @@ function placePlanetsSpiral(
     let placed = false;
     for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
       // Bias toward middle of the arm (avoid empty core and fringe)
-      const spineRadius = maxRadius * (0.08 + rng() * 0.88);
+      const spineRadius = maxRadius * (0.1 + rng() * 0.8);
       // Spiral twist: angle grows linearly with radius
       const angle = armBaseAngle + spineRadius * curveFactor;
-      // Gaussian lateral scatter perpendicular to arm direction
-      const u1 = rng() || 1e-10;
-      const u2 = rng();
-      const lateral = lateralSigma * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      const lateral = sampleCorridorOffset(
+        rng,
+        lateralHalf,
+        virtualMinDistance,
+        3,
+      );
 
       const x = Math.round(
         virtualCx + Math.cos(angle) * spineRadius - Math.sin(angle) * lateral,
@@ -570,6 +604,123 @@ function distanceToPolyline(point: Position, waypoints: Position[]): number {
   return min;
 }
 
+function polylineLength(line: Position[]): number {
+  let total = 0;
+  for (let i = 0; i < line.length - 1; i++) {
+    total += euclideanDistance(line[i], line[i + 1]);
+  }
+  return total;
+}
+
+function pointAndTangentOnPolyline(
+  line: Position[],
+  dist: number,
+): { x: number; y: number; angle: number } {
+  let remaining = dist;
+  for (let i = 0; i < line.length - 1; i++) {
+    const d = euclideanDistance(line[i], line[i + 1]);
+    if (remaining <= d || i === line.length - 2) {
+      const t = d === 0 ? 0 : Math.min(1, remaining / Math.max(d, 1e-6));
+      const dx = line[i + 1].x - line[i].x;
+      const dy = line[i + 1].y - line[i].y;
+      return {
+        x: line[i].x + dx * t,
+        y: line[i].y + dy * t,
+        angle: Math.atan2(dy, dx),
+      };
+    }
+    remaining -= d;
+  }
+  const last = line[line.length - 1];
+  const prev = line[Math.max(0, line.length - 2)];
+  return {
+    x: last.x,
+    y: last.y,
+    angle: Math.atan2(last.y - prev.y, last.x - prev.x),
+  };
+}
+
+function placeAlongPolylines(
+  rng: () => number,
+  planetCount: number,
+  width: number,
+  height: number,
+  virtualMinDistance: number,
+  polylines: Position[][],
+  lateralSigma: number,
+  shapeName: string,
+  laneCount = 3,
+): Position[] {
+  const virtualWidth = width * 2;
+  const virtualHeight = height * 2;
+  const pad = 8;
+  for (const line of polylines) {
+    for (const p of line) {
+      p.x = Math.max(pad, Math.min(virtualWidth - 1 - pad, p.x));
+      p.y = Math.max(pad, Math.min(virtualHeight - 1 - pad, p.y));
+    }
+  }
+  const lengths = polylines.map(polylineLength);
+  const totalLen = lengths.reduce((sum, n) => sum + n, 0);
+  const packedHalf =
+    (planetCount * virtualMinDistance * virtualMinDistance) / (2 * Math.max(totalLen, 1));
+  const minHalf =
+    laneCount <= 2
+      ? virtualMinDistance * 0.7
+      : threePlanetCorridorHalf(virtualMinDistance);
+  const sigma = Math.max(lateralSigma, packedHalf * 0.6, minHalf);
+  const positions: Position[] = [];
+
+  for (let i = 0; i < polylines.length; i++) {
+    const mid = pointAndTangentOnPolyline(polylines[i], lengths[i] * 0.5);
+    const seed = { x: Math.round(mid.x), y: Math.round(mid.y) };
+    if (isFarEnough(seed, positions, virtualMinDistance)) {
+      positions.push(seed);
+    }
+  }
+
+  const perLine = Math.max(1, Math.ceil(planetCount / polylines.length));
+  for (let i = positions.length; i < planetCount; i++) {
+    let placed = false;
+    const prefer = i % polylines.length;
+    const localIndex = Math.floor(i / polylines.length);
+    for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+      const lineIndex =
+        attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET * 0.7
+          ? prefer
+          : Math.floor(rng() * polylines.length);
+      const jitter = attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET * 0.5 ? rng() : rng() * perLine;
+      const t = ((localIndex + jitter) / perLine) % 1;
+      const along = pointAndTangentOnPolyline(
+        polylines[lineIndex],
+        t * Math.max(lengths[lineIndex], 1),
+      );
+      const spread = attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET * 0.8 ? sigma : sigma * 1.6;
+      const lateral = sampleCorridorOffset(
+        rng,
+        spread,
+        virtualMinDistance,
+        laneCount,
+      );
+      const x = Math.round(along.x - Math.sin(along.angle) * lateral);
+      const y = Math.round(along.y + Math.cos(along.angle) * lateral);
+      if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
+      if (!isFarEnough({ x, y }, positions, virtualMinDistance)) continue;
+      positions.push({ x, y });
+      placed = true;
+      break;
+    }
+    if (!placed) {
+      throw new Error(
+        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (${shapeName} shape)`,
+      );
+    }
+  }
+
+  normalizePositionsToGrid(positions, width, height);
+  return positions;
+}
+
 /**
  * Binary shape: two organic-growth cores on opposite sides of the map.
  * Connectivity bridges form the corridor chokepoint when the cores stay apart.
@@ -639,10 +790,10 @@ function placePlanetsRibbon(
   const extent = Math.min(virtualWidth, virtualHeight);
   const heading = rng() * Math.PI;
   const phase = rng() * 2 * Math.PI;
-  const waves = 1.25 + rng() * 0.7;
+  const waves = 1.35 + rng() * 0.6;
   const length = extent * 0.88;
-  const amplitude = extent * (0.22 + rng() * 0.08);
-  const waypointCount = 8;
+  const amplitude = extent * (0.28 + rng() * 0.08);
+  const waypointCount = 10;
   const waypoints: Position[] = [];
   for (let i = 0; i < waypointCount; i++) {
     const t = i / (waypointCount - 1);
@@ -653,35 +804,16 @@ function placePlanetsRibbon(
       y: Math.round(virtualCy + along * Math.sin(heading) + across * Math.cos(heading)),
     });
   }
-
-  let spineLen = 0;
-  for (let i = 0; i < waypoints.length - 1; i++) {
-    spineLen += euclideanDistance(waypoints[i], waypoints[i + 1]);
-  }
-  const packedHalfW = (planetCount * virtualMinDistance * virtualMinDistance * 1.6) / (2 * Math.max(spineLen, 1));
-  const halfWidth = Math.max(extent * 0.11, packedHalfW);
-  const positions: Position[] = [waypoints[0]];
-
-  for (let i = 1; i < planetCount; i++) {
-    const candidate = growConstrainedOrFallback(
-      rng,
-      positions,
-      positions,
-      virtualWidth,
-      virtualHeight,
-      virtualMinDistance,
-      (p) => distanceToPolyline(p, waypoints) <= halfWidth,
-    );
-    if (candidate === null) {
-      throw new Error(
-        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (ribbon shape)`,
-      );
-    }
-    positions.push(candidate);
-  }
-
-  normalizePositionsToGrid(positions, width, height);
-  return positions;
+  return placeAlongPolylines(
+    rng,
+    planetCount,
+    width,
+    height,
+    virtualMinDistance,
+    [waypoints],
+    extent * 0.045,
+    'ribbon',
+  );
 }
 
 /**
@@ -718,35 +850,29 @@ function placePlanetsHalo(
     x: Math.round(virtualCx + (outerR0 + outerR1) / 2),
     y: Math.round(virtualCy),
   };
-  const innerPlanets: Position[] = [innerSeed];
-  const outerPlanets: Position[] = [outerSeed];
   const positions: Position[] = [innerSeed, outerSeed];
 
   for (let i = 2; i < planetCount; i++) {
-    const inner = innerPlanets.length < innerCount;
-    const parents = inner ? innerPlanets : outerPlanets;
+    const inner = i - 2 < innerCount - 1;
     const r0 = inner ? innerR0 : outerR0;
     const r1 = inner ? innerR1 : outerR1;
-    const candidate = growConstrainedOrFallback(
-      rng,
-      parents,
-      positions,
-      virtualWidth,
-      virtualHeight,
-      virtualMinDistance,
-      (p) => {
-        const r = Math.hypot(p.x - virtualCx, p.y - virtualCy);
-        return r >= r0 && r <= r1;
-      },
-    );
-    if (candidate === null) {
+    let placed = false;
+    for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+      const angle = rng() * 2 * Math.PI;
+      const radius = r0 + rng() * (r1 - r0);
+      const x = Math.round(virtualCx + Math.cos(angle) * radius);
+      const y = Math.round(virtualCy + Math.sin(angle) * radius);
+      if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
+      if (!isFarEnough({ x, y }, positions, virtualMinDistance)) continue;
+      positions.push({ x, y });
+      placed = true;
+      break;
+    }
+    if (!placed) {
       throw new Error(
         `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (halo shape)`,
       );
     }
-    positions.push(candidate);
-    if (inner) innerPlanets.push(candidate);
-    else outerPlanets.push(candidate);
   }
 
   normalizePositionsToGrid(positions, width, height);
@@ -773,7 +899,7 @@ function placePlanetsBrokenRing(
   const ringWidth = maxRadius * 0.48;
   const outerRadius = innerRadius + ringWidth;
   const gateCount = 2 + Math.floor(rng() * 2); // 2–3
-  const gateWidth = 0.38 + rng() * 0.18; // ~22°–32°
+  const gateWidth = 0.55 + rng() * 0.28; // ~31°–48°
   const rotation = rng() * 2 * Math.PI;
 
   const inArc = (p: Position): boolean => {
@@ -882,36 +1008,16 @@ function placePlanetsCrossroads(
     }
   }
 
-  let spineLen = 0;
-  for (const line of polylines) {
-    spineLen += euclideanDistance(line[0], line[1]);
-  }
-  const packedHalfW = (planetCount * virtualMinDistance * virtualMinDistance * 1.6) / (2 * Math.max(spineLen, 1));
-  const halfWidth = Math.max(extent * 0.1, packedHalfW);
-  const nearAnyArm = (p: Position): boolean =>
-    polylines.some((line) => distanceToPolyline(p, line) <= halfWidth);
-
-  const positions: Position[] = [{ x: Math.round(virtualCx), y: Math.round(virtualCy) }];
-  for (let i = 1; i < planetCount; i++) {
-    const candidate = growConstrainedOrFallback(
-      rng,
-      positions,
-      positions,
-      virtualWidth,
-      virtualHeight,
-      virtualMinDistance,
-      nearAnyArm,
-    );
-    if (candidate === null) {
-      throw new Error(
-        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (crossroads shape)`,
-      );
-    }
-    positions.push(candidate);
-  }
-
-  normalizePositionsToGrid(positions, width, height);
-  return positions;
+  return placeAlongPolylines(
+    rng,
+    planetCount,
+    width,
+    height,
+    virtualMinDistance,
+    polylines,
+    extent * 0.045,
+    'crossroads',
+  );
 }
 
 /**
@@ -988,48 +1094,31 @@ function placePlanetsCoil(
   const virtualCy = virtualHeight / 2;
   const extent = Math.min(virtualWidth, virtualHeight);
   const maxRadius = extent * 0.44;
+  const minRadius = maxRadius * 0.06;
   const heading = rng() * 2 * Math.PI;
-  const curveFactor = 0.07 + rng() * 0.03;
-  const waypointCount = 14;
+  const turns = 1.65 + rng() * 0.7;
+  const waypointCount = 28;
   const waypoints: Position[] = [];
   for (let i = 0; i < waypointCount; i++) {
     const t = i / (waypointCount - 1);
-    const radius = maxRadius * (0.06 + t * 0.9);
-    const angle = heading + radius * curveFactor;
+    const angle = heading + t * turns * 2 * Math.PI;
+    const spineRadius = minRadius * Math.pow(maxRadius / minRadius, t);
     waypoints.push({
-      x: Math.round(virtualCx + Math.cos(angle) * radius),
-      y: Math.round(virtualCy + Math.sin(angle) * radius),
+      x: Math.round(virtualCx + Math.cos(angle) * spineRadius),
+      y: Math.round(virtualCy + Math.sin(angle) * spineRadius),
     });
   }
-
-  let spineLen = 0;
-  for (let i = 0; i < waypoints.length - 1; i++) {
-    spineLen += euclideanDistance(waypoints[i], waypoints[i + 1]);
-  }
-  const packedHalfW = (planetCount * virtualMinDistance * virtualMinDistance * 1.6) / (2 * Math.max(spineLen, 1));
-  const halfWidth = Math.max(extent * 0.1, packedHalfW);
-  const positions: Position[] = [waypoints[0]];
-
-  for (let i = 1; i < planetCount; i++) {
-    const candidate = growConstrainedOrFallback(
-      rng,
-      positions,
-      positions,
-      virtualWidth,
-      virtualHeight,
-      virtualMinDistance,
-      (p) => distanceToPolyline(p, waypoints) <= halfWidth,
-    );
-    if (candidate === null) {
-      throw new Error(
-        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (coil shape)`,
-      );
-    }
-    positions.push(candidate);
-  }
-
-  normalizePositionsToGrid(positions, width, height);
-  return positions;
+  return placeAlongPolylines(
+    rng,
+    planetCount,
+    width,
+    height,
+    virtualMinDistance,
+    [waypoints],
+    virtualMinDistance * 0.75,
+    'coil',
+    2,
+  );
 }
 
 /**
@@ -1080,38 +1169,16 @@ function placePlanetsBarred(
     ],
   ];
 
-  let spineLen = 0;
-  for (const line of polylines) {
-    for (let i = 0; i < line.length - 1; i++) {
-      spineLen += euclideanDistance(line[i], line[i + 1]);
-    }
-  }
-  const packedHalfW = (planetCount * virtualMinDistance * virtualMinDistance * 1.5) / (2 * Math.max(spineLen, 1));
-  const halfWidth = Math.max(extent * 0.1, packedHalfW);
-  const nearFrame = (p: Position): boolean =>
-    polylines.some((line) => distanceToPolyline(p, line) <= halfWidth);
-
-  const positions: Position[] = [{ x: Math.round(virtualCx), y: Math.round(virtualCy) }];
-  for (let i = 1; i < planetCount; i++) {
-    const candidate = growConstrainedOrFallback(
-      rng,
-      positions,
-      positions,
-      virtualWidth,
-      virtualHeight,
-      virtualMinDistance,
-      nearFrame,
-    );
-    if (candidate === null) {
-      throw new Error(
-        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (barred shape)`,
-      );
-    }
-    positions.push(candidate);
-  }
-
-  normalizePositionsToGrid(positions, width, height);
-  return positions;
+  return placeAlongPolylines(
+    rng,
+    planetCount,
+    width,
+    height,
+    virtualMinDistance,
+    polylines,
+    extent * 0.05,
+    'barred',
+  );
 }
 
 /**
@@ -1131,8 +1198,8 @@ function placePlanetsHourglass(
   const virtualCy = virtualHeight / 2;
   const extent = Math.min(virtualWidth, virtualHeight);
   const axis = rng() * Math.PI;
-  const lobeR = extent * 0.24;
-  const sep = lobeR * 1.15;
+  const lobeR = extent * 0.28;
+  const sep = lobeR * 0.82;
   const seeds: Position[] = [
     {
       x: Math.round(virtualCx + Math.cos(axis) * sep),
@@ -1146,27 +1213,27 @@ function placePlanetsHourglass(
   const inHourglass = (p: Position): boolean =>
     euclideanDistance(p, seeds[0]) <= lobeR || euclideanDistance(p, seeds[1]) <= lobeR;
 
-  const clusters: Position[][] = [[seeds[0]], [seeds[1]]];
   const positions: Position[] = [seeds[0], seeds[1]];
-
   for (let i = 2; i < planetCount; i++) {
     const ci = i % 2;
-    const candidate = growConstrainedOrFallback(
-      rng,
-      clusters[ci],
-      positions,
-      virtualWidth,
-      virtualHeight,
-      virtualMinDistance,
-      inHourglass,
-    );
-    if (candidate === null) {
+    let placed = false;
+    for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+      const mag = lobeR * Math.sqrt(rng());
+      const angle = rng() * 2 * Math.PI;
+      const x = Math.round(seeds[ci].x + Math.cos(angle) * mag);
+      const y = Math.round(seeds[ci].y + Math.sin(angle) * mag);
+      if (x < 0 || x > virtualWidth - 1 || y < 0 || y > virtualHeight - 1) continue;
+      if (!inHourglass({ x, y })) continue;
+      if (!isFarEnough({ x, y }, positions, virtualMinDistance)) continue;
+      positions.push({ x, y });
+      placed = true;
+      break;
+    }
+    if (!placed) {
       throw new Error(
         `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (hourglass shape)`,
       );
     }
-    positions.push(candidate);
-    clusters[ci].push(candidate);
   }
 
   normalizePositionsToGrid(positions, width, height);
@@ -1192,7 +1259,7 @@ function placePlanetsLanes(
   const heading = rng() * Math.PI;
   const laneCount = 2 + Math.floor(rng() * 2); // 2–3
   const length = extent * 0.86;
-  const laneGap = extent * (laneCount === 2 ? 0.26 : 0.2);
+  const laneGap = extent * (laneCount === 2 ? 0.34 : 0.26);
   const perpX = -Math.sin(heading);
   const perpY = Math.cos(heading);
   const polylines: Position[][] = [];
@@ -1216,28 +1283,68 @@ function placePlanetsLanes(
   for (const line of polylines) {
     spineLen += euclideanDistance(line[0], line[1]);
   }
-  const packedHalfW = (planetCount * virtualMinDistance * virtualMinDistance * 1.5) / (2 * Math.max(spineLen, 1));
-  const halfWidth = Math.max(extent * 0.08, packedHalfW);
-  const nearLane = (p: Position): boolean =>
+  const packedHalfW =
+    (planetCount * virtualMinDistance * virtualMinDistance * 1.5) / (2 * Math.max(spineLen, 1));
+  const halfWidth = Math.min(
+    laneGap * 0.28,
+    Math.max(
+      threePlanetCorridorHalf(virtualMinDistance),
+      extent * 0.05,
+      packedHalfW,
+    ),
+  );
+  const nearAnyLane = (p: Position): boolean =>
     polylines.some((line) => distanceToPolyline(p, line) <= halfWidth);
 
-  const positions: Position[] = [polylines[0][0]];
-  for (let i = 1; i < planetCount; i++) {
-    const candidate = growConstrainedOrFallback(
-      rng,
-      positions,
-      positions,
-      virtualWidth,
-      virtualHeight,
-      virtualMinDistance,
-      nearLane,
-    );
+  const seeds: Position[] = polylines.map((line) => ({
+    x: Math.round((line[0].x + line[1].x) / 2),
+    y: Math.round((line[0].y + line[1].y) / 2),
+  }));
+  const clusters: Position[][] = seeds.map((seed) => [seed]);
+  const positions: Position[] = [...seeds];
+
+  for (let i = positions.length; i < planetCount; i++) {
+    const ci = i % laneCount;
+    const inThisLane = (p: Position): boolean =>
+      distanceToPolyline(p, polylines[ci]) <= halfWidth;
+    let candidate: Position | null = null;
+    for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+      candidate = growFromParents(
+        rng,
+        clusters[ci],
+        positions,
+        virtualWidth,
+        virtualHeight,
+        virtualMinDistance,
+        inThisLane,
+      );
+      if (candidate !== null) {
+        break;
+      }
+    }
+    if (candidate === null) {
+      for (let attempt = 0; attempt < MAX_PLACEMENT_ATTEMPTS_PER_PLANET; attempt++) {
+        candidate = growFromParents(
+          rng,
+          positions,
+          positions,
+          virtualWidth,
+          virtualHeight,
+          virtualMinDistance,
+          nearAnyLane,
+        );
+        if (candidate !== null) {
+          break;
+        }
+      }
+    }
     if (candidate === null) {
       throw new Error(
         `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (lanes shape)`,
       );
     }
     positions.push(candidate);
+    clusters[ci].push(candidate);
   }
 
   normalizePositionsToGrid(positions, width, height);
@@ -1263,7 +1370,6 @@ function placePlanetsAsterisk(
   const heading = rng() * Math.PI;
   const rayCount = 4 + Math.floor(rng() * 2); // 4–5
   const armLen = extent * 0.42;
-  const hubR = extent * 0.1;
   const polylines: Position[][] = [];
   for (let i = 0; i < rayCount; i++) {
     const angle = heading + (i * 2 * Math.PI) / rayCount;
@@ -1276,38 +1382,16 @@ function placePlanetsAsterisk(
     ]);
   }
 
-  let spineLen = 0;
-  for (const line of polylines) {
-    spineLen += euclideanDistance(line[0], line[1]);
-  }
-  const packedHalfW = (planetCount * virtualMinDistance * virtualMinDistance * 1.5) / (2 * Math.max(spineLen, 1));
-  const halfWidth = Math.max(extent * 0.08, packedHalfW);
-  const nearStar = (p: Position): boolean => {
-    if (Math.hypot(p.x - virtualCx, p.y - virtualCy) <= hubR) return true;
-    return polylines.some((line) => distanceToPolyline(p, line) <= halfWidth);
-  };
-
-  const positions: Position[] = [{ x: Math.round(virtualCx), y: Math.round(virtualCy) }];
-  for (let i = 1; i < planetCount; i++) {
-    const candidate = growConstrainedOrFallback(
-      rng,
-      positions,
-      positions,
-      virtualWidth,
-      virtualHeight,
-      virtualMinDistance,
-      nearStar,
-    );
-    if (candidate === null) {
-      throw new Error(
-        `Failed to place planet ${i} after ${MAX_PLACEMENT_ATTEMPTS_PER_PLANET} attempts (asterisk shape)`,
-      );
-    }
-    positions.push(candidate);
-  }
-
-  normalizePositionsToGrid(positions, width, height);
-  return positions;
+  return placeAlongPolylines(
+    rng,
+    planetCount,
+    width,
+    height,
+    virtualMinDistance,
+    polylines,
+    extent * 0.04,
+    'asterisk',
+  );
 }
 
 function enforceMinimumSpacing(positions: Position[], width: number, height: number): void {
@@ -1316,25 +1400,44 @@ function enforceMinimumSpacing(positions: Position[], width: number, height: num
   const minY = PLANET_EDGE_PADDING;
   const maxY = height - 1 - PLANET_EDGE_PADDING;
   // Cap at 500 to avoid O(n^4) freeze on large maps (e.g. 135 planets × n²×4 = 659M ops).
-  // This function only corrects rounding violations; convergence is fast in practice.
   const maxIter = 500;
+
+  const stepAway = (p: Position, ux: number, uy: number, sign: number): Position => {
+    const push = 0.51;
+    let rx = Math.round(p.x + sign * ux * push);
+    let ry = Math.round(p.y + sign * uy * push);
+    if (rx === p.x && ry === p.y) {
+      if (Math.abs(ux) >= Math.abs(uy)) rx += sign * (ux >= 0 ? 1 : -1);
+      else ry += sign * (uy >= 0 ? 1 : -1);
+    }
+    return {
+      x: Math.max(minX, Math.min(maxX, rx)),
+      y: Math.max(minY, Math.min(maxY, ry)),
+    };
+  };
 
   for (let iter = 0; iter < maxIter; iter++) {
     let moved = false;
     for (let i = 0; i < positions.length; i++) {
       for (let j = i + 1; j < positions.length; j++) {
         const d = euclideanDistance(positions[i], positions[j]);
-        if (d >= MIN_PLANET_DISTANCE || d === 0) continue;
+        if (d >= MIN_PLANET_DISTANCE) continue;
         moved = true;
-        const push = (MIN_PLANET_DISTANCE - d) / 2 + 0.01;
-        const dx = positions[j].x - positions[i].x;
-        const dy = positions[j].y - positions[i].y;
-        const len = d || 1;
-        let jx = Math.round(positions[j].x + (dx / len) * push);
-        let jy = Math.round(positions[j].y + (dy / len) * push);
-        jx = Math.max(minX, Math.min(maxX, jx));
-        jy = Math.max(minY, Math.min(maxY, jy));
-        positions[j] = { x: jx, y: jy };
+        let dx = positions[j].x - positions[i].x;
+        let dy = positions[j].y - positions[i].y;
+        if (d === 0) {
+          dx = 1;
+          dy = 0;
+        }
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const nextJ = stepAway(positions[j], ux, uy, 1);
+        if (nextJ.x !== positions[j].x || nextJ.y !== positions[j].y) {
+          positions[j] = nextJ;
+        } else {
+          positions[i] = stepAway(positions[i], ux, uy, -1);
+        }
       }
     }
     if (!moved) break;
@@ -1342,27 +1445,36 @@ function enforceMinimumSpacing(positions: Position[], width: number, height: num
 }
 
 const CONNECTIVITY_RANGE = 11; // must match BASE_FLEET_RANGE_CLICKS in movementEngine.ts
-const BRIDGE_LANE_COUNT = 3;
-const BRIDGE_LANE_SPACING = 3; // clicks between parallel planets on a bridge
+const BRIDGE_CORRIDOR_HALF = MIN_PLANET_DISTANCE * 2.1;
 
-function tryInsertBridgePlanet(positions: Position[], parent: number[], x: number, y: number): boolean {
-  for (let r = 0; r <= 3; r++) {
-    for (let dx = -r; dx <= r; dx++) {
-      for (let dy = -r; dy <= r; dy++) {
-        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-        const cand = { x: x + dx, y: y + dy };
-        if (isFarEnough(cand, positions, MIN_PLANET_DISTANCE)) {
-          positions.push(cand);
-          parent.push(positions.length - 1);
-          return true;
-        }
-      }
-    }
-  }
-  return false;
+function tryInsertBridgePlanet(
+  positions: Position[],
+  parent: number[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): boolean {
+  const minX = PLANET_EDGE_PADDING;
+  const maxX = width - 1 - PLANET_EDGE_PADDING;
+  const minY = PLANET_EDGE_PADDING;
+  const maxY = height - 1 - PLANET_EDGE_PADDING;
+  const cand = {
+    x: Math.max(minX, Math.min(maxX, Math.round(x))),
+    y: Math.max(minY, Math.min(maxY, Math.round(y))),
+  };
+  if (!isFarEnough(cand, positions, MIN_PLANET_DISTANCE)) return false;
+  positions.push(cand);
+  parent.push(positions.length - 1);
+  return true;
 }
 
-function ensureConnectivity(positions: Position[]): void {
+function ensureConnectivity(
+  positions: Position[],
+  rng: () => number,
+  width: number,
+  height: number,
+): void {
   const parent = positions.map((_, i) => i);
   function find(x: number): number {
     if (parent[x] !== x) parent[x] = find(parent[x]);
@@ -1383,7 +1495,6 @@ function ensureConnectivity(positions: Position[]): void {
   }
   rebuildUnion();
   const MAX_BRIDGE_ITERATIONS = 50;
-  const laneHalf = (BRIDGE_LANE_COUNT - 1) / 2;
   for (let iter = 0; iter < MAX_BRIDGE_ITERATIONS; iter++) {
     const roots = new Set(positions.map((_, i) => find(i)));
     if (roots.size <= 1) break;
@@ -1402,21 +1513,50 @@ function ensureConnectivity(positions: Position[]): void {
       }
     }
     if (bestA === -1) break;
-    const gapX = positions[bestB].x - positions[bestA].x;
-    const gapY = positions[bestB].y - positions[bestA].y;
+    const start = positions[bestA];
+    const end = positions[bestB];
+    const gapX = end.x - start.x;
+    const gapY = end.y - start.y;
     const gapLen = Math.hypot(gapX, gapY) || 1;
     const perpX = -gapY / gapLen;
     const perpY = gapX / gapLen;
     const steps = Math.ceil(minDist / CONNECTIVITY_RANGE);
-    const bridges = steps - 1;
-    for (let k = 1; k <= bridges; k++) {
-      const t = k / steps;
-      const bx = positions[bestA].x + t * gapX;
-      const by = positions[bestA].y + t * gapY;
-      for (let lane = -laneHalf; lane <= laneHalf; lane++) {
-        const lx = Math.round(bx + perpX * lane * BRIDGE_LANE_SPACING);
-        const ly = Math.round(by + perpY * lane * BRIDGE_LANE_SPACING);
-        tryInsertBridgePlanet(positions, parent, lx, ly);
+    const alongCount = Math.max(2, steps - 1);
+    const target = alongCount * 3;
+    const tPad = minDist <= CONNECTIVITY_RANGE * 1.6 ? 0.32 : 0.18;
+    for (let n = 0; n < target; n++) {
+      let placed = false;
+      for (let attempt = 0; attempt < 80; attempt++) {
+        const t = tPad + rng() * (1 - 2 * tPad);
+        const lateral = sampleCorridorOffset(
+          rng,
+          BRIDGE_CORRIDOR_HALF,
+          MIN_PLANET_DISTANCE,
+          3,
+        );
+        const x = start.x + t * gapX + perpX * lateral;
+        const y = start.y + t * gapY + perpY * lateral;
+        if (tryInsertBridgePlanet(positions, parent, x, y, width, height)) {
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        const t = 0.5 + (rng() - 0.5) * 0.2;
+        const lateral = sampleCorridorOffset(
+          rng,
+          BRIDGE_CORRIDOR_HALF,
+          MIN_PLANET_DISTANCE,
+          3,
+        );
+        tryInsertBridgePlanet(
+          positions,
+          parent,
+          start.x + t * gapX + perpX * lateral,
+          start.y + t * gapY + perpY * lateral,
+          width,
+          height,
+        );
       }
     }
     rebuildUnion();
@@ -1500,7 +1640,7 @@ function tryLayout(
     try {
       const positions = placeByShape(shape, rng, planetCount, width, height, virtualMinDistance);
       enforceMinimumSpacing(positions, width, height);
-      ensureConnectivity(positions);
+      ensureConnectivity(positions, rng, width, height);
       enforceMinimumSpacing(positions, width, height);
       if (minPairwiseDistance(positions) >= MIN_PLANET_DISTANCE) {
         return { positions, rng };
@@ -1516,26 +1656,8 @@ export function generateMap(config: MapConfig): GameMap {
   const { seed, width, height, planetCount } = config;
 
   const shapeRng = mulberry32(seed);
-  const shapes: GalaxyShape[] = [
-    'scattered',
-    'dense_core',
-    'ring',
-    'cluster',
-    'spiral',
-    'crescent',
-    'binary',
-    'ribbon',
-    'halo',
-    'broken_ring',
-    'crossroads',
-    'clover',
-    'coil',
-    'barred',
-    'hourglass',
-    'lanes',
-    'asterisk',
-  ];
-  const shape: GalaxyShape = config.galaxyShape ?? shapes[Math.floor(shapeRng() * shapes.length)];
+  const shape: GalaxyShape =
+    config.galaxyShape ?? GALAXY_SHAPES[Math.floor(shapeRng() * GALAXY_SHAPES.length)];
   const consumeShapeRoll = !config.galaxyShape;
 
   let layout = tryLayout(shape, seed, consumeShapeRoll, width, height, planetCount, 0);

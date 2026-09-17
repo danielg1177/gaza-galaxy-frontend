@@ -122,6 +122,7 @@ export interface CreateGamePayload {
     mapHeight: number;
     planetCount: number;
     seed: number;
+    galaxyShape?: string;
   };
   playerSlots: Array<{
     type: 'human' | 'ai';

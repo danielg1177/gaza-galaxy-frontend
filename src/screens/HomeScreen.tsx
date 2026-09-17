@@ -18,10 +18,11 @@ import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { APP_NAME_UPPER, DEFAULT_PLAYER_NAME } from '../constants/app';
-import type { MapSize } from '../game/types';
+import { GALAXY_SHAPES, isGalaxyShape, type GalaxyShape, type MapSize } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
 import { ConversationModal } from '../components/ConversationModal';
 import { EditGameNameModal } from '../components/EditGameNameModal';
+import { GalaxyShapePreview } from '../components/GalaxyShapePreview';
 import { ApiError } from '../services/apiClient';
 import {
   acceptInvite,
@@ -43,6 +44,7 @@ import {
 import {
   buildPlayAgainSlots,
   canForfeitAsyncGame,
+  resolveGalaxyShape,
   resolveMapSize,
 } from '../services/playAgain';
 import { useAuthStore } from '../store/authStore';
@@ -65,6 +67,51 @@ const MAP_SIZE_LABELS: Record<MapSize, string> = {
   small: 'Small',
   medium: 'Medium',
   large: 'Large',
+};
+
+type GalaxyShapeChoice = GalaxyShape | 'random';
+
+const GALAXY_SHAPE_LABELS: Record<GalaxyShape, string> = {
+  scattered: 'Scattered',
+  dense_core: 'Dense Core',
+  ring: 'Ring',
+  cluster: 'Cluster',
+  spiral: 'Spiral',
+  crescent: 'Crescent',
+  binary: 'Binary',
+  ribbon: 'Ribbon',
+  halo: 'Halo',
+  broken_ring: 'Broken Ring',
+  crossroads: 'Crossroads',
+  clover: 'Clover',
+  coil: 'Coil',
+  barred: 'Barred',
+  hourglass: 'Hourglass',
+  lanes: 'Lanes',
+  asterisk: 'Asterisk',
+};
+
+const MAP_TYPE_OPTIONS: GalaxyShapeChoice[] = ['random', ...GALAXY_SHAPES];
+
+const MAP_TYPE_FIELD_HEIGHT = 48;
+
+const MAP_TYPE_SELECT_STYLE = {
+  width: '100%',
+  height: MAP_TYPE_FIELD_HEIGHT,
+  boxSizing: 'border-box' as const,
+  appearance: 'none' as const,
+  WebkitAppearance: 'none' as const,
+  MozAppearance: 'none' as const,
+  backgroundColor: '#faf7f4',
+  border: '1px solid #ccc4b8',
+  borderRadius: 8,
+  color: '#1c1c2e',
+  fontSize: 16,
+  lineHeight: `${MAP_TYPE_FIELD_HEIGHT}px`,
+  padding: '0 36px 0 14px',
+  letterSpacing: 0.5,
+  fontFamily: 'inherit',
+  cursor: 'pointer',
 };
 
 function formatAiCountLabel(aiCount: number): string | null {
@@ -507,6 +554,7 @@ export default function HomeScreen() {
   );
   const [gameNameDirty, setGameNameDirty] = useState(false);
   const [mapSize, setMapSize] = useState<MapSize>('medium');
+  const [galaxyShapeChoice, setGalaxyShapeChoice] = useState<GalaxyShapeChoice>('random');
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [openGameCount, setOpenGameCount] = useState(0);
   const [pendingLobbyCount, setPendingLobbyCount] = useState(0);
@@ -1000,19 +1048,24 @@ export default function HomeScreen() {
     size: MapSize,
     mode: 'passAndPlay' | 'asyncMultiplayer',
     lobbyFill: 'invite' | 'open' = 'invite',
+    galaxyShape?: GalaxyShape,
   ) => {
     const { width, height, planetCount } = computeMapDimensions(size, slots.length);
     const playerName = (slots[0]?.name ?? '').trim() || DEFAULT_PLAYER_NAME;
+    const mapConfig = {
+      mapSize: size,
+      mapWidth: width,
+      mapHeight: height,
+      planetCount,
+      ...(galaxyShape != null ? { galaxyShape } : {}),
+    };
 
     if (mode === 'passAndPlay') {
       startNewGame({
         playerName,
         gameName: campaignName,
         playerSlots: slots,
-        mapSize: size,
-        mapWidth: width,
-        mapHeight: height,
-        planetCount,
+        ...mapConfig,
         playMode: mode,
       });
       navigation.navigate('Game');
@@ -1025,10 +1078,7 @@ export default function HomeScreen() {
         playerName,
         gameName: campaignName,
         playerSlots: slots,
-        mapSize: size,
-        mapWidth: width,
-        mapHeight: height,
-        planetCount,
+        ...mapConfig,
         playMode: 'passAndPlay',
       });
       navigation.navigate('Game');
@@ -1048,7 +1098,7 @@ export default function HomeScreen() {
           await createGame({
             name: campaignName,
             playMode: 'async_multiplayer',
-            mapConfig: { mapSize: size, mapWidth: width, mapHeight: height, planetCount, seed },
+            mapConfig: { ...mapConfig, seed },
             playerSlots: slots.map((slot, index) => ({
               type: slot.type,
               userId: null,
@@ -1073,10 +1123,7 @@ export default function HomeScreen() {
     const config: GameConfig = {
       playerName,
       playerSlots: slots,
-      mapSize: size,
-      mapWidth: width,
-      mapHeight: height,
-      planetCount,
+      ...mapConfig,
       playMode: 'asyncMultiplayer',
     };
     const initialState = generateInitialGameState(config, seed);
@@ -1087,7 +1134,7 @@ export default function HomeScreen() {
         const response = await createGame({
           name: campaignName,
           playMode: 'async_multiplayer',
-          mapConfig: { mapSize: size, mapWidth: width, mapHeight: height, planetCount, seed },
+          mapConfig: { ...mapConfig, seed },
           playerSlots: slots.map((slot) => ({
             type: slot.type,
             userId: slot.userId ?? null,
@@ -1119,7 +1166,9 @@ export default function HomeScreen() {
 
   const handleLaunch = () => {
     const campaignName = resolveCampaignName(gameName, playerSlots, usesOpenLobbyName);
-    launchCampaign(campaignName, playerSlots, mapSize, playMode, fillMode);
+    const galaxyShape =
+      galaxyShapeChoice === 'random' ? undefined : galaxyShapeChoice;
+    launchCampaign(campaignName, playerSlots, mapSize, playMode, fillMode, galaxyShape);
   };
 
   const handleResume = (id: string) => {
@@ -1155,6 +1204,7 @@ export default function HomeScreen() {
           mapWidth: width,
           mapHeight: height,
           planetCount,
+          galaxyShape: record.config.galaxyShape,
           playMode: record.config.playMode,
         });
         navigation.navigate('Game');
@@ -1178,7 +1228,8 @@ export default function HomeScreen() {
           return;
         }
         const size = resolveMapSize(game.mapConfig?.mapSize);
-        launchCampaign(game.name, built.slots, size, 'asyncMultiplayer', 'invite');
+        const galaxyShape = resolveGalaxyShape(game.mapConfig?.galaxyShape);
+        launchCampaign(game.name, built.slots, size, 'asyncMultiplayer', 'invite', galaxyShape);
       },
     );
   };
@@ -1715,6 +1766,41 @@ export default function HomeScreen() {
                 );
               })}
             </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Map type</Text>
+            <View style={styles.mapTypeRow}>
+              <View style={styles.mapTypeSelectWrap}>
+                <select
+                  value={galaxyShapeChoice}
+                  onChange={(event) => {
+                    const next = event.currentTarget.value;
+                    if (next === 'random' || isGalaxyShape(next)) {
+                      setGalaxyShapeChoice(next);
+                    }
+                  }}
+                  style={MAP_TYPE_SELECT_STYLE}
+                >
+                  {MAP_TYPE_OPTIONS.map((shape) => (
+                    <option key={shape} value={shape}>
+                      {shape === 'random' ? 'Random' : GALAXY_SHAPE_LABELS[shape]}
+                    </option>
+                  ))}
+                </select>
+                <Text style={styles.mapTypeSelectChevron} pointerEvents="none">
+                  ▾
+                </Text>
+              </View>
+              <View style={styles.mapTypePreview}>
+                <GalaxyShapePreview shape={galaxyShapeChoice} />
+              </View>
+            </View>
+            {galaxyShapeChoice !== 'random' && (
+              <Text style={styles.mapTypeEstimate}>
+                The shape shown is an estimate.
+              </Text>
+            )}
           </View>
 
           {playerSlots.some((slot) => slot.type === 'ai') && (
@@ -2909,6 +2995,39 @@ const styles = StyleSheet.create({
   },
   mapSizeRow: {
     gap: 10,
+  },
+  mapTypeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  mapTypeSelectWrap: {
+    flex: 1,
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  mapTypeSelectChevron: {
+    position: 'absolute',
+    right: 14,
+    color: COLORS.textMuted,
+    fontSize: 14,
+  },
+  mapTypePreview: {
+    width: MAP_TYPE_FIELD_HEIGHT,
+    height: MAP_TYPE_FIELD_HEIGHT,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.panel,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapTypeEstimate: {
+    marginTop: 6,
+    color: COLORS.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
   },
   mapSizeButton: {
     paddingVertical: 14,

@@ -61,7 +61,7 @@ Indexes: `(addressee_id, status)`, `(requester_id, status)`
 | name | VARCHAR(255) NOT NULL | Default: 'Untitled Game' |
 | status | ENUM('waiting','active','finished') | 'waiting' until all invites accepted |
 | play_mode | ENUM('pass_and_play','async_multiplayer') | |
-| map_config_json | TEXT NOT NULL | Serialized MapConfig (width, height, planetCount, seed, mapSize, galaxyShape) |
+| map_config_json | TEXT NOT NULL | Serialized MapConfig (width, height, planetCount, seed, mapSize, optional galaxyShape) |
 | current_user_id | BIGINT UNSIGNED FK→users NULL | NULL when it is an AI's turn |
 | turn_number | INT UNSIGNED NOT NULL | Global turn counter, increments each player turn |
 | round_number | INT UNSIGNED NOT NULL | Full-cycle counter, increments when all players complete a turn |
@@ -356,7 +356,8 @@ Auth required.
     "mapWidth": 286,
     "mapHeight": 286,
     "planetCount": 30,
-    "seed": 1748556123456
+    "seed": 1748556123456,
+    "galaxyShape": "scattered"
   },
   "player_slots": [
     { "type": "human", "user_id": null, "name": "Dan" },
@@ -366,6 +367,8 @@ Auth required.
 }
 ```
 `user_id: null` in slot 0 means the authenticated creator fills that slot.
+
+`galaxyShape` on `map_config` is optional. When set it must be one of the 17 galaxy shapes. When omitted (Create Game **Random**), the client picks a shape from the seed at map generation.
 
 **Open lobby:** extra human slots may also send `user_id: null`. Those seats skip the friend check and skip `startGame()`. The game stays `waiting_for_players` with empty `state_json` until `POST /games/{id}/start`. Cannot mix invited friend IDs and open seats.
 
@@ -654,6 +657,7 @@ All API responses should use a consistent envelope. Errors:
 - The Sanctum token is stored in the client's AsyncStorage and persists across app sessions (no need to re-login)
 
 ## Changelog
+- 2026-09-17: `map_config.galaxyShape` is optional on `POST /games` (omit for Create Game Random). Stored in `map_config_json` when set.
 - 2026-09-10: `GET /api/games` (and create/show/start payloads) include `created_by_user_id`; list players ordered by `turn_order`. Command Center Play Again / Forfeit use existing create and forfeit endpoints.
 - 2026-08-26: Chat GET returns `can_send` / `cannot_send_reason` so the composer can be replaced when every other remaining human is blocked.
 - 2026-08-26: Phase 78–79 — `DELETE /api/auth/account`; block/unblock; message report/hide.

@@ -84,12 +84,12 @@ Settings → **Delete account** (current password). Live campaigns continue with
 - Turn alert badges on async game cards (see Turn Alerts section)
 - Pending game invites section or badge for unanswered invites
 - **Card ⋮ menu:** each Command Center game (async, Solo, Pass & Play) has a three-dot control instead of face buttons. Async order: **Chat** (unread badge on the ⋮), creator **Edit**, **Play Again**, **Forfeit** (or **Rejoin** when sitting out), **Delete** (creator, or the last remaining sitting-in human). Local: **Play Again**, **Delete**.
-- **Play Again:** same as filling Create Game with that roster, map size, campaign name, and game type, then launching. New seed/map (AI names regenerate). Does not copy state, fleets, or the old map. If the caller did not create the original, they swap seats with the original creator so they own the new game. Extra humans must still be accepted friends (`POST /games`).
+- **Play Again:** same as filling Create Game with that roster, map size, map type, campaign name, and game type, then launching. New seed/map (AI names regenerate). An explicit `galaxyShape` is reused; Random still picks a new layout. Does not copy state, fleets, or the old map. If the caller did not create the original, they swap seats with the original creator so they own the new game. Extra humans must still be accepted friends (`POST /games`).
 - **Forfeit from Command Center:** any sitting-in human member of an in-progress async game. Off-turn: `POST /games/{id}/forfeit`. On-turn: load the game, run the existing AI-submit-then-forfeit path, stay on Command Center.
 - **Delete game:** in the ⋮ menu for the creator (`created_by_user_id` equals the authenticated user), or for the sole remaining sitting-in human after every other human has forfeited (AI slots do not count). Confirmation alert → `DELETE /api/games/{id}` → card removed from lobby state and any matching local `GameRecord` (`asyncGameId`) dropped from Zustand. No status gate (waiting, in progress, and finished may all be deleted). If two or more humans are still sitting in, only the creator sees **Delete**.
 
 ### Async Game Creation
-When the user selects "Async Multiplayer" / Play with Friends in the new-game setup, a **Fill seats** control chooses the fill model:
+When the user selects "Async Multiplayer" / Play with Friends in the new-game setup, a **Fill seats** control chooses the fill model. **Map size** and **Map type** apply to every fill model: Map type is Random (default) or one of the 17 galaxy shapes. Random omits `map_config.galaxyShape` so generation uses the seeded picker; an explicit shape is stored and used when `state_json` is generated (invite path immediately, open lobby at `POST /games/{id}/start`).
 
 **Invite friends (default)**
 1. Human player slots (other than slot 0 — the creator) show a friend picker instead of a name text input. Opening the picker re-fetches `GET /friends` so the list matches friends added or removed since setup was opened.
@@ -244,6 +244,8 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 ---
 
 ## Changelog
+- 2026-09-17: Create Game map-type preview uses generated 6-player large-map SVGs and an estimate caption (hidden for Random).
+- 2026-09-17: Create Game **Map type** dropdown (Random + 17 galaxy shapes) with a same-height gray outline preview (`?` for Random). Random omits `map_config.galaxyShape`; an explicit shape is stored and reused by Play Again / open-lobby start.
 - 2026-09-10: Last remaining sitting-in human can **Delete** after other humans forfeit (Command Center ⋮ + `DELETE /games/{id}`). Creator still can in any status.
 - 2026-09-10: Invite friends picker re-fetches `GET /friends` each time it is opened during Create Game.
 - 2026-09-10: Command Center per-card ⋮ menu (Chat, Edit, Play Again, Forfeit, Delete). Play Again creates a fresh match from settings only (new map); non-host swaps with the original creator. Forfeit from the lobby for any sitting-in member.

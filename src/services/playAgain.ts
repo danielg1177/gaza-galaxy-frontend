@@ -1,5 +1,5 @@
 import { DEFAULT_PLAYER_NAME } from '../constants/app';
-import type { MapSize } from '../game/types';
+import { isGalaxyShape, type GalaxyShape, type MapSize } from '../game/types';
 import type { PlayerSlot } from '../store/gameStore';
 import type { ApiGame, ApiGamePlayer } from './gamesService';
 
@@ -8,6 +8,11 @@ export function resolveMapSize(value: string | undefined): MapSize {
     return value;
   }
   return 'medium';
+}
+
+/** Explicit Create Game map type. Undefined means Random (seeded picker). */
+export function resolveGalaxyShape(value: string | undefined): GalaxyShape | undefined {
+  return isGalaxyShape(value) ? value : undefined;
 }
 
 function findHumanSlotIndex(

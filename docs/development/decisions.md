@@ -2,6 +2,30 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-09-17 — Corridors stay 2–3 planets wide; bridges are random scatter
+**Decision:** Arm/ribbon/star layouts sample two or three offset banks across a corridor instead of a spine. Connectivity bridges scatter planets in a band wide enough for three, using the map RNG, rather than placing three parallel lanes at equal steps.
+**Rationale:** Single-file chains and stair-step bridges looked artificial and were easy chokepoints with no room to pass. Width-to-fit-three still leaves a corridor; random placement keeps it from reading as a ladder.
+**Alternatives considered:** Keeping the 3-lane grid and only jittering by 1 click (rejected — still reads as steps); filling the whole gap as a dense blob (rejected — merges clusters/binary cores).
+
+---
+## 2026-09-17 — Map-type preview is a generated 6-player map SVG
+**Decision:** The Create Game preview box shows a baked SVG of that galaxy shape generated at 6 players / large map (seed 42). Caption: **The shape shown is an estimate.** Hidden for Random (`?` only).
+**Rationale:** Outline glyphs did not match the real generator. A real sample at the assumed player count is a better estimate; the caption makes clear the launched map will differ.
+**Alternatives considered:** Generating a live preview from current player count and map size on each change (rejected — slower, and Create Game player count can change after the preview is seen); keeping abstract outlines (rejected — user asked for the inspection SVGs).
+
+---
+## 2026-09-17 — Constrained galaxy shapes sample their outline, not a fat growth tube
+**Decision:** Ribbon, barred, crossroads, and asterisk place planets by sampling along thin polylines (stratified along the spine with small lateral jitter). Halo samples two concentric rings; hourglass fills two overlapping disks; cluster uses tighter Gaussians with larger centre separation. `enforceMinimumSpacing` must change a planet's integer cell when a pair is closer than 2.5 clicks.
+**Rationale:** Organic growth in a wide band around a spine fills the interior at 135 planets, and leftover unconstrained spill plus normalize turns the map into a blob. Sub-cell spacing nudges rounded back onto the same grid point, so `tryLayout` rejected the real shape and `generateMap` fell back to `scattered`.
+**Alternatives considered:** Keeping growth-in-a-tube and lowering `halfWidth` (rejected — parent-linked growth still cannot follow a thin S or star); disabling the scattered fallback (rejected — launch must still succeed if a shape fails).
+
+---
+## 2026-09-17 — Create Game map type is a user setting
+**Decision:** Create Game includes a **Map type** dropdown (Random plus the 17 galaxy shapes). Random omits `galaxyShape` so `generateMap` uses the seeded picker. An explicit shape is stored on `GameConfig` and async `map_config.galaxyShape`. Play Again copies that choice; Random still picks a new shape from the new seed.
+**Rationale:** Players asked to choose a layout (or leave it random) without changing map generation itself.
+**Alternatives considered:** Always resolving Random to a concrete shape at create time and storing that shape (rejected — Play Again would then lock the accidental pick); adding `random` as a stored `galaxyShape` enum value (rejected — omitting the field matches existing generator behavior and old games).
+
+---
 ## 2026-09-11 — Same-turn build wrench; scheduled origins use dotted lines only
 **Decision:** The map no longer draws an orange ⟳ badge on planets with a scheduled troop movement. Those routes already use orange dotted lines. That top-left slot instead shows a blue wrench badge on owned planets that have at least one building with `builtOnRound === currentRound`.
 **Rationale:** The badge duplicated the dotted-line schedule cue. A same-turn build is otherwise only visible after opening the planet modal. Each player has one turn per round, so `builtOnRound === currentRound` is the queued-this-turn signal and clears after round wrap (or cancel) without a new engine field.
@@ -16,6 +40,7 @@ This file records significant design decisions with rationale. Never delete entr
 **Decision:** Command Center **Play Again** calls the same create/launch path as Create Game with that campaign's name, map-size tier, play type, and human/AI roster. Seed, map, galaxy shape, AI names, and `state_json` are generated fresh. If the caller is not `created_by_user_id`, they swap seats with the original host so they are slot 0 (backend requires slot 0 = creator) and the old host takes their previous seat. Extra humans still must be accepted friends.
 **Rationale:** User asked for a rematch that is identical to filling Create Game, not a clone of the old board. Swapping host and caller is the only change when you rematch someone else's game.
 **Alternatives considered:** Prefilling the Create Game form and waiting for Launch (rejected — Play Again should start the match); copying `map_config` seed/dimensions (rejected — user asked for a randomized map of the same size); converting matchmaking rematches to a new open lobby (rejected — same *players*, so invite those user ids).
+**Update (2026-09-17):** Play Again also copies the Create Game map-type choice. An explicit `galaxyShape` is reused; Random (omitted field) still picks a new shape from the new seed. Seed, planet positions, and AI names remain fresh.
 
 ## 2026-09-10 — Forfeit from Command Center; card actions live in a ⋮ menu
 **Decision:** Any sitting-in human can **Forfeit** from the Command Center card menu on an in-progress async game, not only from in-game ⋮ while it is their turn. Off-turn uses `POST /forfeit` only. On-turn loads the game and runs the existing AI-submit-then-forfeit path so `current_user_id` does not stall. Card ⋮ order is **Chat**, **Edit**, **Play Again**, **Forfeit**, **Delete** (Rejoin in the Forfeit slot when sitting out); unread chat badges the ⋮. FINISHED/victory styling stays on the card.

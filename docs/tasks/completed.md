@@ -1,5 +1,35 @@
 # Completed Tasks
 
+## Map previews, corridor width, random bridges
+**Completed:** 2026-09-17
+**Files modified:** `src/game/mapGenerator.ts`, `src/components/GalaxyShapePreview.tsx`, `src/screens/HomeScreen.tsx`, `src/assets/galaxyPreviewSvgs.ts`, `assets/galaxy-previews/*.svg`, `scripts/generate-galaxy-previews.ts`, docs
+**Notes:** Arms and ribbons sample 2–3 offset banks so they never taper to a single-file line. Connectivity fills a three-planet-wide corridor with RNG scatter instead of three parallel step-lanes. Create Game preview uses generated 6-player large-map SVGs (`npx tsx scripts/generate-galaxy-previews.ts`) and shows “The shape shown is an estimate.” except when Random is selected.
+
+---
+## Large-map galaxy shapes match their outlines
+**Completed:** 2026-09-17
+**Files modified:** `src/game/mapGenerator.ts`, docs
+**Notes:** Inspected every shape at 6 players / large map (135 planets, 111×111). Fat-tube growth plus unconstrained spill turned `ribbon`, `crossroads`, `barred`, and `asterisk` into blobs; `cluster` overlapped into one cloud; `halo` and `hourglass` failed to show two rings / a waist. Those now sample the intended geometry. `enforceMinimumSpacing` also failed on integer rounding (sub-0.5 pushes were no-ops), so several shapes silently fell back to `scattered`. Nudges now step at least one cell.
+
+---
+## Coil shape filled as a blob
+**Completed:** 2026-09-17
+**Files modified:** `src/game/mapGenerator.ts`, `src/components/GalaxyShapePreview.tsx`, docs
+**Notes:** `placePlanetsCoil` grew organically in a wide band around a spine that twisted less than one turn, so the tube filled the interior. Planets are now sampled along a logarithmic arm (~1.7–2.4 turns) with thin lateral scatter, matching two-arm `spiral`.
+
+---
+## Lanes shape filled as a single line
+**Completed:** 2026-09-17
+**Files modified:** `src/game/mapGenerator.ts`, docs
+**Notes:** `placePlanetsLanes` only seeded lane 0. Parent-linked growth cannot jump the lane gap, so the other rivers stayed empty and normalize stretched one line across the map. Each lane is now seeded at its midpoint and grown round-robin. Band width is capped below half the lane gap; overflow stays in a river.
+
+---
+## Create Game map type picker
+**Completed:** 2026-09-17
+**Files modified:** `src/game/types.ts`, `src/game/mapGenerator.ts`, `src/store/gameStore.ts`, `src/screens/HomeScreen.tsx`, `src/components/GalaxyShapePreview.tsx`, `src/services/gamesService.ts`, `src/services/playAgain.ts`, `src/services/matchmaking.ts`, docs
+**Notes:** Create Game has a **Map type** dropdown after map size: Random (default) plus the 17 galaxy shapes. The field sits beside a same-height preview box with a gray outline of that layout, or `?` when Random is selected. Cluster and dense core use a zoomed-out field of tiny gray dots instead of an outline. Random leaves `galaxyShape` unset so the seeded picker runs. An explicit shape is passed into `generateMap`, stored on `GameConfig` and `map_config`, and copied by Play Again / open-lobby start.
+
+---
 ## Same-turn build wrench; scheduled-origin planet badge removed
 **Completed:** 2026-09-11
 **Files modified:** `src/screens/GameScreen.tsx`, `src/screens/RulesScreen.tsx`, docs

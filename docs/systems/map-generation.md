@@ -16,6 +16,7 @@ interface MapConfig {
   height: number;
   planetCount: number;
   playerCount: number; // reserved for spawn placement; not used by generateMap
+  galaxyShape?: GalaxyShape; // optional — if absent, picked randomly from seed (Create Game Random)
 }
 ```
 
@@ -38,44 +39,44 @@ Uses **mulberry32**, a self-contained 32-bit seeded PRNG. No `Math.random()` any
 3. Reject candidates that violate minimum Euclidean distance from all already-placed planets — checks use virtual-space coordinates with a higher floor (`MIN_PLANET_DISTANCE × 2`) because normalization compresses the 2× virtual canvas into the final grid.
 4. Throw if placement fails after all attempts
 5. **Normalization pass:** uniform scale (preserves distance ratios; independent X/Y stretch was shrinking pairs) maps the virtual bounding box into the configured grid with `PLANET_EDGE_PADDING = 2`.
-6. **Spacing enforcement pass:** `enforceMinimumSpacing` nudges any post-normalize/integer-rounding pairs closer than `MIN_PLANET_DISTANCE` apart in final grid coordinates (what `computeClickDistance` reports).
+6. **Spacing enforcement pass:** `enforceMinimumSpacing` nudges any post-normalize/integer-rounding pairs closer than `MIN_PLANET_DISTANCE` apart in final grid coordinates (what `computeClickDistance` reports). The nudge steps at least one grid cell — a sub-0.5 push used to round back onto the same integer and leave large maps at ~2.0 clicks, after which `generateMap` fell back to `scattered`.
 7. Assign id `planet-0`, `planet-1`, …
 
 This produces varied irregular galaxy shapes (chains, arms, clusters) per seed (Task 92), replacing the symmetric central Gaussian blob (Tasks 89–91) and earlier multi-cluster layout (Task 86). The **`scattered`** galaxy shape uses this algorithm; see Galaxy Shapes below.
 
 ## Post-Placement Connectivity Pass
-After shape placement and bounding-box normalization, `ensureConnectivity(positions)` runs **before** planet objects are built.
+After shape placement and bounding-box normalization, `ensureConnectivity(positions, rng, width, height)` runs **before** planet objects are built.
 
 - Treats planets as nodes in an undirected graph: an edge exists when Euclidean distance ≤ **11 clicks** (matches `BASE_FLEET_RANGE_CLICKS` in `movementEngine.ts`).
-- If Union-Find finds more than one component, repeatedly connects the two closest planets in different components by inserting a **3-lane bridge** along the line between them (centre spine plus one planet on each side, 3 clicks apart). Tight gaps may place only 1–2 of the three lanes.
-- Bridge stations for a gap of distance `d`: `ceil(d / 11) - 1` rows at equal parametric steps; each lane uses a small shell search (radius 0–3) for `MIN_PLANET_DISTANCE` clearance; if none found, that lane is skipped (connectivity no longer overrides spacing).
+- If Union-Find finds more than one component, repeatedly connects the two closest planets in different components by scattering planets in a **three-planet-wide corridor** (half-width ≈ 5.25 clicks). Placement uses the seeded RNG so the corridor is a random scatter, not three parallel “step” lanes.
+- Count for a gap of distance `d`: about `3 × max(2, ceil(d / 11) − 1)` attempts along the corridor; each planet gets a random position in one of three offset banks with jitter. Tight gaps stay a short wide knot at the midpoint.
 - Bridge planets receive normal RNG-driven name, class, and attributes when `positions.map(...)` builds `Planet` objects (they append to the positions array).
 - Safety cap: 50 bridge iterations per map.
 - `spawnPlacer` is unaffected (reads final `planets[].position` only).
 
 ## Galaxy Shapes
 Each game is assigned a galaxy shape via the seeded RNG (or an explicit `MapConfig.galaxyShape`).
-The shape controls the planet placement algorithm used.
+Create Game exposes these as a **Map type** dropdown, plus **Random** (default), with a same-height preview of a generated 6-player large map (`?` for Random). Caption **The shape shown is an estimate.** sits under the row except when Random is selected. Random leaves `galaxyShape` unset so the picker chooses from the seed. An explicit choice is passed through `GameConfig.galaxyShape` and stored on async `map_config`. Preview SVGs live in `assets/galaxy-previews/` and are regenerated with `npx tsx scripts/generate-galaxy-previews.ts`.
 
 | Shape | Description |
 |-------|-------------|
 | `scattered` | Organic parent-linked growth from a central seed (current algorithm) |
 | `dense_core` | Radial density — planets biased toward the centre using inverse-square-root distribution; sparse edges |
 | `ring` | Annular band — planets in a ring (inner void ~40% of radius, ring thickness ~45%); empty centre and outer fringe |
-| `cluster` | 3–5 independent blobs of planets scattered across the map; Gaussian spread per cluster; creates natural chokepoints between groups |
+| `cluster` | 3–5 independent blobs of planets scattered across the map; tight Gaussian spread and large centre separation so the groups stay distinct; creates natural chokepoints between groups |
 | `spiral` | Two curved logarithmic arms winding outward from the centre; spine radius uniform [8%, 96%] of max; Gaussian lateral scatter σ ≈ 10% of max radius; curve factor 0.045 rad/unit |
 | `crescent` | Open horseshoe band (arc span 216°–288°); seeded rotation so the bay faces a different direction each game; empty interior on the open side |
 | `binary` | Two organic-growth cores on opposite sides of the map; `ensureConnectivity` forms the corridor chokepoint when the cores stay apart |
-| `ribbon` | Single winding S-curve of planets grown along a sine-wave spine (1.25–1.95 waves); long linear theater, meet-in-the-middle fights |
-| `halo` | Two concentric rings — a tight inner prize ring (~30% of planets) and a thicker outer band, with a void between them; `ensureConnectivity` adds spoke bridges when the gap exceeds fleet range |
-| `broken_ring` | Annular band with 2–3 seeded angular gaps (gates ~22°–32°); connectivity fills the gaps with 3-lane bridges |
-| `crossroads` | Two crossing diameters (X) or three rays from the centre (Y); junction is the contested prize |
+| `ribbon` | Winding S-curve sampled along a sine-wave spine (1.35–1.95 waves), at least two planets across; long linear theater, meet-in-the-middle fights |
+| `halo` | Two concentric rings — a tight inner prize ring and a thicker outer band, sampled by angle/radius with a void between them; `ensureConnectivity` adds spoke bridges when the gap exceeds fleet range |
+| `broken_ring` | Annular band with 2–3 seeded angular gaps (gates ~31°–48°); connectivity fills the gaps with 3-lane bridges |
+| `crossroads` | Two crossing diameters (X) or three rays from the centre (Y), sampled as 2–3-planet-wide arms; junction is the contested prize |
 | `clover` | Three organic lobes equally spaced around a small hub; more regular than `cluster` |
-| `coil` | Single logarithmic arm winding out from the centre (nautilus); distinct from two-arm `spiral` |
-| `barred` | Thick central bar with two short arms off the ends (barred-spiral galaxy) |
-| `hourglass` | Two overlapping lobes with a narrow waist (figure-8); distinct from separated `binary` cores |
-| `lanes` | Two or three parallel rivers of planets; distinct from the single `ribbon` |
-| `asterisk` | Four or five rays from a small hub; distinct from `crossroads` (X or Y) |
+| `coil` | Single logarithmic arm winding ~1.7–2.4 turns from the centre (nautilus), two planets across; distinct from two-arm `spiral` |
+| `barred` | Central bar with two short arms off the ends (barred-spiral galaxy), sampled along those polylines at corridor width |
+| `hourglass` | Two overlapping disks filled uniformly, leaving a pinched waist (figure-8); distinct from separated `binary` cores |
+| `lanes` | Two or three parallel rivers of planets; each river is seeded and grown separately so they stay visually apart; distinct from the single `ribbon` |
+| `asterisk` | Four or five rays from a small hub, 2–3 planets across; distinct from `crossroads` (X or Y) |
 
 ### Minimum Distance Rule
 ```
@@ -174,6 +175,11 @@ Opponent **gold** and **researchPoints** remain visible in the player list for n
 - What is the target planet count range per player count?
 
 ## Changelog
+- 2026-09-17: Corridors never collapse to a single-file line — arms sample 2–3 offset banks. Connectivity bridges scatter in a three-planet-wide band instead of three parallel step-lanes. Create Game map-type preview uses generated 6-player large-map SVGs, with “The shape shown is an estimate.” under the picker (hidden for Random).
+- 2026-09-17: Large 6-player maps (135 planets, 111×111) were inspected for every shape. Arm/ribbon layouts now sample thin polylines instead of growing fat tubes; `cluster` uses tighter blobs; `halo` samples two rings; `hourglass` fills overlapping disks; `broken_ring` gates are wider. `enforceMinimumSpacing` now steps at least one grid cell so integer rounding no longer leaves pairs at ~2.0 clicks and silently falls back to `scattered`.
+- 2026-09-17: `coil` placement samples a true logarithmic arm (~1.7–2.4 turns, thin lateral scatter) instead of growing a fat tube around a weakly wound spine — that filled into a blob with a small centre.
+- 2026-09-17: `lanes` placement seeds every river and grows round-robin per lane (was one seed on lane 0, so organic growth never reached the other rivers and normalize stretched a single line across the map). Lane gap widened; band width capped so the rivers do not merge. Leftover planets stay in a river instead of spilling into the gap.
+- 2026-09-17: Create Game **Map type** dropdown (Random + all seventeen shapes) with a same-height gray outline preview (`?` for Random; cluster/dense_core use a zoomed-out gray dot field). Random omits `galaxyShape`; an explicit shape is stored on `GameConfig` / `map_config` and reused by Play Again and open-lobby start.
 - 2026-09-10: Five more galaxy shapes — `coil` (single winding arm), `barred` (bar + two arms), `hourglass` (figure-8), `lanes` (2–3 parallel rivers), `asterisk` (4–5 rays).
 - 2026-09-04: Three more galaxy shapes — `broken_ring` (ring with gates), `crossroads` (X or Y junction), `clover` (three lobes + hub).
 - 2026-09-04: Connectivity bridges are 3 lanes wide (centre + two flanks, 3-click spacing) instead of a single-file line, so corridors can hold two or three planets across.
