@@ -5,7 +5,7 @@
 
 ## Overview
 Push notifications via Expo Notifications, triggered by the Laravel backend after game events.
-Tapping a notification deep-links the user directly into the relevant game.
+Tapping a notification deep-links into the relevant game when it is the player's turn in an accepted match. If they have not accepted the invite yet, they land on Command Center instead of the map.
 
 ---
 
@@ -57,12 +57,17 @@ Implemented in `App.tsx` (Task 148):
 1. `Notifications.addNotificationResponseReceivedListener` extracts `game_id` from `response.notification.request.content.data` and stores it in a `pendingGameId` ref.
 2. **Cold start:** if auth is not yet resolved, the game ID waits in the ref; a `useEffect` on `currentUser` calls `consumePendingGameId()` once `currentUser` is non-null and `isLoadingAuth` is false.
 3. **Warm start:** if the user is already authenticated when the notification is tapped, `consumePendingGameId()` is invoked directly from the listener.
-4. `consumePendingGameId()` calls `getGame(gameId)`, navigates to `Home`, then opens `Game` only when `detail.isMyTurn` (loads via `loadAsyncGame` first). If it is not the player's turn, the user lands on Home with no game open. All errors swallowed silently.
+4. `consumePendingGameId()` calls `getGame(gameId)` and `listInvites()` in parallel, always navigates to `Home` (Command Center) first, then opens `Game` only when the user has accepted the match and it is their turn. Stay on Command Center when:
+   - the user still has a pending invite for that `game_id`
+   - `status` is `waiting_for_players` (parked invite-friends game or unfilled lobby)
+   - `playMode` is `async_multiplayer` and `isMyTurn` is false
+   Loads via `loadAsyncGame` before `navigate('Game')`. All errors swallowed silently.
 
 When a user taps a notification:
 1. Extract `game_id` from the notification data payload
-2. If the app is already open: navigate to that game directly
-3. If the app is launching from a notification tap: after auth check resolves, navigate to the game
+2. If the invite is still pending: land on Command Center (accept/decline there). Do not open the map.
+3. If the app is already open and it is an accepted match on the player's turn: navigate into that game
+4. If the app is launching from a notification tap: after auth check resolves, follow the same rules
 
 **Notification data payload format:**
 ```json
@@ -134,6 +139,7 @@ Batch multiple tokens by passing an array to `to` when notifying multiple player
 ---
 
 ## Changelog
+- 2026-09-18: Notification deep-link no longer opens the map for a game the user has not accepted. Tapping `invite_received` or a "your turn" push for a pending invite lands on Command Center. End Turn / Exit Game were 422 because parked invitee turns set `status = waiting_for_players`.
 - 2026-08-25: Matchmaking start notifies the first human (your turn) and every other human (game started). Same `event: game_started` so deep-link stays on Home when it is not your turn.
 - 2026-05-29: Task 148 complete — `App.tsx` deep-link handler: notification response listener, `pendingGameId` ref, imperative navigation via `useNavigationContainerRef`, `getGame` + `loadAsyncGame` flow matching HomeScreen async card tap.
 - 2026-05-29: Task 147 complete — `src/services/pushNotificationService.ts` implements `registerNotificationHandler()` and `setupPushNotifications()`; `App.tsx` wires module-level handler and post-login token upload with AsyncStorage dedup (`push_token` key).

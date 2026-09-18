@@ -2,6 +2,12 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-09-18 — Unaccepted games stay on Command Center
+**Decision:** Notification deep-links and Command Center taps do not open the map while the user has a pending `game_invites` row, or while `status` is `waiting_for_players`. They land on Command Center so the invite can be accepted or declined. `GET /games` / `GET /games/{id}` report `is_my_turn: false` for those callers even if `current_user_id` already points at them.
+**Rationale:** Creator-first start parks the match as `waiting_for_players` when the next human has not accepted. Opening the map anyway made End Turn and Exit Game fail (422: game is not in progress).
+**Alternatives considered:** Auto-accepting on notification tap (rejected — decline would be skipped); opening read-only (rejected — there is nothing to play until they accept).
+
+---
 ## 2026-09-17 — Corridors stay 2–3 planets wide; bridges are random scatter
 **Decision:** Arm/ribbon/star layouts sample two or three offset banks across a corridor instead of a spine. Connectivity bridges scatter planets in a band wide enough for three, using the map RNG, rather than placing three parallel lanes at equal steps.
 **Rationale:** Single-file chains and stair-step bridges looked artificial and were easy chokepoints with no room to pass. Width-to-fit-three still leaves a corridor; random placement keeps it from reading as a ladder.

@@ -10,6 +10,16 @@
 
 ---
 
+### ~~Invite / unaccepted-turn notifications opened the map~~ (2026-09-18, resolved 2026-09-18)
+
+**Symptom:** Tapping a "you've been invited" or "your turn" notification for a friends game the user had not accepted opened the map. End Turn and Exit Game then failed.
+
+**Root cause:** Invited humans are `game_players` at create time. After the creator submits, `current_user_id` points at the invitee and `is_my_turn` was true even with a pending invite. The match is parked as `waiting_for_players`, so turn save/submit return 422. The deep-link only checked `isMyTurn` before `navigate('Game')`.
+
+**Fix:** Deep-link and Command Center open stay on Home when a pending invite exists or status is `waiting_for_players`. Backend `is_my_turn` is false until the invite is accepted.
+
+---
+
 ### ~~Slider showed 4.0 troops/turn but garrison gained 3~~ (2026-09-02, resolved 2026-09-02)
 
 **Symptom:** Dragging the gold–troops slider until the live label read `4.0 troops/turn` could still add only 3 ships on the next production tick.
@@ -357,6 +367,7 @@ _None yet._
 ---
 
 ## Changelog
+- 2026-09-18: Resolved invite / unaccepted-turn notifications opening the map (deep-link stays on Command Center; `is_my_turn` false while invite pending).
 - 2026-09-02: Resolved slider `4.0 troops/turn` vs 3 garrisoned — `computeFactoryOutputs` / `roundToTenth` before troop accumulator and gold floor.
 - 2026-08-19: Resolved async knockout skipping the eliminated human's farewell turn and looping the attacker (Phase 73, Task 258).
 - 2026-08-19: Resolved pass-and-play knockout skip of the first player after a round-wrap elimination, plus local knockout flipping the async submit overlay (Phase 69, Task 252).

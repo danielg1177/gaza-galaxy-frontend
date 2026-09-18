@@ -19,7 +19,7 @@ import RegisterScreen from './src/screens/RegisterScreen';
 import RulesScreen from './src/screens/RulesScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import { setOnUnauthorized } from './src/services/apiClient';
-import { getGame } from './src/services/gamesService';
+import { getGame, listInvites } from './src/services/gamesService';
 import {
   requestHomeRefresh,
   setupPushHomeRefreshBridge,
@@ -87,9 +87,19 @@ export default function App() {
     pendingGameId.current = null;
 
     try {
-      const detail = await getGame(gameId);
+      const [detail, pendingInvites] = await Promise.all([
+        getGame(gameId),
+        listInvites().catch(() => []),
+      ]);
       navigationRef.current?.navigate('Home');
-      if (detail.playMode === 'async_multiplayer' && !detail.isMyTurn) {
+      const hasPendingInvite = pendingInvites.some(
+        (invite) => invite.game.id === gameId,
+      );
+      if (
+        hasPendingInvite ||
+        detail.status === 'waiting_for_players' ||
+        (detail.playMode === 'async_multiplayer' && !detail.isMyTurn)
+      ) {
         return;
       }
       useGameStore.getState().loadAsyncGame(detail);

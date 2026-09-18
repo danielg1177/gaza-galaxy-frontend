@@ -1285,6 +1285,9 @@ export default function HomeScreen() {
     if (loadingGameId !== null) {
       return;
     }
+    if (invites.some((invite) => invite.game.id === gameId)) {
+      return;
+    }
     const summary = asyncGames.find((g) => g.id === gameId);
     const canViewFinalBattle =
       summary !== undefined &&
@@ -1292,9 +1295,10 @@ export default function HomeScreen() {
       finalBattleViewedByGameId[String(summary.id)] !== true;
     if (
       summary !== undefined &&
-      isAsyncMultiplayerApiGame(summary) &&
-      !summary.isMyTurn &&
-      !canViewFinalBattle
+      (summary.status === 'waiting_for_players' ||
+        (isAsyncMultiplayerApiGame(summary) &&
+          !summary.isMyTurn &&
+          !canViewFinalBattle))
     ) {
       return;
     }
@@ -1312,9 +1316,10 @@ export default function HomeScreen() {
           detail.status === 'finished' &&
           finalBattleViewedByGameId[String(detail.id)] !== true;
         if (
-          isAsyncMultiplayerApiGame(detail) &&
-          !detail.isMyTurn &&
-          !detailCanViewFinalBattle
+          detail.status === 'waiting_for_players' ||
+          (isAsyncMultiplayerApiGame(detail) &&
+            !detail.isMyTurn &&
+            !detailCanViewFinalBattle)
         ) {
           setLoadingGameId(null);
           return;

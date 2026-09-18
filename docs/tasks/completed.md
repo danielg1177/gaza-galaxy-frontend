@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Pending invite notifications stay on Command Center
+**Completed:** 2026-09-18
+**Files modified:** `App.tsx`, `src/screens/HomeScreen.tsx`, backend `GameController.php`, docs
+**Notes:** Tapping an invite or "your turn" notification for a friends game the user has not accepted no longer opens the map. `consumePendingGameId` and Command Center open stay on Home when a pending invite exists or `status` is `waiting_for_players`. Backend `GET /games` and `GET /games/{id}` set `is_my_turn` false for pending invitees. End Turn / Exit Game were 422 because parked invitee turns are not `in_progress`.
+
+---
 ## Map preview tap-to-enlarge; larger planet dots
 **Completed:** 2026-09-17
 **Files modified:** `src/components/GalaxyShapePreview.tsx`, `scripts/generate-galaxy-previews.ts`, `src/assets/galaxyPreviewSvgs.ts`, `assets/galaxy-previews/*.svg`, docs

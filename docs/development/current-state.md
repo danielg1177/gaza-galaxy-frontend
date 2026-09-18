@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-09-17 (map preview tap-to-enlarge; larger planet dots)
+2026-09-18 (pending-invite notification deep-link stays on Command Center)
 
 ## Overall Status
 
@@ -10,6 +10,7 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Notification / Command Center open no longer loads the map for a friends game the user has not accepted. Tapping an invite or "your turn" push lands on Command Center; End Turn / Exit were 422 because parked invitee turns are `waiting_for_players`. Backend `is_my_turn` is false while a `game_invites` row is still pending.
 - Create Game map-type preview shows a generated 6-player large-map SVG for the selected shape; tap it to open a larger view. Caption “The shape shown is an estimate.” sits under the row (hidden for Random). Arms stay at least two planets across; connectivity bridges scatter in a three-planet-wide corridor instead of stair-step lanes.
 - Large 6-player maps: `cluster`, `ribbon`, `halo`, `broken_ring`, `crossroads`, `barred`, `hourglass`, and `asterisk` were blobs or silent `scattered` fallbacks. Thin shapes now sample along their spines; spacing nudges at least one grid cell so normalize/round no longer discards the layout.
 - Coil maps were a blob with a small centre: the arm barely wound and planets grew in a fat tube around it. Coil now samples a logarithmic nautilus arm (~1.7–2.4 turns) the same way spiral samples its two arms.
@@ -226,7 +227,7 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/store/authStore.ts` | Implemented — `useAuthStore` Zustand store; `currentUser`, `token`, `isLoadingAuth`; `login`/`register`/`logout`/`loadStoredAuth` |
 | `src/screens/LoginScreen.tsx` | Implemented — warm off-white card layout; username/password inputs; Sign In button with loading state; error display; link to Register |
 | `src/screens/RegisterScreen.tsx` | Implemented — same card layout as LoginScreen; username/password/confirm fields; client-side password match validation; field-level API error display; link back to Login |
-| `App.tsx` | Updated — auth gate; push token setup; notification deep-link (`pendingGameId` ref, response listener, `useNavigationContainerRef`, `getGame` + `loadAsyncGame` + navigate); `Game` route accepts optional `isReadOnly` param; main stack includes `Friends`; `setOnUnauthorized` wired to `logout()` |
+| `App.tsx` | Updated — auth gate; push token setup; notification deep-link (`pendingGameId` ref, response listener, `useNavigationContainerRef`, `getGame` + `listInvites` + `loadAsyncGame` + navigate; stay on Home for pending invites / `waiting_for_players`); `Game` route accepts optional `isReadOnly` param; main stack includes `Friends`; `setOnUnauthorized` wired to `logout()` |
 | `src/game/types.ts` | Defined — core types |
 | `src/game/mapGenerator.ts` | Implemented — seeded map generation |
 | `src/game/spawnPlacer.ts` | Implemented — zone-based starting planet placement |
@@ -238,10 +239,11 @@ Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is 
 | `src/game/validationEngine.ts` | Stub only |
 | `src/game/index.ts` | Re-exports all modules |
 | `src/store/gameStore.ts` | Zustand store — `isAsyncGame()` keyed on `asyncGameId`; `loadAsyncGame` forces `playMode: 'asyncMultiplayer'` and overlays `is_forfeited`; async `endTurn` / forfeit submit (`submitTurn`, `isSubmittingTurn`, `shouldReturnHome`); local pass-and-play unchanged |
-| `src/screens/HomeScreen.tsx` | Command Center lobby — async games with alert badges + priority sort; tappable only when `isMyTurn`; per-card ⋮ menu (Chat, Edit, Play Again, Forfeit, Delete); Play Again recreates from settings only (swap caller into host seat if they did not create the original); any sitting-in member can Forfeit; **Pass & Play** / **Solos** cards use the same ⋮ menu; per-card `getGame` loading; game invites; Find Game badge = open + pending lobbies; auto campaign names from roster unless the field was edited; Invite friends picker refreshes `GET /friends` on open; `AppTopBar` (Friends + Logout) |
+| `src/screens/HomeScreen.tsx` | Command Center lobby — async games with alert badges + priority sort; tappable only when `isMyTurn` (not pending invite / `waiting_for_players`); per-card ⋮ menu (Chat, Edit, Play Again, Forfeit, Delete); Play Again recreates from settings only (swap caller into host seat if they did not create the original); any sitting-in member can Forfeit; **Pass & Play** / **Solos** cards use the same ⋮ menu; per-card `getGame` loading; game invites; Find Game badge = open + pending lobbies; auto campaign names from roster unless the field was edited; Invite friends picker refreshes `GET /friends` on open; `AppTopBar` (Friends + Logout) |
 | `src/screens/GameScreen.tsx` | Playable galaxy map + fleet dispatch; ⋮ **Exit Game** / **Exit to Home** first, **Forfeit**, **End Game** last; pass-and-play lock screen hidden when `asyncGameId != null`; async submit overlay; read-only spectator banner when `isReadOnly` |
 
 ## Changelog
+- 2026-09-18: Pending invite deep-link — `consumePendingGameId` stays on Command Center when `listInvites` still has that game, or `status` is `waiting_for_players`; Command Center tap uses the same guards. Backend `is_my_turn` is false for pending invitees.
 - 2026-09-10: Create Game Invite friends picker re-fetches `GET /friends` whenever a seat's "Select a friend" control is opened (stale list if friends changed after entering setup).
 - 2026-09-11: Map planet markers — removed orange ⟳ scheduled-origin badge (dotted route lines remain); added blue wrench on owned planets with a same-turn queued build (`builtOnRound === currentRound`).
 - 2026-09-10: Last remaining sitting-in human can Delete an async game after other humans forfeit (`canDeleteAsyncGame` + `DELETE /games/{id}`).

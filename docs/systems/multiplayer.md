@@ -127,8 +127,9 @@ If there are no AI seats, the `v nAIs` suffix is omitted (`Daniel v Nery`, or `3
 
 ### Game Invites
 - Invited users see pending invites in their HomeScreen (badge count + invite list)
+- Tapping an invite notification (or a "your turn" notification for a game they have not accepted) opens Command Center, not the map
 - Tapping an invite shows game details (creator, map size, player list, AI count)
-- User accepts → they join the game; if all invites are now accepted the game auto-starts
+- User accepts → they join the game; if the match was parked waiting for them, it returns to `in_progress` on their turn
 - User declines → game is cancelled; creator is notified
 
 ---
@@ -244,6 +245,7 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 ---
 
 ## Changelog
+- 2026-09-18: Pending invite notification / Command Center open stay on Home instead of loading the map; `is_my_turn` is false until the invite is accepted.
 - 2026-09-17: Map-type preview planet dots are 50% larger; tapping the image opens a larger view.
 - 2026-09-17: Create Game map-type preview uses generated 6-player large-map SVGs and an estimate caption (hidden for Random).
 - 2026-09-17: Create Game **Map type** dropdown (Random + 17 galaxy shapes) with a same-height gray outline preview (`?` for Random). Random omits `map_config.galaxyShape`; an explicit shape is stored and reused by Play Again / open-lobby start.
