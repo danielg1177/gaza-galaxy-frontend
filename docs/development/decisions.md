@@ -12,6 +12,7 @@ This file records significant design decisions with rationale. Never delete entr
 **Decision:** The Create Game preview box shows a baked SVG of that galaxy shape generated at 6 players / large map (seed 42). Caption: **The shape shown is an estimate.** Hidden for Random (`?` only).
 **Rationale:** Outline glyphs did not match the real generator. A real sample at the assumed player count is a better estimate; the caption makes clear the launched map will differ.
 **Alternatives considered:** Generating a live preview from current player count and map size on each change (rejected — slower, and Create Game player count can change after the preview is seen); keeping abstract outlines (rejected — user asked for the inspection SVGs).
+**Update (2026-09-17):** Planet dots are 50% larger (r=3.3). Tapping the preview opens a larger view of the same image.
 
 ---
 ## 2026-09-17 — Constrained galaxy shapes sample their outline, not a fat growth tube

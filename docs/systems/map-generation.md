@@ -56,7 +56,7 @@ After shape placement and bounding-box normalization, `ensureConnectivity(positi
 
 ## Galaxy Shapes
 Each game is assigned a galaxy shape via the seeded RNG (or an explicit `MapConfig.galaxyShape`).
-Create Game exposes these as a **Map type** dropdown, plus **Random** (default), with a same-height preview of a generated 6-player large map (`?` for Random). Caption **The shape shown is an estimate.** sits under the row except when Random is selected. Random leaves `galaxyShape` unset so the picker chooses from the seed. An explicit choice is passed through `GameConfig.galaxyShape` and stored on async `map_config`. Preview SVGs live in `assets/galaxy-previews/` and are regenerated with `npx tsx scripts/generate-galaxy-previews.ts`.
+Create Game exposes these as a **Map type** dropdown, plus **Random** (default), with a same-height preview of a generated 6-player large map (`?` for Random). Tapping the preview opens a larger view of the same image. Caption **The shape shown is an estimate.** sits under the row except when Random is selected. Random leaves `galaxyShape` unset so the picker chooses from the seed. An explicit choice is passed through `GameConfig.galaxyShape` and stored on async `map_config`. Preview SVGs live in `assets/galaxy-previews/` and are regenerated with `npx tsx scripts/generate-galaxy-previews.ts` (planet dots at r=3.3).
 
 | Shape | Description |
 |-------|-------------|
@@ -175,6 +175,7 @@ Opponent **gold** and **researchPoints** remain visible in the player list for n
 - What is the target planet count range per player count?
 
 ## Changelog
+- 2026-09-17: Map-type preview planet dots are 50% larger (r 2.2→3.3). Tapping the preview opens a larger view of the same image; tap outside or the image to close. Random still shows `?` only (not tappable).
 - 2026-09-17: Corridors never collapse to a single-file line — arms sample 2–3 offset banks. Connectivity bridges scatter in a three-planet-wide band instead of three parallel step-lanes. Create Game map-type preview uses generated 6-player large-map SVGs, with “The shape shown is an estimate.” under the picker (hidden for Random).
 - 2026-09-17: Large 6-player maps (135 planets, 111×111) were inspected for every shape. Arm/ribbon layouts now sample thin polylines instead of growing fat tubes; `cluster` uses tighter blobs; `halo` samples two rings; `hourglass` fills overlapping disks; `broken_ring` gates are wider. `enforceMinimumSpacing` now steps at least one grid cell so integer rounding no longer leaves pairs at ~2.0 clicks and silently falls back to `scattered`.
 - 2026-09-17: `coil` placement samples a true logarithmic arm (~1.7–2.4 turns, thin lateral scatter) instead of growing a fat tube around a weakly wound spine — that filled into a blob with a small centre.

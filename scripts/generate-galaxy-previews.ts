@@ -26,7 +26,7 @@ function toSvg(
   const dots = points
     .map(
       (p) =>
-        `<circle cx="${(p.x * scale).toFixed(1)}" cy="${(p.y * scale).toFixed(1)}" r="2.2" fill="#334"/>`,
+        `<circle cx="${(p.x * scale).toFixed(1)}" cy="${(p.y * scale).toFixed(1)}" r="3.3" fill="#334"/>`,
     )
     .join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${width * scale} ${height * scale}"><rect width="100%" height="100%" fill="#f5f0eb"/>${dots}</svg>`;

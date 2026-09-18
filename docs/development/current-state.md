@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-09-17 (map previews, corridor width, random bridges)
+2026-09-17 (map preview tap-to-enlarge; larger planet dots)
 
 ## Overall Status
 
@@ -10,7 +10,7 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
-- Create Game map-type preview shows a generated 6-player large-map SVG for the selected shape, with “The shape shown is an estimate.” under the row (hidden for Random). Arms stay at least two planets across; connectivity bridges scatter in a three-planet-wide corridor instead of stair-step lanes.
+- Create Game map-type preview shows a generated 6-player large-map SVG for the selected shape; tap it to open a larger view. Caption “The shape shown is an estimate.” sits under the row (hidden for Random). Arms stay at least two planets across; connectivity bridges scatter in a three-planet-wide corridor instead of stair-step lanes.
 - Large 6-player maps: `cluster`, `ribbon`, `halo`, `broken_ring`, `crossroads`, `barred`, `hourglass`, and `asterisk` were blobs or silent `scattered` fallbacks. Thin shapes now sample along their spines; spacing nudges at least one grid cell so normalize/round no longer discards the layout.
 - Coil maps were a blob with a small centre: the arm barely wound and planets grew in a fat tube around it. Coil now samples a logarithmic nautilus arm (~1.7–2.4 turns) the same way spiral samples its two arms.
 - Lanes maps were one thick line: placement only seeded the first river, so the others never filled. Each river is now seeded and grown separately, with a wider gap and a capped band width.

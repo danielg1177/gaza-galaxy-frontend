@@ -244,6 +244,7 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 ---
 
 ## Changelog
+- 2026-09-17: Map-type preview planet dots are 50% larger; tapping the image opens a larger view.
 - 2026-09-17: Create Game map-type preview uses generated 6-player large-map SVGs and an estimate caption (hidden for Random).
 - 2026-09-17: Create Game **Map type** dropdown (Random + 17 galaxy shapes) with a same-height gray outline preview (`?` for Random). Random omits `map_config.galaxyShape`; an explicit shape is stored and reused by Play Again / open-lobby start.
 - 2026-09-10: Last remaining sitting-in human can **Delete** after other humans forfeit (Command Center ⋮ + `DELETE /games/{id}`). Creator still can in any status.

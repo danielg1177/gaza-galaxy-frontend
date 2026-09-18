@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Map preview tap-to-enlarge; larger planet dots
+**Completed:** 2026-09-17
+**Files modified:** `src/components/GalaxyShapePreview.tsx`, `scripts/generate-galaxy-previews.ts`, `src/assets/galaxyPreviewSvgs.ts`, `assets/galaxy-previews/*.svg`, docs
+**Notes:** Tapping the Create Game map-type image opens a larger view of the same SVG (tap the image or backdrop to close). Preview planet dots regenerated at 50% larger radius (2.2→3.3). Random still shows `?` and is not tappable.
+
+---
 ## Map previews, corridor width, random bridges
 **Completed:** 2026-09-17
 **Files modified:** `src/game/mapGenerator.ts`, `src/components/GalaxyShapePreview.tsx`, `src/screens/HomeScreen.tsx`, `src/assets/galaxyPreviewSvgs.ts`, `assets/galaxy-previews/*.svg`, `scripts/generate-galaxy-previews.ts`, docs
