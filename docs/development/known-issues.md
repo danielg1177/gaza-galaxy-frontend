@@ -10,6 +10,16 @@
 
 ---
 
+### ~~Async: scheduled troop movements vanish after the next player's turn~~ (2026-09-25, resolved 2026-09-25)
+
+**Symptom:** A player sets up standing orders, ends their turn, and by the time the turn comes back the orange dotted routes and the **Scheduled Troop Movements** rows are gone. No code change preceded it; games played days earlier were fine.
+
+**Root cause:** `resolveTurn` rebuilt `GameState` field by field instead of spreading the incoming state, and the whole result is submitted as `state_json` and stored verbatim. Any client running a bundle from before the 2026-09-10 scheduled-movements commit has a `resolveTurn` whose return literal has no `scheduledMovements`, so its submit deleted the standing orders of **every** player in the game. A PWA left open in a tab or a home-screen app that has not cold-started since then never reloads its JavaScript, so a single stale participant silently wiped everyone's schedules once per round. Reproduced with a two-human simulation: schedules survive up-to-date submits and disappear on the first stale one.
+
+**Fix:** `resolveTurn` now spreads `state` before overriding the fields it computes, so fields it does not know about can no longer be dropped. Because that only helps clients that already have the new bundle, `TurnController::submit` also restores any `PRESERVED_STATE_KEYS` (currently `scheduledMovements`) that a submission omits entirely — a key present but empty is a real change and still wins.
+
+---
+
 ### ~~Invite / unaccepted-turn notifications opened the map~~ (2026-09-18, resolved 2026-09-18)
 
 **Symptom:** Tapping a "you've been invited" or "your turn" notification for a friends game the user had not accepted opened the map. End Turn and Exit Game then failed.

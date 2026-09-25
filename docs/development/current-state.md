@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-09-18 (pending-invite notification deep-link stays on Command Center)
+2026-09-25 (scheduled movements no longer wiped by clients running an older bundle)
 
 ## Overall Status
 
@@ -10,6 +10,7 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Standing orders survived a player's own submit but were deleted by the next player when that player ran a bundle predating 2026-09-10. `resolveTurn` now spreads the incoming `GameState` instead of rebuilding it key by key, and `TurnController::submit` restores `scheduledMovements` when a submission omits the key entirely, so one stale client can no longer wipe every player's schedules.
 - Notification / Command Center open no longer loads the map for a friends game the user has not accepted. Tapping an invite or "your turn" push lands on Command Center; End Turn / Exit were 422 because parked invitee turns are `waiting_for_players`. Backend `is_my_turn` is false while a `game_invites` row is still pending.
 - Create Game map-type preview shows a generated 6-player large-map SVG for the selected shape; tap it to open a larger view. Caption “The shape shown is an estimate.” sits under the row (hidden for Random). Arms stay at least two planets across; connectivity bridges scatter in a three-planet-wide corridor instead of stair-step lanes.
 - Large 6-player maps: `cluster`, `ribbon`, `halo`, `broken_ring`, `crossroads`, `barred`, `hourglass`, and `asterisk` were blobs or silent `scattered` fallbacks. Thin shapes now sample along their spines; spacing nudges at least one grid cell so normalize/round no longer discards the layout.

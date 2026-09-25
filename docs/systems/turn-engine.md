@@ -112,7 +112,12 @@ Async ⋮ **Forfeit** uses the same `isAiControlled` loop. The store discards qu
 
 `loadGame` and `loadAsyncGame` call **`drainStaleFleets`**, which removes any fleet with `turnsRemaining <= 0` from `GameState.fleets` before the match resumes. Under normal play, round-wrap resolution leaves only `turnsRemaining > 0` fleets in state; persisted saves from before that invariant (or corrupted state) could otherwise re-enter the early-arrivals block at the next turn start and produce a phantom second combat on the same planet.
 
+## Result construction
+
+`resolveTurn` builds its return value by spreading `state` and then overriding only the fields it computes (`map`, `players`, `fleets`, `turnNumber`, `roundNumber`, `currentPlayerId`, `status`, `winnerId`, `aiStates`, `scheduledMovements`). The result is submitted wholesale as `state_json` and stored verbatim, so a field missing from this object is deleted for every player in the game. Never reintroduce a key-by-key literal here: a client whose bundle predates a `GameState` field will drop it on submit even though every other player is up to date. The backend carries a short list of keys forward as a second line of defence — see `backend/docs/backend/turn-engine.md`.
+
 ## Changelog
+- 2026-09-25: `resolveTurn` spreads `state` into its result (and into the AI-observation `partialState`) instead of listing every field. Fixes standing orders being wiped whenever a player on a pre-2026-09-10 bundle submitted a turn.
 - 2026-09-10: Scheduled movements — `pruneScheduledMovements` after combat/elimination; apply next player's `scheduledMovements` after turn advance and round wrap (step 9a). `resolveTurn` copies `scheduledMovements` through the result snapshot.
 - 2026-08-26: Overlay title **Player update**; rejoin copy "has rejoined." Persisted field remains `commanderStatusNotices`.
 - 2026-08-19: **Task 258** — async knockout farewells include deferred/self wrap-kills; persist farewell queue on `GameState`; `acknowledgeKnockout` keeps the match active while AIs remain.

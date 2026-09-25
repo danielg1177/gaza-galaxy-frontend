@@ -780,20 +780,16 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
   let aiStates = state.aiStates ?? {};
   if (currentPlayer !== undefined && isAiControlled(currentPlayer, state.playMode)) {
     const partialState: GameState = {
+      ...state,
       map,
       players,
       fleets,
       turnNumber: nextTurnNumber,
       roundNumber,
       currentPlayerId,
-      seed: state.seed,
-      playMode: state.playMode,
       status,
       winnerId,
       aiStates,
-      commanderStatusNotices: state.commanderStatusNotices,
-      pendingFarewellPlayerIds: state.pendingFarewellPlayerIds,
-      knockoutResumePlayerId: state.knockoutResumePlayerId,
       scheduledMovements,
     };
     aiStates = {
@@ -802,21 +798,21 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     };
   }
 
+  // Spread `state` first so fields this function does not compute (seed, playMode,
+  // commanderStatusNotices, the knockout queue, anything added later) survive the
+  // turn. The result is submitted wholesale as `state_json`, so a field missing
+  // here is deleted for every player in the game.
   return {
+    ...state,
     map,
     players,
     fleets,
     turnNumber: nextTurnNumber,
     roundNumber,
     currentPlayerId,
-    seed: state.seed,
-    playMode: state.playMode,
     status,
     winnerId,
     aiStates,
-    commanderStatusNotices: state.commanderStatusNotices,
-    pendingFarewellPlayerIds: state.pendingFarewellPlayerIds,
-    knockoutResumePlayerId: state.knockoutResumePlayerId,
     scheduledMovements,
     events,
   };

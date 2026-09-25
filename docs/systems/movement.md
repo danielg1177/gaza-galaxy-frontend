@@ -146,6 +146,7 @@ No randomness. Same positions and fleet list always produce the same transit tim
 
 ## Changelog
 
+- 2026-09-25: Standing orders were being deleted by any player still running a pre-2026-09-10 bundle, whose `resolveTurn` dropped `scheduledMovements` from the state it submitted. `resolveTurn` now spreads the incoming state, and the backend restores the key when a submission omits it.
 - 2026-09-11: Removed the orange ⟳ planet badge for scheduled origins; orange dotted route lines remain the map indicator.
 - 2026-09-10: Scheduled movements — `GameState.scheduledMovements`; send-fleet ⟳ panel; apply on next-player turn start; origin capture cancels; ~~orange map badge~~ *(badge removed 2026-09-11)*.
 - 2026-06-03: Box-select multi-fleet dispatch — circular selection icon toggle enables box-draw gesture mode; dragging draws a selection rectangle over the map (pan blocked during draw); on release, all owned planets with troops or queued orders inside the box are selected (teal ring highlight); tapping any planet queues all selected troops there via `queueOrder`; out-of-range planets show "Too far for some troops" warning; tapping empty space or toggling the button exits the mode; End Turn also clears mode.
