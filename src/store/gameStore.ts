@@ -181,12 +181,15 @@ export interface GameStore {
   cancelBuildOrder: (planetId: string, buildingIndex: number) => void;
   demolishBuilding: (planetId: string, buildingIndex: number) => void;
   setProductionSlider: (planetId: string, value: number) => void;
+  setProductionSliders: (planetIds: string[], value: number) => void;
   upsertScheduledMovement: (
     fromPlanetId: string,
     toPlanetId: string,
     amount: number | 'all',
   ) => void;
+  scheduleSendAll: (fromPlanetIds: string[], toPlanetId: string) => void;
   cancelScheduledMovement: (id: string) => void;
+  cancelScheduledMovementsFromPlanets: (fromPlanetIds: string[]) => void;
   seedQueuedOrdersFromSchedules: () => void;
   endTurn: () => void;
   advanceStagedAiTurn: () => void;
@@ -1658,6 +1661,52 @@ export const useGameStore = create<GameStore>()(
     });
   },
 
+  setProductionSliders: (planetIds, value) => {
+    const record = get().getActiveRecord();
+    if (record === null || planetIds.length === 0) {
+      return;
+    }
+
+    const gameState = record.state;
+    const currentPlayerId = gameState.currentPlayerId;
+    const ids = new Set(planetIds);
+    const clampedValue = Math.min(1, Math.max(0, value));
+    let changed = false;
+    const nextPlanets = gameState.map.planets.map((planet) => {
+      if (!ids.has(planet.id) || planet.owner !== currentPlayerId) {
+        return planet;
+      }
+      if (planet.productionSlider === clampedValue) {
+        return planet;
+      }
+      changed = true;
+      return {
+        ...planet,
+        productionSlider: clampedValue,
+      };
+    });
+    if (!changed) {
+      return;
+    }
+
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id
+          ? {
+              ...g,
+              state: {
+                ...g.state,
+                map: {
+                  ...g.state.map,
+                  planets: nextPlanets,
+                },
+              },
+            }
+          : g,
+      ),
+    });
+  },
+
   upsertScheduledMovement: (fromPlanetId, toPlanetId, amount) => {
     const record = get().getActiveRecord();
     if (record === null) {
@@ -1702,6 +1751,72 @@ export const useGameStore = create<GameStore>()(
     });
   },
 
+  scheduleSendAll: (fromPlanetIds, toPlanetId) => {
+    const record = get().getActiveRecord();
+    if (record === null || fromPlanetIds.length === 0) {
+      return;
+    }
+    const gameState = record.state;
+    const currentPlayerId = gameState.currentPlayerId;
+    const planetById = new Map(gameState.map.planets.map((planet) => [planet.id, planet]));
+    if (planetById.get(toPlanetId) === undefined) {
+      return;
+    }
+    const origins = new Set<string>();
+    for (const planetId of fromPlanetIds) {
+      if (planetId === toPlanetId) {
+        continue;
+      }
+      const origin = planetById.get(planetId);
+      if (origin === undefined || origin.owner !== currentPlayerId) {
+        continue;
+      }
+      origins.add(planetId);
+    }
+    if (origins.size === 0) {
+      return;
+    }
+    const existing = gameState.scheduledMovements ?? [];
+    const fromThese = existing.filter(
+      (movement) => movement.ownerId === currentPlayerId && origins.has(movement.fromPlanetId),
+    );
+    const alreadySendAll =
+      fromThese.length === origins.size &&
+      fromThese.every(
+        (movement) => movement.toPlanetId === toPlanetId && movement.amount === 'all',
+      );
+    if (alreadySendAll) {
+      return;
+    }
+    const kept = existing.filter(
+      (movement) =>
+        !(movement.ownerId === currentPlayerId && origins.has(movement.fromPlanetId)),
+    );
+    const added: ScheduledMovement[] = [];
+    for (const fromPlanetId of origins) {
+      added.push({
+        id: scheduledMovementId(fromPlanetId, toPlanetId),
+        ownerId: currentPlayerId,
+        fromPlanetId,
+        toPlanetId,
+        amount: 'all',
+      });
+    }
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id
+          ? {
+              ...g,
+              state: {
+                ...g.state,
+                scheduledMovements: [...kept, ...added],
+              },
+            }
+          : g,
+      ),
+    });
+  },
+
   cancelScheduledMovement: (id) => {
     const record = get().getActiveRecord();
     if (record === null) {
@@ -1711,6 +1826,35 @@ export const useGameStore = create<GameStore>()(
     const existing = record.state.scheduledMovements ?? [];
     const next = existing.filter(
       (movement) => !(movement.id === id && movement.ownerId === currentPlayerId),
+    );
+    if (next.length === existing.length) {
+      return;
+    }
+    set({
+      games: get().games.map((g) =>
+        g.id === record.id
+          ? {
+              ...g,
+              state: {
+                ...g.state,
+                scheduledMovements: next,
+              },
+            }
+          : g,
+      ),
+    });
+  },
+
+  cancelScheduledMovementsFromPlanets: (fromPlanetIds) => {
+    const record = get().getActiveRecord();
+    if (record === null || fromPlanetIds.length === 0) {
+      return;
+    }
+    const currentPlayerId = record.state.currentPlayerId;
+    const origins = new Set(fromPlanetIds);
+    const existing = record.state.scheduledMovements ?? [];
+    const next = existing.filter(
+      (movement) => !(movement.ownerId === currentPlayerId && origins.has(movement.fromPlanetId)),
     );
     if (next.length === existing.length) {
       return;

@@ -2,6 +2,12 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-10-15 — Box select is a planet-action menu
+**Decision:** The bottom-left selection button opens a menu before box-draw: **Send all troops** (the previous behavior), **Schedule send all**, **Cancel schedules**, and **Set troop / gold**. Schedule send all replaces every other standing order from each chosen origin with a single `'all'` route and queues that garrison for the current turn. Cancel schedules removes standing orders only; fleets already queued this turn stay queued. The slider modal applies one value on **Apply**.
+**Rationale:** The same selection is how a player redirects a front, arms it to keep sending, clears those standing orders, or retunes production.
+**Alternatives considered:** Showing the menu after the box is drawn (rejected — cancel and the slider do not need a destination, and send vs schedule changes which planets qualify); leaving other standing orders in place when scheduling "all" (rejected — fixed-count orders dispatch first, so "all" would not send the garrison).
+
+---
 ## 2026-09-18 — Unaccepted games stay on Command Center
 **Decision:** Notification deep-links and Command Center taps do not open the map while the user has a pending `game_invites` row, or while `status` is `waiting_for_players`. They land on Command Center so the invite can be accepted or declined. `GET /games` / `GET /games/{id}` report `is_my_turn: false` for those callers even if `current_user_id` already points at them.
 **Rationale:** Creator-first start parks the match as `waiting_for_players` when the next human has not accepted. Opening the map anyway made End Turn and Exit Game fail (422: game is not in progress).

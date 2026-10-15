@@ -92,6 +92,8 @@ In the owned-planet modal (`GameScreen`), planets with at least one factory show
 - Percentage split label (`XX% troops / YY% gold`)
 - Live projected output label (`⚔ X.X troops/turn · 💰 Y.Y gold/turn`) from `computeFactoryOutputs` using active factories (`builtOnRound < currentRound`) and current slider position
 
+The same split can be set on many planets at once from the bottom-left planet-action menu (**Set troop / gold**). After a box selection, **Apply** calls `setProductionSliders` with one value for every selected owned planet, including planets that do not yet have a factory. **Cancel** leaves the sliders unchanged. The modal opens at the average of the selected sliders.
+
 Fractional troops accumulate in `troopAccumulator`. Each turn, whole troops are floored from the accumulator, added to `shipCount`, and subtracted from the accumulator. Gold is floored before adding to the owner's `gold`.
 
 ## Factory output by planet class (A–P)
@@ -206,6 +208,7 @@ Owned planets with at least one building where `builtOnRound === currentRound` s
 
 ## Changelog
 
+- 2026-10-15: Box-select **Set troop / gold** applies one `productionSlider` to every selected owned planet via `setProductionSliders`.
 - 2026-09-11: Map shows a blue wrench on owned planets with a same-round queued build (`builtOnRound === currentRound`); gone next turn after round wrap / cancel.
 - 2026-09-02: Factory troop and gold output now round to the nearest tenth (`roundToTenth` / `computeFactoryOutputs`) before the troop accumulator and gold floor, matching the slider label so `4.0 troops/turn` yields 4 troops rather than flooring an unrounded `3.96` to 3.
 - 2026-06-01: Removed all `troop_produced` UI — no Battle Report cards or ⋮ Report Production section; store no longer routes the event to per-player turn reports.

@@ -1290,6 +1290,38 @@ function findFleetAtMapCoords(
   return best;
 }
 
+type BoxSelectAction = 'send' | 'schedule' | 'cancel_schedules' | 'slider';
+
+const BOX_SELECT_ACTIONS: { id: BoxSelectAction; label: string }[] = [
+  { id: 'send', label: 'Send all troops' },
+  { id: 'schedule', label: 'Schedule send all' },
+  { id: 'cancel_schedules', label: 'Cancel schedules' },
+  { id: 'slider', label: 'Set troop / gold' },
+];
+
+function boxSelectHint(
+  action: BoxSelectAction,
+  phase: 'idle' | 'drawing' | 'awaiting_destination' | 'adjusting_slider',
+  modeOn: boolean,
+): string | null {
+  if (!modeOn || phase === 'drawing' || phase === 'adjusting_slider') {
+    return null;
+  }
+  if (phase === 'awaiting_destination') {
+    return action === 'schedule' ? 'Tap destination to schedule' : 'Tap destination planet';
+  }
+  switch (action) {
+    case 'send':
+      return 'Drag a box around planets to send';
+    case 'schedule':
+      return 'Drag a box around planets to schedule';
+    case 'cancel_schedules':
+      return 'Drag a box to cancel their schedules';
+    case 'slider':
+      return 'Drag a box to set troop / gold';
+  }
+}
+
 function BoxSelectToggleIcon({
   variant,
   color,
@@ -1928,8 +1960,13 @@ export default function GameScreen() {
   const cancelBuildOrder = useGameStore((s) => s.cancelBuildOrder);
   const demolishBuilding = useGameStore((s) => s.demolishBuilding);
   const setProductionSlider = useGameStore((s) => s.setProductionSlider);
+  const setProductionSliders = useGameStore((s) => s.setProductionSliders);
   const upsertScheduledMovement = useGameStore((s) => s.upsertScheduledMovement);
+  const scheduleSendAll = useGameStore((s) => s.scheduleSendAll);
   const cancelScheduledMovement = useGameStore((s) => s.cancelScheduledMovement);
+  const cancelScheduledMovementsFromPlanets = useGameStore(
+    (s) => s.cancelScheduledMovementsFromPlanets,
+  );
   const { currentUser } = useAuthStore();
   const activeGameId = useGameStore((s) => s.activeGameId);
   const activeRecord = useGameStore((s) => {
@@ -2025,13 +2062,21 @@ export default function GameScreen() {
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
 
-  // Box-select state
+  // Box-select state. The bottom button opens an action menu; drawing a box then
+  // runs the chosen action on the owned planets inside it.
   const [boxSelectMode, setBoxSelectMode] = useState(false);
-  // 'idle' = mode on but not drawing; 'drawing' = drag in progress; 'awaiting_destination' = box released, waiting for destination tap
-  const [boxSelectPhase, setBoxSelectPhase] = useState<'idle' | 'drawing' | 'awaiting_destination'>('idle');
+  const [boxSelectAction, setBoxSelectAction] = useState<BoxSelectAction>('send');
+  const [showBoxSelectMenu, setShowBoxSelectMenu] = useState(false);
+  // 'idle' = mode on but not drawing; 'drawing' = drag in progress;
+  // 'awaiting_destination' = box released, waiting for a destination tap;
+  // 'adjusting_slider' = production-split modal is open
+  const [boxSelectPhase, setBoxSelectPhase] = useState<
+    'idle' | 'drawing' | 'awaiting_destination' | 'adjusting_slider'
+  >('idle');
   const [boxSelectRect, setBoxSelectRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [boxSelectedPlanetIds, setBoxSelectedPlanetIds] = useState<string[]>([]);
   const [boxSelectTooFarWarning, setBoxSelectTooFarWarning] = useState(false);
+  const [boxSliderValue, setBoxSliderValue] = useState(0.5);
 
   useEffect(() => {
     if (gameState === null) {
@@ -3120,6 +3165,7 @@ export default function GameScreen() {
 
   const exitBoxSelect = useCallback(() => {
     setBoxSelectMode(false);
+    setShowBoxSelectMenu(false);
     setBoxSelectPhase('idle');
     setBoxSelectRect(null);
     setBoxSelectedPlanetIds([]);
@@ -3130,6 +3176,35 @@ export default function GameScreen() {
       isBoxSelectAwaitingDestSV.value = false;
     })();
   }, [isBoxSelectModeSV, isBoxSelecting, isBoxSelectAwaitingDestSV]);
+
+  const clearBoxSelection = useCallback(() => {
+    setBoxSelectPhase('idle');
+    setBoxSelectRect(null);
+    setBoxSelectedPlanetIds([]);
+    runOnUI(() => {
+      'worklet';
+      isBoxSelecting.value = false;
+      isBoxSelectAwaitingDestSV.value = false;
+    })();
+  }, [isBoxSelecting, isBoxSelectAwaitingDestSV]);
+
+  const enterBoxSelectAction = useCallback(
+    (action: BoxSelectAction) => {
+      setBoxSelectAction(action);
+      setShowBoxSelectMenu(false);
+      setBoxSelectMode(true);
+      setBoxSelectPhase('idle');
+      setBoxSelectRect(null);
+      setBoxSelectedPlanetIds([]);
+      runOnUI(() => {
+        'worklet';
+        isBoxSelectModeSV.value = true;
+        isBoxSelecting.value = false;
+        isBoxSelectAwaitingDestSV.value = false;
+      })();
+    },
+    [isBoxSelectModeSV, isBoxSelecting, isBoxSelectAwaitingDestSV],
+  );
 
   const handleBoxSelectEnd = useCallback(
     (x1: number, y1: number, x2: number, y2: number, s: number, tx: number, ty: number) => {
@@ -3161,12 +3236,17 @@ export default function GameScreen() {
           center.y >= mapTop &&
           center.y <= mapBottom
         ) {
-          const hasQueuedOrder = queuedOrders.some(
-            (o) => !isBuildOrder(o) && o.fromPlanetId === planet.id,
-          );
-          if (planet.shipCount > 0 || hasQueuedOrder) {
-            selectedIds.push(planet.id);
+          // Send still requires troops or a queued outbound. Schedule, cancel, and
+          // the slider apply to every owned planet in the box, including empty ones.
+          if (boxSelectAction === 'send') {
+            const hasQueuedOrder = queuedOrders.some(
+              (o) => !isBuildOrder(o) && o.fromPlanetId === planet.id,
+            );
+            if (planet.shipCount <= 0 && !hasQueuedOrder) {
+              continue;
+            }
           }
+          selectedIds.push(planet.id);
         }
       }
 
@@ -3174,17 +3254,53 @@ export default function GameScreen() {
 
       if (selectedIds.length === 0) {
         setBoxSelectPhase('idle');
-      } else {
+        return;
+      }
+
+      if (boxSelectAction === 'cancel_schedules') {
+        cancelScheduledMovementsFromPlanets(selectedIds);
+        clearBoxSelection();
+        return;
+      }
+
+      if (boxSelectAction === 'slider') {
+        let sum = 0;
+        for (const planetId of selectedIds) {
+          const planet = gameState.map.planets.find((p) => p.id === planetId);
+          if (planet !== undefined) {
+            sum += planet.productionSlider;
+          }
+        }
+        setBoxSliderValue(sum / selectedIds.length);
         setBoxSelectedPlanetIds(selectedIds);
-        setBoxSelectPhase('awaiting_destination');
+        setBoxSelectPhase('adjusting_slider');
         runOnUI(() => {
           'worklet';
           isBoxSelectAwaitingDestSV.value = true;
           isBoxSelecting.value = false;
         })();
+        return;
       }
+
+      setBoxSelectedPlanetIds(selectedIds);
+      setBoxSelectPhase('awaiting_destination');
+      runOnUI(() => {
+        'worklet';
+        isBoxSelectAwaitingDestSV.value = true;
+        isBoxSelecting.value = false;
+      })();
     },
-    [gameState, isViewingFinishedGame, localHumanPlayerId, queuedOrders, isBoxSelectAwaitingDestSV, isBoxSelecting],
+    [
+      gameState,
+      isViewingFinishedGame,
+      localHumanPlayerId,
+      queuedOrders,
+      boxSelectAction,
+      cancelScheduledMovementsFromPlanets,
+      clearBoxSelection,
+      isBoxSelectAwaitingDestSV,
+      isBoxSelecting,
+    ],
   );
 
   const handleBoxSelectSend = useCallback(
@@ -3193,23 +3309,13 @@ export default function GameScreen() {
         return;
       }
       if (gameState === null || humanPlayer === undefined || boxSelectedPlanetIds.length === 0) {
-        setBoxSelectPhase('idle');
-        setBoxSelectedPlanetIds([]);
-        runOnUI(() => {
-          'worklet';
-          isBoxSelectAwaitingDestSV.value = false;
-        })();
+        clearBoxSelection();
         return;
       }
 
       const destPlanet = gameState.map.planets.find((p) => p.id === destinationPlanetId);
       if (destPlanet === undefined) {
-        setBoxSelectPhase('idle');
-        setBoxSelectedPlanetIds([]);
-        runOnUI(() => {
-          'worklet';
-          isBoxSelectAwaitingDestSV.value = false;
-        })();
+        clearBoxSelection();
         return;
       }
 
@@ -3233,12 +3339,17 @@ export default function GameScreen() {
           continue;
         }
         planetsInRange.push(planetId);
-        // Collect existing queued order indices from this planet to cancel/redirect
+        // Redirect any outbound already queued from this planet, including a
+        // schedule's seeded send, so this turn moves the full garrison.
         queuedOrders.forEach((o, i) => {
           if (!isBuildOrder(o) && o.fromPlanetId === planetId) {
             allIndicesToCancel.push(i);
           }
         });
+      }
+
+      if (boxSelectAction === 'schedule' && planetsInRange.length > 0) {
+        scheduleSendAll(planetsInRange, destinationPlanetId);
       }
 
       // Cancel in descending index order so lower indices remain valid
@@ -3260,23 +3371,20 @@ export default function GameScreen() {
         setBoxSelectTooFarWarning(true);
       }
 
-      // Reset to idle (keep mode ON so user can make another selection)
-      setBoxSelectPhase('idle');
-      setBoxSelectedPlanetIds([]);
-      runOnUI(() => {
-        'worklet';
-        isBoxSelectAwaitingDestSV.value = false;
-      })();
+      // Reset the selection (keep mode ON so the player can box another group)
+      clearBoxSelection();
     },
     [
       gameState,
       humanPlayer,
       isViewingFinishedGame,
+      boxSelectAction,
       boxSelectedPlanetIds,
       queuedOrders,
       cancelQueuedOrder,
       queueOrder,
-      isBoxSelectAwaitingDestSV,
+      scheduleSendAll,
+      clearBoxSelection,
     ],
   );
 
@@ -4052,6 +4160,9 @@ export default function GameScreen() {
         })()
       : null;
 
+  const selectionHint = boxSelectHint(boxSelectAction, boxSelectPhase, boxSelectMode);
+  const boxTroopPercent = Math.round(boxSliderValue * 100);
+
   return (
     <View style={styles.root}>
       <View style={[styles.statusBar, { paddingTop: insets.top + 8 }]}>
@@ -4283,9 +4394,9 @@ export default function GameScreen() {
             pointerEvents="none"
           />
         )}
-        {boxSelectPhase === 'awaiting_destination' && (
+        {selectionHint !== null && (
           <View style={styles.boxSelectHintOverlay} pointerEvents="none">
-            <Text style={styles.boxSelectHintText}>Tap destination planet</Text>
+            <Text style={styles.boxSelectHintText}>{selectionHint}</Text>
           </View>
         )}
         <Animated.View
@@ -5200,6 +5311,7 @@ export default function GameScreen() {
             style={[
               styles.endTurnButton,
               { bottom: insets.bottom + 16 },
+              showBoxSelectMenu && styles.boxSelectAboveMenu,
               isSubmittingTurn && styles.endTurnButtonDisabled,
             ]}
             disabled={isSubmittingTurn}
@@ -5217,43 +5329,106 @@ export default function GameScreen() {
             <Text style={styles.endTurnButtonText}>End Turn</Text>
           </Pressable>
           {!isKnockoutTurn && (
+          <>
+          {showBoxSelectMenu && (
+            <Pressable
+              style={styles.boxSelectMenuBackdrop}
+              accessibilityLabel="Close planet actions"
+              onPress={() => setShowBoxSelectMenu(false)}
+            />
+          )}
+          {showBoxSelectMenu && (
+            <View style={[styles.boxSelectMenu, { bottom: insets.bottom + 16 + 52 }]}>
+              {BOX_SELECT_ACTIONS.map((action) => (
+                <Pressable
+                  key={action.id}
+                  style={styles.headerMenuRow}
+                  accessibilityRole="button"
+                  onPress={() => enterBoxSelectAction(action.id)}
+                >
+                  <Text style={styles.headerMenuRowText}>{action.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
           <Pressable
             style={[
               styles.boxSelectToggle,
               { bottom: insets.bottom + 16 },
-              boxSelectMode && styles.boxSelectToggleActive,
+              (boxSelectMode || showBoxSelectMenu) && styles.boxSelectToggleActive,
             ]}
             accessibilityLabel={
-              boxSelectPhase === 'awaiting_destination'
-                ? 'Box select: tap destination planet'
-                : boxSelectMode
-                  ? 'Turn off box select'
-                  : 'Turn on box select'
+              boxSelectMode
+                ? 'Turn off planet actions'
+                : showBoxSelectMenu
+                  ? 'Close planet actions'
+                  : 'Open planet actions'
             }
             accessibilityRole="button"
             onPress={() => {
               if (boxSelectMode) {
                 exitBoxSelect();
               } else {
-                setBoxSelectMode(true);
-                setBoxSelectPhase('idle');
-                runOnUI(() => {
-                  'worklet';
-                  isBoxSelectModeSV.value = true;
-                  isBoxSelecting.value = false;
-                  isBoxSelectAwaitingDestSV.value = false;
-                })();
+                setShowBoxSelectMenu((open) => !open);
               }
             }}
           >
             <BoxSelectToggleIcon
               variant={boxSelectPhase === 'awaiting_destination' ? 'target' : 'select'}
-              color={boxSelectMode ? '#e0f7f9' : COLORS.text}
+              color={boxSelectMode || showBoxSelectMenu ? '#e0f7f9' : COLORS.text}
             />
           </Pressable>
+          </>
           )}
         </>
       )}
+
+      <Modal
+        visible={boxSelectPhase === 'adjusting_slider' && boxSelectedPlanetIds.length > 0}
+        transparent
+        animationType="fade"
+        onRequestClose={clearBoxSelection}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={clearBoxSelection}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Production split</Text>
+            <Text style={styles.productionOutputLabel}>
+              {boxSelectedPlanetIds.length === 1
+                ? '1 planet'
+                : `${boxSelectedPlanetIds.length} planets`}
+            </Text>
+            <PlatformSlider
+              minimumValue={0}
+              maximumValue={1}
+              value={boxSliderValue}
+              onValueChange={setBoxSliderValue}
+              minimumTrackTintColor={COLORS.accent}
+              maximumTrackTintColor={COLORS.border}
+              thumbTintColor={COLORS.accent}
+            />
+            <Text style={styles.productionSplitLabel}>
+              {boxTroopPercent}% troops / {100 - boxTroopPercent}% gold
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                style={[styles.modalBtn, styles.modalBtnSecondary]}
+                onPress={clearBoxSelection}
+              >
+                <Text style={styles.modalBtnSecondaryText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={() => {
+                  setProductionSliders(boxSelectedPlanetIds, boxSliderValue);
+                  clearBoxSelection();
+                }}
+              >
+                <Text style={styles.primaryButtonText}>Apply</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {showingAiObserver && (
         <Pressable
@@ -6051,7 +6226,30 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 10,
+    zIndex: 42,
+  },
+  boxSelectAboveMenu: {
+    zIndex: 42,
+  },
+  boxSelectMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+  },
+  boxSelectMenu: {
+    position: 'absolute',
+    left: 16,
+    minWidth: 220,
+    backgroundColor: COLORS.panel,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 4,
+    zIndex: 41,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
   },
   boxSelectToggleActive: {
     backgroundColor: '#007a84',

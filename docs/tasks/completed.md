@@ -1,5 +1,11 @@
 # Completed Tasks
 
+## Planet actions on box select
+**Completed:** 2026-10-15
+**Files modified:** `src/screens/GameScreen.tsx`, `src/store/gameStore.ts`, docs
+**Notes:** The bottom-left selection button opens a menu: Send all troops (previous box-select send), Schedule send all (`scheduleSendAll`, amount `'all'`, other standing orders from those origins removed, plus a full-garrison queue for this turn), Cancel schedules (`cancelScheduledMovementsFromPlanets`; this turn's queued fleets stay), and Set troop / gold (`setProductionSliders` on Apply). Send still requires troops or a queued outbound; the other actions include every owned planet in the box. Out-of-range origins are skipped with the existing warning. Backend stores both fields inside `state_json` and did not change.
+
+---
 ## Pending invite notifications stay on Command Center
 **Completed:** 2026-09-18
 **Files modified:** `App.tsx`, `src/screens/HomeScreen.tsx`, backend `GameController.php`, docs

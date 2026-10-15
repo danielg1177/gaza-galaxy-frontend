@@ -116,6 +116,19 @@ Standing orders (`GameState.scheduledMovements`) repeat a route every turn witho
 - If the **origin** planet is captured (owner no longer the scheduler), only standing orders **from that planet** are pruned. Schedules on the player's other planets are left alone. Recapture does not restore a pruned order. If the scheduler is eliminated, remaining origins are forfeited to neutral and those orders drop the same way.
 - Fog of war: only the viewing player's schedules are visible. Scheduled routes render as orange dotted lines on the map. ~~Owned origin planets with a schedule show a small orange repeat badge at the **top-left** of the planet.~~ *(removed 2026-09-11 — the dotted line is the schedule indicator)*
 
+### Box select (planet actions)
+
+On a human turn the bottom-left button opens a menu, then box-draw. Pan is blocked while the rectangle is being drawn. Tapping the button again, tapping empty map while a destination is pending, or pressing **End Turn** leaves the mode. After an action completes, the mode stays on so another box can be drawn.
+
+| Action | Planets in the box | Result |
+|--------|--------------------|--------|
+| **Send all troops** | Owned, with troops or a queued outbound order | Tap a destination. In-range planets cancel queued orders from that origin and queue the full garrison (`queueOrder`). |
+| **Schedule send all** | Every owned planet | Tap a destination. Each in-range origin gets a standing order of amount `'all'` (`scheduleSendAll`) and also queues its full garrison there this turn (`queueOrder`), after cancelling other outbound orders from that planet. Other standing orders from those origins are removed. Origins with no troops still get the standing order. |
+| **Cancel schedules** | Every owned planet | On release, every standing order from those origins is removed (`cancelScheduledMovementsFromPlanets`). Sends already queued this turn stay queued. |
+| **Set troop / gold** | Every owned planet | A production-split modal opens at the average slider of the selection. **Apply** writes that value onto every selected planet (`setProductionSliders`). |
+
+Out-of-range origins are skipped for send and schedule. The map shows **Too far for some troops**. Those origins keep their existing standing orders.
+
 ### Fleet visualization (`GameScreen`)
 
 In-transit fleets render on an SVG overlay (`react-native-svg`) sized to the map canvas, above planet nodes and below the pinch/pan gesture layer.
@@ -146,6 +159,8 @@ No randomness. Same positions and fleet list always produce the same transit tim
 
 ## Changelog
 
+- 2026-10-15: Schedule send all also queues every in-range origin's full garrison for this turn. ~~The standing order waited until the next turn and left this turn's queued sends in place.~~ *(updated 2026-10-15)*
+- 2026-10-15: Box select is a planet-action menu (send all, schedule send all, cancel schedules, set troop/gold). Schedule send all replaces other standing orders from the selected origins with one `'all'` route. ~~The bottom-left button entered send-only box-draw directly.~~ *(superseded 2026-10-15)*
 - 2026-09-25: Standing orders were being deleted by any player still running a pre-2026-09-10 bundle, whose `resolveTurn` dropped `scheduledMovements` from the state it submitted. `resolveTurn` now spreads the incoming state, and the backend restores the key when a submission omits it.
 - 2026-09-11: Removed the orange ⟳ planet badge for scheduled origins; orange dotted route lines remain the map indicator.
 - 2026-09-10: Scheduled movements — `GameState.scheduledMovements`; send-fleet ⟳ panel; apply on next-player turn start; origin capture cancels; ~~orange map badge~~ *(badge removed 2026-09-11)*.

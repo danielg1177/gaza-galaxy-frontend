@@ -4,6 +4,14 @@ Tasks not yet started, in priority order.
 
 ---
 
+## Planet actions on box select
+
+**Status:** Complete (2026-10-15).
+
+- ~~Send all, schedule send all, cancel schedules, and set the troop/gold slider from the bottom-left selection button~~ *(complete 2026-10-15)*
+
+---
+
 ## Phase 79 — Feature: Chat report
 
 **Status:** Complete (2026-08-26).
