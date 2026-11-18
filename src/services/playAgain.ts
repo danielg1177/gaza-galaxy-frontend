@@ -1,5 +1,6 @@
 import { DEFAULT_PLAYER_NAME } from '../constants/app';
-import { isGalaxyShape, type GalaxyShape, type MapSize } from '../game/types';
+import { isGalaxyShape, type GalaxyShape, type MapSize, type VisibilityMode } from '../game/types';
+import { normalizeVisibility } from '../game/visibility';
 import type { PlayerSlot } from '../store/gameStore';
 import type { ApiGame, ApiGamePlayer } from './gamesService';
 
@@ -13,6 +14,11 @@ export function resolveMapSize(value: string | undefined): MapSize {
 /** Explicit Create Game map type. Undefined means Random (seeded picker). */
 export function resolveGalaxyShape(value: string | undefined): GalaxyShape | undefined {
   return isGalaxyShape(value) ? value : undefined;
+}
+
+/** Create Game visibility. Missing values stay on the original classic rules. */
+export function resolveVisibility(value: string | undefined): VisibilityMode {
+  return normalizeVisibility(value);
 }
 
 function findHumanSlotIndex(

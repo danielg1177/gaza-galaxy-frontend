@@ -1,7 +1,7 @@
 # Current State
 
 ## Last Updated
-2026-10-15 (planet-action menu on the box-select button)
+2026-11-18 (Visibility setting: Classic or Fog)
 
 ## Overall Status
 
@@ -10,6 +10,7 @@
 Pass-and-play, AI, all map generation, combat, fog of war, and all UI polish is done. Auth layer, friends system, async game setup, in-game async integration, Expo push token registration, and notification deep-link to game are wired on the client.
 
 ## Completed
+- Create Game **Visibility**: **Classic** (default) or **Fog**. Classic keeps public planet class and hides enemy fleets. Fog shows class, owner, and troop count only within one turn of an owned planet (viewer fleet speed, capped at 15 clicks), and shows an enemy fleet's owner and size when that fleet is currently that close. Buildings and production stay hidden off your own worlds. Stored on `GameState.visibility` and async `map_config.visibility`. Play Again and open-lobby start reuse it. Older games with no value stay Classic.
 - Planet actions on the bottom-left selection button. Tapping it opens a menu: **Send all troops** (previous box-select send), **Schedule send all**, **Cancel schedules**, and **Set troop / gold**. Drawing a box selects owned planets; send and schedule then wait for a destination tap. Schedule send all writes an `'all'` standing order, drops other standing orders from those origins, and queues each in-range garrison for this turn. Cancel removes standing orders on release and leaves this turn's queued fleets in place. The slider modal starts at the selection's average split and Apply writes that value onto every selected planet.
 - Standing orders survived a player's own submit but were deleted by the next player when that player ran a bundle predating 2026-09-10. `resolveTurn` now spreads the incoming `GameState` instead of rebuilding it key by key, and `TurnController::submit` restores `scheduledMovements` when a submission omits the key entirely, so one stale client can no longer wipe every player's schedules.
 - Notification / Command Center open no longer loads the map for a friends game the user has not accepted. Tapping an invite or "your turn" push lands on Command Center; End Turn / Exit were 422 because parked invitee turns are `waiting_for_players`. Backend `is_my_turn` is false while a `game_invites` row is still pending.

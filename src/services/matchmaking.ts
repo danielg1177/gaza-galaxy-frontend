@@ -1,5 +1,6 @@
 import { DEFAULT_PLAYER_NAME } from '../constants/app';
 import { isGalaxyShape, type MapSize } from '../game/types';
+import { normalizeVisibility } from '../game/visibility';
 import {
   generateInitialGameState,
   type GameConfig,
@@ -58,6 +59,7 @@ export async function startMatchmakingFromLobby(
     mapHeight: map.mapHeight ?? 286,
     planetCount: map.planetCount ?? 30,
     galaxyShape: isGalaxyShape(map.galaxyShape) ? map.galaxyShape : undefined,
+    visibility: normalizeVisibility(map.visibility),
     playMode: 'asyncMultiplayer',
   };
   const seed = typeof map.seed === 'number' ? map.seed : Date.now();

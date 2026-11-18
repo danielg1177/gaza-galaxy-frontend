@@ -22,10 +22,21 @@ Each planet has:
 - Buildings: Manufacturing Facility, Research Facility
 - A manufacturing allocation (slider: ships vs resources)
 
-## Fog of War
+## Visibility
+Each new game chooses **Classic** or **Fog**. Older games with no setting play as Classic.
+
+### Classic
 - Full details (troop count, buildings, production slider) are visible only on planets you own
 - Neutral and enemy planets show only position, name, and class on the map
 - Enemy fleets in transit are hidden; you see only your own fleets
+
+### Fog
+- Full details are still visible only on planets you own
+- A planet's **class** is visible only if you own it, or it lies within one turn of travel of a planet you own
+- One turn is your current fleet speed (`5 + tech level` clicks), and sight stops growing at **15 clicks** (tech 10 and above)
+- A planet within that distance also shows whether it is taken, who holds it, and how many troops are there. Buildings, slots, and the production slider stay hidden
+- Planets farther away keep their position and name. Their class shows as unknown, and ownership and troop count stay hidden
+- Enemy fleets are visible, with owner and troop count, when the fleet's current position is within one turn of one of your planets. Your own fleets are always visible
 
 ## Planet Classes
 | Class | Production Quality |
@@ -66,6 +77,8 @@ Owned planets with a building queued this turn show a blue wrench on the map unt
 - Last player with an un-captured home planet wins
 
 ## Changelog
+- 2026-11-18: Fog sight is capped at 15 clicks. Fleet speed can still exceed that.
+- 2026-11-18: Visibility setting. Classic keeps the original fog. Fog reveals class, owner, and troops only within one turn of an owned planet, and reveals nearby enemy fleets.
 - 2026-09-11: Same-turn build wrench on owned planets; scheduled repeating orders use dotted map routes (planet ⟳ badge removed).
 - 2026-09-10: Scheduled repeating fleet orders (fixed count or all remaining ships; cancel on origin capture).
 - 2026-06-05: Added Fog of War section; removed standalone Home Planets section (covered under Objective, Elimination, and Victory).

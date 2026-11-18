@@ -77,13 +77,20 @@ function StrategicPlanetDot({
   planet,
   humanPlayerId,
   dotSize,
+  scoutedColor,
 }: {
   planet: Planet;
   humanPlayerId: string;
   dotSize: number;
+  scoutedColor?: string;
 }) {
   const center = planetCenterPx(planet);
   const isOwned = planet.owner === humanPlayerId;
+  const backgroundColor = isOwned
+    ? OWNED_COLOR
+    : planet.fogSight === 'scouted' && scoutedColor !== undefined
+      ? scoutedColor
+      : OTHER_COLOR;
   return (
     <View
       pointerEvents="none"
@@ -95,8 +102,8 @@ function StrategicPlanetDot({
           width: dotSize,
           height: dotSize,
           borderRadius: dotSize / 2,
-          backgroundColor: isOwned ? OWNED_COLOR : OTHER_COLOR,
-          opacity: isOwned ? 1 : 0.75,
+          backgroundColor,
+          opacity: isOwned || planet.fogSight === 'scouted' ? 1 : 0.75,
         },
       ]}
     />
@@ -108,6 +115,8 @@ export interface StrategicMapModalProps {
   onClose: () => void;
   map: GameMap;
   humanPlayerId: string;
+  /** Fill for a fog-scouted planet. Omitted planets use the neutral "other" color. */
+  colorForPlanet?: (planet: Planet) => string | undefined;
 }
 
 export default function StrategicMapModal({
@@ -115,6 +124,7 @@ export default function StrategicMapModal({
   onClose,
   map,
   humanPlayerId,
+  colorForPlanet,
 }: StrategicMapModalProps) {
   const mapPixelWidth = map.width * CELL_SIZE;
   const mapPixelHeight = map.height * CELL_SIZE;
@@ -287,7 +297,11 @@ export default function StrategicMapModal({
             <View style={[styles.legendDot, { backgroundColor: OWNED_COLOR }]} />
             <Text style={styles.legendText}>Your planets</Text>
             <View style={[styles.legendDot, { backgroundColor: OTHER_COLOR }]} />
-            <Text style={styles.legendText}>Other</Text>
+            <Text style={styles.legendText}>
+              {map.planets.some((planet) => planet.fogSight !== undefined)
+                ? 'Out of sight'
+                : 'Other'}
+            </Text>
           </View>
           <View
             style={styles.mapViewport}
@@ -318,6 +332,7 @@ export default function StrategicMapModal({
                       planet={planet}
                       humanPlayerId={humanPlayerId}
                       dotSize={dotSize}
+                      scoutedColor={colorForPlanet?.(planet)}
                     />
                   ))}
                 </Animated.View>

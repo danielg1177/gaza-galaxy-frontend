@@ -18,7 +18,7 @@ import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { APP_NAME_UPPER, DEFAULT_PLAYER_NAME } from '../constants/app';
-import { GALAXY_SHAPES, isGalaxyShape, type GalaxyShape, type MapSize } from '../game/types';
+import { GALAXY_SHAPES, isGalaxyShape, type GalaxyShape, type MapSize, type VisibilityMode } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
 import { ConversationModal } from '../components/ConversationModal';
 import { EditGameNameModal } from '../components/EditGameNameModal';
@@ -46,6 +46,7 @@ import {
   canForfeitAsyncGame,
   resolveGalaxyShape,
   resolveMapSize,
+  resolveVisibility,
 } from '../services/playAgain';
 import { useAuthStore } from '../store/authStore';
 import { generateInitialGameState, useGameStore, type GameConfig, type GameRecord, type PlayerSlot } from '../store/gameStore';
@@ -555,6 +556,7 @@ export default function HomeScreen() {
   const [gameNameDirty, setGameNameDirty] = useState(false);
   const [mapSize, setMapSize] = useState<MapSize>('medium');
   const [galaxyShapeChoice, setGalaxyShapeChoice] = useState<GalaxyShapeChoice>('random');
+  const [visibility, setVisibility] = useState<VisibilityMode>('classic');
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [openGameCount, setOpenGameCount] = useState(0);
   const [pendingLobbyCount, setPendingLobbyCount] = useState(0);
@@ -1049,6 +1051,7 @@ export default function HomeScreen() {
     mode: 'passAndPlay' | 'asyncMultiplayer',
     lobbyFill: 'invite' | 'open' = 'invite',
     galaxyShape?: GalaxyShape,
+    visibilityMode: VisibilityMode = 'classic',
   ) => {
     const { width, height, planetCount } = computeMapDimensions(size, slots.length);
     const playerName = (slots[0]?.name ?? '').trim() || DEFAULT_PLAYER_NAME;
@@ -1057,6 +1060,7 @@ export default function HomeScreen() {
       mapWidth: width,
       mapHeight: height,
       planetCount,
+      visibility: visibilityMode,
       ...(galaxyShape != null ? { galaxyShape } : {}),
     };
 
@@ -1168,7 +1172,15 @@ export default function HomeScreen() {
     const campaignName = resolveCampaignName(gameName, playerSlots, usesOpenLobbyName);
     const galaxyShape =
       galaxyShapeChoice === 'random' ? undefined : galaxyShapeChoice;
-    launchCampaign(campaignName, playerSlots, mapSize, playMode, fillMode, galaxyShape);
+    launchCampaign(
+      campaignName,
+      playerSlots,
+      mapSize,
+      playMode,
+      fillMode,
+      galaxyShape,
+      visibility,
+    );
   };
 
   const handleResume = (id: string) => {
@@ -1189,7 +1201,7 @@ export default function HomeScreen() {
     setCardMenu(null);
     showConfirm(
       'Play again?',
-      'Start a new game with the same players, map size, name, and type. The map will be randomized.',
+      'Start a new game with the same players, map size, name, type, and visibility. The map will be randomized.',
       () => {
         const size = record.config.mapSize;
         const slots = record.config.playerSlots;
@@ -1205,6 +1217,7 @@ export default function HomeScreen() {
           mapHeight: height,
           planetCount,
           galaxyShape: record.config.galaxyShape,
+          visibility: resolveVisibility(record.config.visibility ?? record.state.visibility),
           playMode: record.config.playMode,
         });
         navigation.navigate('Game');
@@ -1220,7 +1233,7 @@ export default function HomeScreen() {
     }
     showConfirm(
       'Play again?',
-      'Start a new game with the same players, map size, name, and type. The map will be randomized.',
+      'Start a new game with the same players, map size, name, type, and visibility. The map will be randomized.',
       () => {
         const built = buildPlayAgainSlots(game, currentUser);
         if ('error' in built) {
@@ -1229,7 +1242,16 @@ export default function HomeScreen() {
         }
         const size = resolveMapSize(game.mapConfig?.mapSize);
         const galaxyShape = resolveGalaxyShape(game.mapConfig?.galaxyShape);
-        launchCampaign(game.name, built.slots, size, 'asyncMultiplayer', 'invite', galaxyShape);
+        const visibilityMode = resolveVisibility(game.mapConfig?.visibility);
+        launchCampaign(
+          game.name,
+          built.slots,
+          size,
+          'asyncMultiplayer',
+          'invite',
+          galaxyShape,
+          visibilityMode,
+        );
       },
     );
   };
@@ -1806,6 +1828,36 @@ export default function HomeScreen() {
                 The shape shown is an estimate.
               </Text>
             )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Visibility</Text>
+            <View style={styles.visibilityRow}>
+              {(['classic', 'fog'] as const).map((mode) => {
+                const selected = visibility === mode;
+                return (
+                  <Pressable
+                    key={mode}
+                    style={({ pressed }) => [
+                      styles.mapSizeButton,
+                      styles.visibilityButton,
+                      selected && styles.mapSizeButtonSelected,
+                      pressed && !selected && styles.mapSizeButtonPressed,
+                    ]}
+                    onPress={() => setVisibility(mode)}
+                  >
+                    <Text style={[styles.mapSizeLabel, selected && styles.mapSizeLabelSelected]}>
+                      {mode === 'classic' ? 'Classic' : 'Fog'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.mapTypeEstimate}>
+              {visibility === 'classic'
+                ? 'Planet class is visible on every world. Enemy fleets stay hidden.'
+                : 'Class, owner, and troop counts show only within one turn of your planets, up to 15 clicks. Enemy fleets appear, with owner and size, when they fly that close.'}
+            </Text>
           </View>
 
           {playerSlots.some((slot) => slot.type === 'ai') && (
@@ -3033,6 +3085,14 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: 12,
     lineHeight: 16,
+  },
+  visibilityRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  visibilityButton: {
+    flex: 1,
+    alignItems: 'center',
   },
   mapSizeButton: {
     paddingVertical: 14,

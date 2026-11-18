@@ -2,6 +2,18 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-11-18 — Fog sight caps at 15 clicks
+**Decision:** Fog sight is `min(effectiveSpeed(techLevel), 15)` clicks. From tech 10 upward the player still sees 15 clicks, while fleets keep their full speed.
+**Rationale:** Uncapped sight reached 20 clicks at tech 15 and showed too much of the map.
+**Alternatives considered:** Capping fleet speed at 15 clicks as well (rejected — only visibility was meant to stop growing).
+
+---
+## 2026-11-18 — Visibility is Classic or Fog, and Fog sight is one turn of flight
+**Decision:** Create Game has a Visibility setting, default Classic. Classic is the existing fog of war (class is public, enemy fleets are hidden). Fog reveals a planet's class, owner, and troop count only when that planet is within one turn of an owned world, and reveals an enemy fleet's owner and troop count only when the fleet's current position is within that same distance. One turn uses the viewer's `effectiveSpeed` (`5 + tech level` clicks). Sight is capped at 15 clicks (see the entry above). Buildings and production stay hidden on every planet the viewer does not own. The choice is stored on `GameState.visibility`, `GameConfig.visibility`, and async `map_config.visibility`. Older saves with no value stay Classic.
+**Rationale:** Public class made every opening the same walk toward the best letters. Tying the extra information to one turn of flight makes scouting and tech change what you know, and it uses a distance the movement system already defines.
+**Alternatives considered:** Using fleet range (11 clicks at tech 0) as the sight radius (rejected — the request is one turn, and range is farther than a single move); hiding planet names as well (rejected — the map still needs labels); applying the same sight limit to the AI's private memory (not part of this setting; the AI keeps its existing observation).
+
+---
 ## 2026-10-15 — Box select is a planet-action menu
 **Decision:** The bottom-left selection button opens a menu before box-draw: **Send all troops** (the previous behavior), **Schedule send all**, **Cancel schedules**, and **Set troop / gold**. Schedule send all replaces every other standing order from each chosen origin with a single `'all'` route and queues that garrison for the current turn. Cancel schedules removes standing orders only; fleets already queued this turn stay queued. The slider modal applies one value on **Apply**.
 **Rationale:** The same selection is how a player redirects a front, arms it to keep sending, clears those standing orders, or retunes production.

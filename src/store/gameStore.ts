@@ -35,7 +35,9 @@ import type {
   Player,
   ScheduledMovement,
   TurnEvent,
+  VisibilityMode,
 } from '../game/types';
+import { applyVisibility } from '../game/visibility';
 import { useMemo } from 'react';
 import { showAlert } from '../utils/webAlert';
 import { create } from 'zustand';
@@ -77,6 +79,8 @@ export interface GameConfig {
   planetCount: number;
   /** When set, generateMap uses this layout. When omitted, the seed picks a random galaxy shape. */
   galaxyShape?: GalaxyShape;
+  /** Absent on older games, which play as classic. */
+  visibility?: VisibilityMode;
   playMode: PlayMode;
 }
 
@@ -415,32 +419,7 @@ function resolveAsyncLocalPlayerId(
 }
 
 function buildVisibleState(state: GameState, viewingPlayerId: string): GameState {
-  return {
-    ...state,
-    map: {
-      ...state.map,
-      planets: state.map.planets.map((planet) => {
-        if (planet.owner === viewingPlayerId) {
-          return planet;
-        }
-        return {
-          ...planet,
-          shipCount: 0,
-          buildings: [],
-          troopAccumulator: 0,
-          productionSlider: 0.5,
-        };
-      }),
-    },
-    fleets: state.fleets.filter((fleet) => fleet.ownerId === viewingPlayerId),
-    scheduledMovements: (state.scheduledMovements ?? []).filter((movement) => {
-      if (movement.ownerId !== viewingPlayerId) {
-        return false;
-      }
-      const origin = state.map.planets.find((planet) => planet.id === movement.fromPlanetId);
-      return origin !== undefined && origin.owner === viewingPlayerId;
-    }),
-  };
+  return applyVisibility(state, viewingPlayerId);
 }
 
 function visibleStateForRecord(
@@ -451,8 +430,13 @@ function visibleStateForRecord(
     return null;
   }
   const gameState = record.state;
+  // Prefer the signed-in seat when this device has one. Falling through to
+  // whoever is currently taking a turn shows their fog while the header still
+  // lists the local player's tech level.
   const viewingPlayerId =
-    overrideViewerId != null ? overrideViewerId : getLocalHumanPlayerId(gameState);
+    overrideViewerId != null
+      ? overrideViewerId
+      : record.localPlayerId ?? getLocalHumanPlayerId(gameState);
   if (viewingPlayerId === undefined) {
     return gameState;
   }
@@ -1060,6 +1044,7 @@ export function generateInitialGameState(config: GameConfig, seed: number): Game
     currentPlayerId: players[0].id,
     seed,
     playMode: config.playMode,
+    visibility: config.visibility === 'fog' ? 'fog' : 'classic',
     status: 'active',
     winnerId: null,
     scheduledMovements: [],
@@ -1277,6 +1262,7 @@ export const useGameStore = create<GameStore>()(
           mapWidth: state.map.width,
           mapHeight: state.map.height,
           planetCount: state.map.planets.length,
+          visibility: state.visibility === 'fog' ? 'fog' : 'classic',
         },
         pendingTurnReport: detail.latestEvents?.length ? detail.latestEvents : undefined,
         pendingTurnReportAcknowledged: false,
@@ -1361,6 +1347,7 @@ export const useGameStore = create<GameStore>()(
         mapWidth: state.map.width,
         mapHeight: state.map.height,
         planetCount: state.map.planets.length,
+        visibility: state.visibility === 'fog' ? 'fog' : 'classic',
       },
     };
     const { games } = get();

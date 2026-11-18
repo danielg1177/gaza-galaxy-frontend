@@ -90,6 +90,13 @@ export type TurnEvent =
  */
 export type PlayMode = 'passAndPlay' | 'asyncMultiplayer';
 
+/**
+ * How much of the galaxy a player can see.
+ * `classic` shows every planet's class and hides enemy fleets.
+ * `fog` reveals class, ownership, and troop counts only within one turn of an owned planet.
+ */
+export type VisibilityMode = 'classic' | 'fog';
+
 export const GALAXY_SHAPES = [
   'scattered',
   'dense_core',
@@ -154,6 +161,12 @@ export interface Planet {
   buildingSlots: number;
   productionSlider: number;
   isHomePlanet: boolean;
+  /**
+   * Present only on a fog-filtered view, never on authoritative state.
+   * `scouted` — within one turn: class, owner, and garrison are shown; economy is not.
+   * `hidden` — farther away: class, owner, and garrison are withheld.
+   */
+  fogSight?: 'scouted' | 'hidden';
 }
 
 /**
@@ -296,6 +309,10 @@ export interface GameState {
   currentPlayerId: string;
   seed: number;
   playMode: PlayMode;
+  /**
+   * Setup choice for what each player can see. Absent on older saves, which play as classic.
+   */
+  visibility?: VisibilityMode;
   status: 'active' | 'finished';
   winnerId: string | null;
   /** Persistent fog-of-war brain state for each AI player. Keyed by player id. */

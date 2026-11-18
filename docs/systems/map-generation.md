@@ -153,20 +153,26 @@ The generator may later:
 
 ## Fog of War
 
-Information visible to each player when rendering the map (see `buildVisibleState` in `src/store/gameStore.ts`):
+Information visible to each player when rendering the map (see `applyVisibility` in `src/game/visibility.ts`, called from `buildVisibleState` in `src/store/gameStore.ts`). The mode is `GameState.visibility` (`classic` or `fog`), chosen on Create Game and stored on `GameConfig` and async `map_config.visibility`. Absent means classic.
+
+### Classic
 
 - **Own planets:** full info visible — troop count, buildings, production slider, troop accumulator, owner, class, position, and name.
 - **Other planets (neutral or enemy):** only **position**, **class**, and **name** are meaningful to the viewer; troop count, buildings, building slots, production slider, and troop accumulator are hidden (zeroed in the filtered view).
 - **Fleets:** only the viewing player's own fleets are included in the visible game state; enemy fleets are excluded.
 
-Current `GameScreen` rendering applies a visibility-aware tint palette on top of that filtered state:
+### Fog
 
-- **Own planets (`planet.owner === humanPlayerId`):** `#27ae60` (green).
-- **Neutral planets (`planet.owner === 'neutral'`):** `#2a2a4a` (very dim neutral).
-- **Enemy/non-owned planets:** `#333355` (dark gray-blue fog blob).
-- Selection feedback is ownership-gated: the animated white/blue pulse border renders only for owned planets, and tapping a non-owned planet clears selection instead of setting `selectedPlanetId`.
+Sight distance is one turn of the viewer's fleet speed (`effectiveSpeed(techLevel)`), capped at 15 clicks.
 
-Fleet dots/lines intentionally still use per-player colors in `FleetLayer` for readability of the local player's in-transit ships.
+- **Own planets:** full info, same as classic.
+- **Scouted planets** (within one turn of any owned planet): class, owner, and troop count. Buildings, slots, production slider, troop accumulator, and home-planet status are hidden. The map colors the planet with that owner's color and shows the troop count, including 0. Tapping opens a read-only card with class, owner name, and troops.
+- **Hidden planets:** position and name only. The class letter is `?`. Owner is masked and troop count is not shown.
+- **Fleets:** your own fleets are always shown. An enemy fleet is shown, with owner name and troop count, when its current position along the route is within one turn of an owned planet.
+
+`GameScreen` colors own planets green (home worlds gold). In Classic, every other planet uses the same neutral color, so ownership stays hidden. In Fog, a scouted planet uses its owner's color; a hidden planet stays neutral and shows `?` instead of a class letter. Tapping a scouted planet opens the read-only intel card. Tapping a hidden planet does not.
+
+Fleet dots and lines use per-player colors. In Fog, an enemy fleet that is in sight also prints that player's name next to the troop count.
 
 Opponent **gold** and **researchPoints** remain visible in the player list for now (leaderboard-style info).
 
@@ -175,6 +181,8 @@ Opponent **gold** and **researchPoints** remain visible in the player list for n
 - What is the target planet count range per player count?
 
 ## Changelog
+- 2026-11-18: Fog sight is capped at 15 clicks (`min(effectiveSpeed(techLevel), 15)`). Fleet speed is unchanged.
+- 2026-11-18: Visibility setting. `applyVisibility` implements Classic (previous fog) and Fog (class, owner, and troops within one turn of flight; nearby enemy fleets).
 - 2026-09-17: Map-type preview planet dots are 50% larger (r 2.2→3.3). Tapping the preview opens a larger view of the same image; tap outside or the image to close. Random still shows `?` only (not tappable).
 - 2026-09-17: Corridors never collapse to a single-file line — arms sample 2–3 offset banks. Connectivity bridges scatter in a three-planet-wide band instead of three parallel step-lanes. Create Game map-type preview uses generated 6-player large-map SVGs, with “The shape shown is an estimate.” under the picker (hidden for Random).
 - 2026-09-17: Large 6-player maps (135 planets, 111×111) were inspected for every shape. Arm/ribbon layouts now sample thin polylines instead of growing fat tubes; `cluster` uses tighter blobs; `halo` samples two rings; `hourglass` fills overlapping disks; `broken_ring` gates are wider. `enforceMinimumSpacing` now steps at least one grid cell so integer rounding no longer leaves pairs at ~2.0 clicks and silently falls back to `scattered`.

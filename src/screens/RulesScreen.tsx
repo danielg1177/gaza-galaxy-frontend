@@ -78,14 +78,17 @@ export default function RulesScreen() {
           </Text>
         </View>
 
-        {/* Fog of War */}
+        {/* Visibility */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🌫️ Fog of War</Text>
+          <Text style={styles.sectionTitle}>🌫️ Visibility</Text>
           <Text style={styles.bodyText}>
-            You only see full details for planets you own. Neutral and enemy planets appear as dim blobs on the map—you can see their position, name, and class, but not troop counts, buildings, or production settings.
+            Each game is Classic or Fog. You always see full details for planets you own: troops, buildings, and production. Buildings and production on every other planet stay hidden.
           </Text>
           <Text style={styles.bodyText}>
-            Enemy fleets in transit are hidden. You only see your own ships moving across the galaxy. Scout by sending fleets to unexplored worlds and learn what you can from battle reports.
+            Classic shows the class of every planet. Enemy fleets in transit stay hidden. You only see your own ships moving across the galaxy.
+          </Text>
+          <Text style={styles.bodyText}>
+            Fog shows a planet's class only when you own it, or when it is within one turn of travel of a planet you own. One turn is how far your fleets move at your current speed, and sight stops at 15 clicks. A planet that close also shows who holds it and how many troops are there. Farther planets keep their name and position, and their class is unknown. An enemy fleet is shown, with its owner and troop count, when its current position is within one turn of one of your planets.
           </Text>
         </View>
 

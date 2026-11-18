@@ -43,6 +43,7 @@ import {
 import { scheduledMovementId, resolveScheduledShipCount } from '../game/turnEngine';
 import { mulberry32 } from '../game/mapGenerator';
 import type { BuildingType, Fleet, OwnerId, Planet, Player, ScheduledMovement, TurnEvent } from '../game/types';
+import { applyVisibility, classifyPlanetSight } from '../game/visibility';
 import { needsForfeitPrompt, nextCommanderStatusNoticeFor } from '../game/playerControl';
 import { getFriendRequests } from '../services/friendsService';
 import { ApiError } from '../services/apiClient';
@@ -93,6 +94,17 @@ function buildTypePrefix(buildingType: BuildingType): string {
 /** UI label for planet tier letter (stored uppercase A–P in game state). */
 function displayPlanetClass(planetClass: string): string {
   return planetClass.toLowerCase();
+}
+
+/** Class letter for a fog-filtered planet. Hidden worlds show an unknown mark. */
+function classLabelForPlanet(planet: Planet | undefined): string {
+  if (planet === undefined) {
+    return '';
+  }
+  if (planet.fogSight === 'hidden') {
+    return '?';
+  }
+  return planet.class;
 }
 
 /** Per-letter upward shift as a fraction of fontSize (negative translateY). Tuned for a–p. */
@@ -956,6 +968,7 @@ const HUMAN_COLOR = '#2e5bcc';
 const FLEET_MOTION_COLOR = '#5a90e8';
 const HOME_PLANET_COLOR = '#c8a26b';
 const NEUTRAL_COLOR = '#7a7a96';
+const ENEMY_PLANET_COLOR = '#cc3333';
 const MODAL_BUTTON_BG = '#6e6c7c';
 const MODAL_BUTTON_BG_ACTIVE = '#5a5866';
 const AI_COLORS = ['#cc3333', '#2a9048', '#d06820', '#8030c0'] as const;
@@ -1025,8 +1038,28 @@ function getPlanetColor(
     }
     return '#2e8a50';
   }
-  // All non-owned planets (neutral AND enemy) look the same — fog of war
+  // All non-owned planets (neutral AND enemy) look the same — classic fog of war
   return NEUTRAL_COLOR;
+}
+
+/** Scouted neutrals stay gray. Every other scouted world is an enemy, drawn red. */
+function scoutedPlanetColor(planet: Planet): string {
+  if (planet.owner === 'neutral') {
+    return NEUTRAL_COLOR;
+  }
+  return ENEMY_PLANET_COLOR;
+}
+
+/** Map fill. Fog-scouted worlds show owner only by red vs gray; everything else follows classic rules. */
+function planetFillColor(
+  planet: Planet,
+  humanPlayerId: string,
+  homePlanetId: string | undefined,
+): string {
+  if (planet.fogSight === 'scouted') {
+    return scoutedPlanetColor(planet);
+  }
+  return getPlanetColor(planet, humanPlayerId, homePlanetId);
 }
 
 function getFinishedViewerPlanetColor(
@@ -1137,7 +1170,9 @@ function FleetTooltipOverlay({
       <View style={styles.fleetTooltipBody}>
         <View style={styles.fleetTooltipHeader}>
           <Text style={styles.fleetTooltipShips} numberOfLines={1}>
-            {tooltip.fleet.shipCount} ships
+            {tooltip.fleet.ownerId !== localHumanPlayerId
+              ? `${getOwnerName(tooltip.fleet.ownerId, players)} · ${tooltip.fleet.shipCount} ships`
+              : `${tooltip.fleet.shipCount} ships`}
           </Text>
           <Pressable
             style={styles.fleetTooltipClose}
@@ -1241,8 +1276,8 @@ function findPlanetAtMapCoords(
   mapY: number,
   planets: Planet[],
   scale: number,
+  hitRadius = Math.max(PLANET_SIZE / 2, PLANET_HIT_RADIUS / scale),
 ): Planet | undefined {
-  const hitRadius = Math.max(PLANET_SIZE / 2, PLANET_HIT_RADIUS / scale);
   let best: Planet | undefined;
   let bestDist = Infinity;
   for (const planet of planets) {
@@ -1256,6 +1291,11 @@ function findPlanetAtMapCoords(
     }
   }
   return best;
+}
+
+/** Same target the tap uses, so a troop drag locks onto the planet under the finger. */
+function dragCatchRadius(scale: number): number {
+  return Math.max(PLANET_SIZE / 2, PLANET_HIT_RADIUS / scale);
 }
 
 function findFleetAtMapCoords(
@@ -1584,8 +1624,14 @@ const PlanetNode = React.memo(function PlanetNode({
     overflow: 'hidden' as const,
   };
   const circleBorderWidth = highlighted ? PLANET_HIGHLIGHT_BORDER_WIDTH : 0;
-  const classLabelStyle = mapPlanetClassLabelStyle(size, circleBorderWidth, isOwned, planet.class);
+  const classText = classLabelForPlanet(planet);
+  const classLabelStyle = mapPlanetClassLabelStyle(size, circleBorderWidth, isOwned, classText);
+  const showShipCount =
+    planet.fogSight === 'scouted' || (isOwned && adjustedShipCount > 0);
+  const shipLabel = planet.fogSight === 'scouted' ? planet.shipCount : adjustedShipCount;
 
+  const showEnemyName =
+    !isOwned && planet.fogSight === 'scouted' && planet.owner !== 'neutral';
   const planetBody = (
     <>
       <Text
@@ -1593,6 +1639,7 @@ const PlanetNode = React.memo(function PlanetNode({
           styles.planetNameLabel,
           { top: nameTop },
           !isOwned && styles.planetNameLabelFogged,
+          showEnemyName && { color: ENEMY_PLANET_COLOR },
         ]}
       >
         {planet.name}
@@ -1624,16 +1671,16 @@ const PlanetNode = React.memo(function PlanetNode({
             ]}
           >
             <PlanetSphereOverlays size={size} />
-            <Text style={classLabelStyle}>{displayPlanetClass(planet.class)}</Text>
+            <Text style={classLabelStyle}>{displayPlanetClass(classText)}</Text>
           </RNAnimated.View>
         </>
       ) : (
         <View style={[styles.planetCircle, circleFrame]}>
           <PlanetSphereOverlays size={size} />
-          <Text style={classLabelStyle}>{displayPlanetClass(planet.class)}</Text>
+          <Text style={classLabelStyle}>{displayPlanetClass(classText)}</Text>
         </View>
       )}
-      {isOwned && adjustedShipCount > 0 && (
+      {showShipCount && (
         <Text
           style={[
             styles.shipCountLabel,
@@ -1643,7 +1690,7 @@ const PlanetNode = React.memo(function PlanetNode({
             },
           ]}
         >
-          {adjustedShipCount}
+          {shipLabel}
         </Text>
       )}
       {isOwned && hasQueuedBuildThisTurn && (
@@ -1783,6 +1830,7 @@ function FleetLayer({
   queuedOrders,
   scheduledMovements,
   humanPlayerId,
+  viewingPlayerId,
   players,
   mapPixelWidth,
   mapPixelHeight,
@@ -1792,6 +1840,7 @@ function FleetLayer({
   queuedOrders: PendingFleet[];
   scheduledMovements: ScheduledMovement[];
   humanPlayerId: string;
+  viewingPlayerId: string;
   players: Player[];
   mapPixelWidth: number;
   mapPixelHeight: number;
@@ -1853,23 +1902,39 @@ function FleetLayer({
         const destX = destPlanet.position.x * CELL_SIZE + CELL_SIZE / 2;
         const destY = destPlanet.position.y * CELL_SIZE + CELL_SIZE / 2;
 
+        const showDestinationLine = fleet.ownerId === viewingPlayerId;
+        const labelColor = showDestinationLine ? color : ENEMY_PLANET_COLOR;
+
         return (
           <G key={fleet.id}>
-            <Line
-              x1={x}
-              y1={y}
-              x2={destX}
-              y2={destY}
-              stroke={color}
-              strokeWidth={1}
-              strokeDasharray="3 3"
-              opacity={0.6}
-            />
+            {showDestinationLine && (
+              <Line
+                x1={x}
+                y1={y}
+                x2={destX}
+                y2={destY}
+                stroke={color}
+                strokeWidth={1}
+                strokeDasharray="3 3"
+                opacity={0.6}
+              />
+            )}
             <FleetShipMarker cx={x} cy={y} towardX={destX} towardY={destY} size={FLEET_SHIP_SIZE} />
+            {fleet.ownerId !== humanPlayerId && (
+              <SvgText
+                x={x + FLEET_MARKER_TEXT_OFFSET_X}
+                y={y - FLEET_MARKER_TEXT_OFFSET_Y - FLEET_IN_TRANSIT_FONT_SIZE - 1}
+                fill={labelColor}
+                fontSize={Math.max(8, FLEET_IN_TRANSIT_FONT_SIZE - 1)}
+                fontWeight="700"
+              >
+                {getOwnerName(fleet.ownerId, players)}
+              </SvgText>
+            )}
             <SvgText
               x={x + FLEET_MARKER_TEXT_OFFSET_X}
               y={y - FLEET_MARKER_TEXT_OFFSET_Y}
-              fill={color}
+              fill={labelColor}
               fontSize={FLEET_IN_TRANSIT_FONT_SIZE}
               fontWeight="700"
             >
@@ -2019,6 +2084,8 @@ export default function GameScreen() {
     null,
   );
   const [dragDistanceLabel, setDragDistanceLabel] = useState<string | null>(null);
+  const [dragHoverPlanetId, setDragHoverPlanetId] = useState<string | null>(null);
+  const dragHoverPlanetIdRef = useRef<string | null>(null);
   const fleetDragActivatedRef = useRef(false);
   const measureDragActivatedRef = useRef(false);
   const fleetDragOriginPlanetRef = useRef<Planet | null>(null);
@@ -2147,11 +2214,11 @@ export default function GameScreen() {
     }
     if (selectedPlanetId !== null) {
       const p = gameState.map.planets.find((pl) => pl.id === selectedPlanetId);
-      if (p === undefined || p.owner !== viewingPlayerId) {
+      if (p === undefined || (p.owner !== viewingPlayerId && p.fogSight !== 'scouted')) {
         selectPlanet(null);
       }
     }
-    if (dragOriginPlanetId !== null) {
+    if (dragOriginPlanetId !== null && !fleetDragActivatedRef.current) {
       const p = gameState.map.planets.find((pl) => pl.id === dragOriginPlanetId);
       if (p === undefined || p.owner !== viewingPlayerId) {
         setDragOriginPlanetId(null);
@@ -3154,7 +3221,9 @@ export default function GameScreen() {
   const cancelDrag = useCallback(() => {
     fleetDragActivatedRef.current = false;
     fleetDragOriginPlanetRef.current = null;
+    dragHoverPlanetIdRef.current = null;
     setDragOriginPlanetId(null);
+    setDragHoverPlanetId(null);
     setDragFingerLocal(null);
     setDragDistanceLabel(null);
     runOnUI(() => {
@@ -3429,8 +3498,6 @@ export default function GameScreen() {
       startY: number,
       localX: number,
       localY: number,
-      absoluteX: number,
-      absoluteY: number,
       s: number,
       tx: number,
       ty: number,
@@ -3439,14 +3506,39 @@ export default function GameScreen() {
         fleetDragActivatedRef.current = true;
         handleDragStart(startX, startY, s, tx, ty);
       }
-      setDragFingerLocal(absoluteToMapLocal(absoluteX, absoluteY));
       const originPlanet = fleetDragOriginPlanetRef.current;
-      if (originPlanet !== null) {
-        const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
-        setDragDistanceLabel(formatDragDistanceLabel(originPlanet, mapPoint.x, mapPoint.y));
+      const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+      const hovered =
+        originPlanet !== null && gameState !== null
+          ? findPlanetAtMapCoords(
+              mapPoint.x,
+              mapPoint.y,
+              gameState.map.planets,
+              s,
+              dragCatchRadius(s),
+            )
+          : undefined;
+      const caught =
+        hovered !== undefined && originPlanet !== null && hovered.id !== originPlanet.id
+          ? hovered
+          : undefined;
+      dragHoverPlanetIdRef.current = caught?.id ?? null;
+      setDragHoverPlanetId(caught?.id ?? null);
+      if (caught !== undefined && originPlanet !== null) {
+        const center = planetCenterPx(caught);
+        setDragFingerLocal({ x: center.x * s + tx, y: center.y * s + ty });
+        const clicks = computeClickDistance(originPlanet.position, caught.position);
+        setDragDistanceLabel(`${clicks.toFixed(1)} clicks`);
+      } else {
+        // Gesture-local coordinates match the map area. Window coordinates do not,
+        // so the line and the drop used to miss the planet the finger was on.
+        setDragFingerLocal({ x: localX, y: localY });
+        if (originPlanet !== null) {
+          setDragDistanceLabel(formatDragDistanceLabel(originPlanet, mapPoint.x, mapPoint.y));
+        }
       }
     },
-    [absoluteToMapLocal, handleDragStart],
+    [gameState, handleDragStart],
   );
 
   const handleMeasureDragStart = useCallback(
@@ -3536,33 +3628,33 @@ export default function GameScreen() {
   }, []);
 
   const handleDragEnd = useCallback(
-    (absoluteX: number, absoluteY: number, s: number, tx: number, ty: number) => {
-      if (gameState === null || humanPlayer === undefined || dragOriginPlanetId === null) {
-        fleetDragActivatedRef.current = false;
-        setDragFingerLocal(null);
-        runOnUI(() => {
-          'worklet';
-          isFleetDragging.value = false;
-        })();
-        return;
-      }
-
-      const originPlanet = gameState.map.planets.find((p) => p.id === dragOriginPlanetId);
-      if (originPlanet === undefined) {
+    (localX: number, localY: number, s: number, tx: number, ty: number) => {
+      // The origin is stored on a ref because a short drag can release before
+      // React has committed dragOriginPlanetId. Reading that state here dropped
+      // the send on nearby planets.
+      const originPlanet = fleetDragOriginPlanetRef.current;
+      if (gameState === null || humanPlayer === undefined || originPlanet === null) {
         cancelDrag();
         return;
       }
 
-      const fingerLocal = absoluteToMapLocal(absoluteX, absoluteY);
-      const mapPoint = screenToMapCoords(fingerLocal.x, fingerLocal.y, s, tx, ty);
-      const destPlanet = findPlanetAtMapCoords(
-        mapPoint.x,
-        mapPoint.y,
-        gameState.map.planets,
-        s,
-      );
+      const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+      const hoveredId = dragHoverPlanetIdRef.current;
+      const hoveredPlanet =
+        hoveredId !== null
+          ? gameState.map.planets.find((planet) => planet.id === hoveredId)
+          : undefined;
+      const destPlanet =
+        hoveredPlanet ??
+        findPlanetAtMapCoords(
+          mapPoint.x,
+          mapPoint.y,
+          gameState.map.planets,
+          s,
+          dragCatchRadius(s),
+        );
 
-      const fromPlanetId = dragOriginPlanetId;
+      const fromPlanetId = originPlanet.id;
       cancelDrag();
 
       if (destPlanet === undefined || destPlanet.id === fromPlanetId) {
@@ -3624,9 +3716,7 @@ export default function GameScreen() {
       }
     },
     [
-      absoluteToMapLocal,
       cancelDrag,
-      dragOriginPlanetId,
       gameState,
       humanPlayer,
       queuedOrders,
@@ -3679,6 +3769,7 @@ export default function GameScreen() {
         return;
       }
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+      const visibleState = applyVisibility(record.state, viewingPlayerId);
       const planet = findPlanetAtMapCoords(
         mapPoint.x,
         mapPoint.y,
@@ -3689,11 +3780,16 @@ export default function GameScreen() {
         const fleet = findFleetAtMapCoords(
           mapPoint.x,
           mapPoint.y,
-          record.state.fleets,
+          visibleState.fleets,
           record.state.map.planets,
           s,
         );
-        if (fleet !== undefined) {
+        const fleetOwnerId = record.localPlayerId ?? freshHumanId;
+        if (
+          fleet !== undefined &&
+          fleetOwnerId !== undefined &&
+          fleet.ownerId === fleetOwnerId
+        ) {
           setFleetTooltip({ fleet, absX, absY });
         } else {
           setFleetTooltip(null);
@@ -3725,6 +3821,10 @@ export default function GameScreen() {
       }
 
       if (planet.owner !== viewingPlayerId) {
+        if (classifyPlanetSight(record.state, viewingPlayerId, planet) === 'scouted') {
+          store.selectPlanet(planet.id);
+          setPlanetBattleReportName(null);
+        }
         return;
       }
       store.selectPlanet(planet.id);
@@ -3755,8 +3855,6 @@ export default function GameScreen() {
         event.y - event.translationY,
         event.x,
         event.y,
-        event.absoluteX,
-        event.absoluteY,
         scale.value,
         translateX.value,
         translateY.value,
@@ -3764,8 +3862,8 @@ export default function GameScreen() {
     })
     .onEnd((event) => {
       runOnJS(handleDragEnd)(
-        event.absoluteX,
-        event.absoluteY,
+        event.x,
+        event.y,
         scale.value,
         translateX.value,
         translateY.value,
@@ -4128,7 +4226,7 @@ export default function GameScreen() {
             winnerPlayer?.homePlanetId,
             humanPlayer.homePlanetId,
           )
-        : getPlanetColor(
+        : planetFillColor(
             selectedPlanet,
             effectiveViewingPlayerId,
             showingAiObserver
@@ -4440,7 +4538,7 @@ export default function GameScreen() {
                           winnerPlayer?.homePlanetId,
                           humanPlayer.homePlanetId,
                         )
-                      : getPlanetColor(
+                      : planetFillColor(
                           planet,
                           effectiveViewingPlayerId,
                           showingAiObserver
@@ -4450,7 +4548,9 @@ export default function GameScreen() {
                   }
                   isOwned={planet.owner === effectiveViewingPlayerId}
                   isSelected={planet.id === selectedPlanetId}
-                  isDragOrigin={planet.id === dragOriginPlanetId}
+                  isDragOrigin={
+                    planet.id === dragOriginPlanetId || planet.id === dragHoverPlanetId
+                  }
                   isBoxSelected={boxSelectedPlanetIds.includes(planet.id)}
                   adjustedShipCount={Math.max(
                     0,
@@ -4470,6 +4570,7 @@ export default function GameScreen() {
                 queuedOrders={queuedOrders}
                 scheduledMovements={scheduledMovements}
                 humanPlayerId={humanPlayer.id}
+                viewingPlayerId={effectiveViewingPlayerId}
                 players={players}
                 mapPixelWidth={mapPixelWidth}
                 mapPixelHeight={mapPixelHeight}
@@ -4803,9 +4904,11 @@ export default function GameScreen() {
                       players={gameState.players}
                       turnEvents={turnReport}
                       planetClass={
-                        gameState.map.planets.find(
-                          (p) => p.name === activePlanetBattleEvent.planetName,
-                        )?.class ?? ''
+                        classLabelForPlanet(
+                          gameState.map.planets.find(
+                            (p) => p.name === activePlanetBattleEvent.planetName,
+                          ),
+                        )
                       }
                     />
                   ) : (
@@ -4814,9 +4917,11 @@ export default function GameScreen() {
                       localHumanPlayerId={localHumanPlayerId}
                       players={gameState.players}
                       planetClass={
-                        gameState.map.planets.find(
-                          (p) => p.name === activePlanetBattleEvent.planetName,
-                        )?.class ?? ''
+                        classLabelForPlanet(
+                          gameState.map.planets.find(
+                            (p) => p.name === activePlanetBattleEvent.planetName,
+                          ),
+                        )
                       }
                     />
                   )}
@@ -5001,6 +5106,62 @@ export default function GameScreen() {
       </Modal>
 
       <Modal
+        visible={
+          selectedPlanet !== undefined &&
+          selectedPlanet.fogSight === 'scouted' &&
+          selectedPlanet.owner !== viewingPlayerId
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={dismissPlanetDetail}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={dismissPlanetDetail}>
+          <Pressable style={styles.planetDetailCard} onPress={() => {}}>
+            <View style={styles.planetDetailHeader}>
+              <View style={styles.planetDetailHeaderSpacer} />
+              <Text style={styles.planetDetailName}>{selectedPlanet?.name}</Text>
+              <Pressable
+                onPress={dismissPlanetDetail}
+                hitSlop={12}
+                style={styles.planetDetailHeaderClose}
+              >
+                <Text style={styles.planetDetailClose}>✕</Text>
+              </Pressable>
+            </View>
+            <View style={styles.planetInfoRow}>
+              <View
+                style={[styles.planetClassTile, { backgroundColor: selectedPlanetFillColor }]}
+              >
+                <Text
+                  style={[
+                    styles.planetClassTileText,
+                    {
+                      transform: [
+                        {
+                          translateY: planetClassOpticalOffsetY(selectedPlanet?.class ?? '', 24),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  {displayPlanetClass(selectedPlanet?.class ?? '')}
+                </Text>
+              </View>
+              <View style={styles.troopsSummary}>
+                <Text style={styles.troopsSummaryValue}>{selectedPlanet?.shipCount ?? 0}</Text>
+                <Text style={styles.troopsSummaryLabel}>troops</Text>
+              </View>
+            </View>
+            <Text style={styles.researchLine}>
+              {selectedPlanet === undefined
+                ? ''
+                : getOwnerName(selectedPlanet.owner, players)}
+            </Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
         visible={showPlanetBattleOnly}
         transparent
         animationType="fade"
@@ -5016,8 +5177,11 @@ export default function GameScreen() {
                   players={gameState.players}
                   turnEvents={turnReport}
                   planetClass={
-                    gameState.map.planets.find((p) => p.name === activePlanetBattleEvent.planetName)
-                      ?.class ?? ''
+                    classLabelForPlanet(
+                      gameState.map.planets.find(
+                        (p) => p.name === activePlanetBattleEvent.planetName,
+                      ),
+                    )
                   }
                 />
               ) : (
@@ -5026,8 +5190,11 @@ export default function GameScreen() {
                   localHumanPlayerId={localHumanPlayerId}
                   players={gameState.players}
                   planetClass={
-                    gameState.map.planets.find((p) => p.name === activePlanetBattleEvent.planetName)
-                      ?.class ?? ''
+                    classLabelForPlanet(
+                      gameState.map.planets.find(
+                        (p) => p.name === activePlanetBattleEvent.planetName,
+                      ),
+                    )
                   }
                 />
               )
@@ -5081,6 +5248,9 @@ export default function GameScreen() {
         onClose={() => setShowStrategicMapModal(false)}
         map={map}
         humanPlayerId={effectiveViewingPlayerId}
+        colorForPlanet={(planet) =>
+          planet.fogSight === 'scouted' ? scoutedPlanetColor(planet) : undefined
+        }
       />
 
       {asyncGameId != null ? (
@@ -5590,8 +5760,9 @@ export default function GameScreen() {
                   </View>
                 )}
                 {sortedBattleReportEvents.map((event, index) => {
-                  const planetClass =
-                    gameState.map.planets.find((p) => p.name === event.planetName)?.class ?? '';
+                  const planetClass = classLabelForPlanet(
+                    gameState.map.planets.find((p) => p.name === event.planetName),
+                  );
                   const homePlanetCaptureDanger = isHumanHomePlanetCapturedByEnemy(
                     event,
                     localHumanPlayerId,

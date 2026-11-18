@@ -34,6 +34,7 @@ export interface ApiMapConfig {
   planetCount?: number;
   seed?: number;
   galaxyShape?: string;
+  visibility?: string;
 }
 
 export interface ApiGame {
@@ -123,6 +124,7 @@ export interface CreateGamePayload {
     planetCount: number;
     seed: number;
     galaxyShape?: string;
+    visibility?: string;
   };
   playerSlots: Array<{
     type: 'human' | 'ai';
