@@ -2,6 +2,12 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-11-18 — Any member can delete a finished or week-idle game
+**Decision:** `DELETE /games/{id}` still allows the creator at any time, and the last sitting-in human after everyone else forfeits. Any human member can also delete when `status` is `finished`, or when the game has not been touched for 7 days. A touch is the latest of the game row, a seat change (join, leave, forfeit, rejoin, read cursor), a turn (including a mid-turn save), an invite update, or a chat message. Opening the map without saving does not count. `GET /games` returns `can_delete` and `last_activity_at` for the caller. Command Center ⋮ **Delete** follows `can_delete`. A week-idle Find Game lobby shows **Delete** to every seated player; non-hosts keep **Leave**.
+**Rationale:** Finished games and abandoned games were stuck unless the creator, or the last person still sitting in, removed them.
+**Alternatives considered:** Letting any member delete an in-progress game immediately (rejected — an active match should stay put); counting only `games.updated_at` (rejected — a join, forfeit, or saved turn would not reset the week).
+
+---
 ## 2026-11-18 — Fog sight caps at 15 clicks
 **Decision:** Fog sight is `min(effectiveSpeed(techLevel), 15)` clicks. From tech 10 upward the player still sees 15 clicks, while fleets keep their full speed.
 **Rationale:** Uncapped sight reached 20 clicks at tech 15 and showed too much of the map.
@@ -137,7 +143,7 @@ This file records significant design decisions with rationale. Never delete entr
 ---
 
 ## 2026-08-19 — Any player can end the match; forfeit stays sit-out
-**Decision:** ⋮ **End Game** calls `POST /games/{id}/end` (any human member of an in-progress game). That sets `games.status = finished` with `winner_user_id` null and patches `state_json` so `status` is finished and `winnerId` is null. Pass-and-play / solo skip the API and `resetGame()` the local record. **Forfeit** remains AI sit-out. ~~**Delete** remains creator-only row removal.~~ *(superseded 2026-09-10 — the last remaining sitting-in human may also delete after others forfeit.)* The ⋮ menu lists **Exit Game** first and **End Game** last (under Forfeit). Confirmation copy: this will fully end the game for all players.
+**Decision:** ⋮ **End Game** calls `POST /games/{id}/end` (any human member of an in-progress game). That sets `games.status = finished` with `winner_user_id` null and patches `state_json` so `status` is finished and `winnerId` is null. Pass-and-play / solo skip the API and `resetGame()` the local record. **Forfeit** remains AI sit-out. ~~**Delete** remains creator-only row removal.~~ *(superseded 2026-09-10 — the last remaining sitting-in human may also delete after others forfeit; superseded 2026-11-18 — any member may also delete a finished game, or a game untouched for a week.)* The ⋮ menu lists **Exit Game** first and **End Game** last (under Forfeit). Confirmation copy: this will fully end the game for all players.
 **Rationale:** Players asked to stop a match for everyone without sitting out or waiting for the creator to delete it. A null winner keeps Command Center cards as neutral **FINISHED** instead of victory/defeat.
 **Alternatives considered:** Reusing creator **Delete** (rejected — removes history and is creator-only); treating end as forfeit (rejected — the game would continue); requiring all players to agree (rejected — user asked for any player to fully end it).
 

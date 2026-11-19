@@ -61,6 +61,10 @@ export interface ApiGame {
   roundNumber: number;
   turnNumber: number;
   createdAt: string;
+  /** Latest turn, seat, invite, chat, or game-row change. Omitted by older payloads. */
+  lastActivityAt?: string;
+  /** Server decision for the signed-in member. Omitted by older payloads. */
+  canDelete?: boolean;
   unreadMessageCount: number;
   blockedPlayers?: ApiBlockedPlayer[];
 }
@@ -178,6 +182,8 @@ interface ApiGameRaw {
   round_number: number;
   turn_number: number;
   created_at: string;
+  last_activity_at?: string;
+  can_delete?: boolean;
   unread_message_count: number;
   blocked_players?: Array<{
     id: number;
@@ -318,12 +324,44 @@ export function isCurrentUserGameCreator(
   return false;
 }
 
-/** True when the user may delete this async game (creator, or sole sitting-in human). */
+/** Idle this long, any member may delete. Matches Game::MEMBER_DELETE_IDLE_DAYS. */
+export const STALE_GAME_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** True when the latest known activity is a week old or older. */
+export function isAsyncGameIdle(game: ApiGame, nowMs = Date.now()): boolean {
+  const stamp = game.lastActivityAt;
+  if (stamp == null || stamp.trim() === '') {
+    return false;
+  }
+  const touchedAt = Date.parse(stamp);
+  if (Number.isNaN(touchedAt)) {
+    return false;
+  }
+  return nowMs - touchedAt >= STALE_GAME_MS;
+}
+
+/**
+ * True when this member may delete the async game.
+ * The list payload's canDelete flag is authoritative. Without it: creator,
+ * sole sitting-in human, any member of a finished game, or any member once
+ * the game has not been touched for a week.
+ */
 export function canDeleteAsyncGame(
   game: ApiGame,
   userId: number | undefined,
   username?: string,
 ): boolean {
+  if (game.canDelete === true) {
+    return true;
+  }
+  if (game.canDelete === false) {
+    return false;
+  }
+
+  if (game.status === 'finished' || isAsyncGameIdle(game)) {
+    return true;
+  }
+
   if (isCurrentUserGameCreator(game, userId, username)) {
     return true;
   }
@@ -393,6 +431,8 @@ function mapGame(api: ApiGameRaw): ApiGame {
     roundNumber: api.round_number,
     turnNumber: api.turn_number,
     createdAt: api.created_at,
+    lastActivityAt: api.last_activity_at,
+    canDelete: typeof api.can_delete === 'boolean' ? api.can_delete : undefined,
     unreadMessageCount: api.unread_message_count ?? 0,
     blockedPlayers: mapBlockedPlayers(api.blocked_players),
   };

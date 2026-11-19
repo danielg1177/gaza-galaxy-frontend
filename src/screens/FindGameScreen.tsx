@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { ApiError } from '../services/apiClient';
 import {
+  canDeleteAsyncGame,
   deleteGame as deleteApiGame,
   humanSeatCounts,
   isCurrentUserGameCreator,
@@ -428,6 +429,7 @@ function PendingLobbyCard({
 }) {
   const seats = humanSeatCounts(game.players);
   const isCreator = isCurrentUserGameCreator(game, currentUserId, currentUsername);
+  const canDelete = canDeleteAsyncGame(game, currentUserId, currentUsername);
   const isFull = seats.filled >= seats.total && seats.total > 0;
   const filledNames = game.players
     .filter((player) => !player.isAi && player.userId != null)
@@ -467,7 +469,7 @@ function PendingLobbyCard({
         </Pressable>
       )}
       <View style={styles.pendingActions}>
-        {isCreator ? (
+        {canDelete && (
           <Pressable
             style={({ pressed }) => [
               styles.dangerButton,
@@ -478,7 +480,8 @@ function PendingLobbyCard({
           >
             <Text style={styles.dangerButtonText}>Delete</Text>
           </Pressable>
-        ) : (
+        )}
+        {!isCreator && (
           <Pressable
             style={({ pressed }) => [
               styles.secondaryButton,

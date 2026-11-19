@@ -452,20 +452,20 @@ Auth required. Caller must be the creator.
 ---
 
 #### `DELETE /api/games/{id}`
-Auth required. Caller must be in `game_players` for the game (else 403 `{ "message": "Forbidden" }`). Allowed if the caller is the creator (`created_by_user_id` = me) **or** the sole remaining sitting-in human (every other human member has `is_forfeited`; AI slots do not count). Else 403 `{ "message": "Only the creator or the last remaining human player can delete this game" }`. No status check — deletion allowed in any game status.
+Auth required. Caller must be in `game_players` for the game (else 403 `{ "message": "Forbidden" }`). Allowed if the caller is the creator (`created_by_user_id` = me), the sole remaining sitting-in human (every other human member has `is_forfeited`; AI slots do not count), or any human member when the game is `finished` or has not been touched for 7 days. A touch is the latest game-row, seat, turn (including a mid-turn save), invite, or chat change. Else 403 `{ "message": "Only the creator or the last remaining human can delete a game that is still active. Any player can delete it once it is finished, or if it has not been touched in a week." }`.
 
 **Logic:** Delete game (cascades to game_players, game_invites, turns).
 
 **Response (200):** `{ "message": "Game deleted" }`
 
-**Client:** `gamesService.deleteGame(id)`; Command Center shows **Delete** when `canDeleteAsyncGame` is true (creator, or only sitting-in human left after others forfeit). Removes the game from list state and drops any local Zustand `GameRecord` with matching `asyncGameId`.
+**Client:** `gamesService.deleteGame(id)`; Command Center shows **Delete** when `canDeleteAsyncGame` is true. `GET /games` `can_delete` is authoritative; without it the client allows the creator, the only sitting-in human, any member of a finished game, or any member once `last_activity_at` is a week old. Removes the game from list state and drops any local Zustand `GameRecord` with matching `asyncGameId`.
 
-**List/detail field:** `GET /api/games` (and game payloads) include `created_by_user_id` and per-player `is_forfeited` so the client can show delete to the creator or the last remaining human.
+**List field:** `GET /api/games` includes `created_by_user_id`, per-player `is_forfeited`, `last_activity_at`, and `can_delete`.
 
 ---
 
 #### `POST /api/games/{id}/end`
-Auth required. Any human member of an in-progress game (not creator-only). Distinct from **Forfeit** (sit-out; game continues) and **Delete** (row removal by the creator or the last remaining sitting-in human).
+Auth required. Any human member of an in-progress game (not creator-only). Distinct from **Forfeit** (sit-out; game continues) and **Delete** (row removal by the creator, the last remaining sitting-in human, or any member of a finished or week-idle game).
 
 **Logic:**
 1. Verify caller is a human `game_players` member. 403 if not.

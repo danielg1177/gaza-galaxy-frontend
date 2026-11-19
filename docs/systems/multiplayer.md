@@ -83,10 +83,10 @@ Settings → **Delete account** (current password). Live campaigns continue with
 - Also lists local pass-and-play games (Zustand-only)
 - Turn alert badges on async game cards (see Turn Alerts section)
 - Pending game invites section or badge for unanswered invites
-- **Card ⋮ menu:** each Command Center game (async, Solo, Pass & Play) has a three-dot control instead of face buttons. Async order: **Chat** (unread badge on the ⋮), creator **Edit**, **Play Again**, **Forfeit** (or **Rejoin** when sitting out), **Delete** (creator, or the last remaining sitting-in human). Local: **Play Again**, **Delete**.
+- **Card ⋮ menu:** each Command Center game (async, Solo, Pass & Play) has a three-dot control instead of face buttons. Async order: **Chat** (unread badge on the ⋮), creator **Edit**, **Play Again**, **Forfeit** (or **Rejoin** when sitting out), **Delete** (creator, last remaining sitting-in human, or any member once the game is finished or untouched for a week). Local: **Play Again**, **Delete**.
 - **Play Again:** same as filling Create Game with that roster, map size, map type, campaign name, and game type, then launching. New seed/map (AI names regenerate). An explicit `galaxyShape` is reused; Random still picks a new layout. Does not copy state, fleets, or the old map. If the caller did not create the original, they swap seats with the original creator so they own the new game. Extra humans must still be accepted friends (`POST /games`).
 - **Forfeit from Command Center:** any sitting-in human member of an in-progress async game. Off-turn: `POST /games/{id}/forfeit`. On-turn: load the game, run the existing AI-submit-then-forfeit path, stay on Command Center.
-- **Delete game:** in the ⋮ menu for the creator (`created_by_user_id` equals the authenticated user), or for the sole remaining sitting-in human after every other human has forfeited (AI slots do not count). Confirmation alert → `DELETE /api/games/{id}` → card removed from lobby state and any matching local `GameRecord` (`asyncGameId`) dropped from Zustand. No status gate (waiting, in progress, and finished may all be deleted). If two or more humans are still sitting in, only the creator sees **Delete**.
+- **Delete game:** in the ⋮ menu when `can_delete` is true. That is the creator (`created_by_user_id` equals the authenticated user), the sole remaining sitting-in human after every other human has forfeited (AI slots do not count), or any human member once the game is `finished` or has not been touched for 7 days. A touch is the latest game, seat, turn (including a mid-turn save), invite, or chat change. Confirmation alert → `DELETE /api/games/{id}` → card removed from lobby state and any matching local `GameRecord` (`asyncGameId`) dropped from Zustand. If two or more humans are still sitting in an active game that was touched this week, only the creator sees **Delete**.
 
 ### Async Game Creation
 When the user selects "Async Multiplayer" / Play with Friends in the new-game setup, a **Fill seats** control chooses the fill model. **Map size** and **Map type** apply to every fill model: Map type is Random (default) or one of the 17 galaxy shapes. Random omits `map_config.galaxyShape` so generation uses the seeded picker; an explicit shape is stored and used when `state_json` is generated (invite path immediately, open lobby at `POST /games/{id}/start`).
@@ -236,7 +236,7 @@ Command Center cards for a sitting-out member stay non-enterable. Subtitle is **
 - **Async:** confirmation → `POST /games/{id}/end` → `resetGame()` → Home. Backend sets `status = finished` with no winner and notifies other humans (`event: game_ended`). Command Center shows the existing **FINISHED** card (unknown outcome). Opening it is `isViewingFinishedGame` with status-bar copy **Game ended**.
 - **Pass-and-play / solo:** confirmation → `resetGame()` (local record removed) → Home. No API call.
 
-**Delete** on the Command Center is the creator, or the last remaining sitting-in human after others forfeit. **Forfeit** remains sit-out with AI control.
+**Delete** on the Command Center is the creator, the last remaining sitting-in human after others forfeit, or any member of a finished game or a game untouched for a week. **Forfeit** remains sit-out with AI control.
 
 ## Player forfeit/rejoin briefing (Task 257)
 
