@@ -11,6 +11,7 @@ import {
   scaledBuildingCost,
 } from './productionEngine';
 import type { TurnInput } from './turnEngine';
+import { concealSameRoundDepartures, normalizeVisibility } from './visibility';
 import type {
   AiPlanetMemory,
   AiPlayerState,
@@ -1309,7 +1310,13 @@ function computeNormalOrHardTurn(ctx: AiContext): void {
  *         Probes every unexplored planet in range. Keeps only 2-ship minimum garrison.
  */
 export function computeAiTurn(state: GameState, playerId: string): TurnInput {
-  const ctx = buildContext(state, playerId);
+  // Fog hides ships other players sent earlier in this round. The AI plans from
+  // that same picture, so a later seat learns no more than an earlier one.
+  const viewed =
+    normalizeVisibility(state.visibility) === 'fog'
+      ? concealSameRoundDepartures(state, playerId)
+      : state;
+  const ctx = buildContext(viewed, playerId);
   if (ctx === null) {
     return { actions: [{ type: 'END_TURN' }], playerId };
   }

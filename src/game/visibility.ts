@@ -61,6 +61,48 @@ export function classifyPlanetSight(
   return scouted ? 'scouted' : 'hidden';
 }
 
+/**
+ * Ships another player sent during this round and that have not moved yet.
+ * A launch sets `turnsRemaining === totalTurns`, so the fleet is still on the
+ * origin. Transit only advances when the round number advances, so later seats
+ * would otherwise see the garrison drop before earlier seats could.
+ */
+export function concealSameRoundDepartures(state: GameState, viewingPlayerId: string): GameState {
+  const hidden = state.fleets.filter(
+    (fleet) =>
+      fleet.ownerId !== viewingPlayerId &&
+      fleet.dispatchedInRound === state.roundNumber &&
+      fleet.turnsRemaining === fleet.totalTurns,
+  );
+  if (hidden.length === 0) {
+    return state;
+  }
+
+  const departedByOrigin = new Map<string, number>();
+  for (const fleet of hidden) {
+    departedByOrigin.set(
+      fleet.originPlanetId,
+      (departedByOrigin.get(fleet.originPlanetId) ?? 0) + fleet.shipCount,
+    );
+  }
+  const hiddenIds = new Set(hidden.map((fleet) => fleet.id));
+
+  return {
+    ...state,
+    map: {
+      ...state.map,
+      planets: state.map.planets.map((planet) => {
+        const departed = departedByOrigin.get(planet.id);
+        if (departed === undefined || planet.owner === viewingPlayerId) {
+          return planet;
+        }
+        return { ...planet, shipCount: planet.shipCount + departed };
+      }),
+    },
+    fleets: state.fleets.filter((fleet) => !hiddenIds.has(fleet.id)),
+  };
+}
+
 function visibleSchedules(state: GameState, viewingPlayerId: string) {
   return (state.scheduledMovements ?? []).filter((movement) => {
     if (movement.ownerId !== viewingPlayerId) {
@@ -119,17 +161,18 @@ export function applyVisibility(state: GameState, viewingPlayerId: string): Game
     };
   }
 
-  const viewer = state.players.find((player) => player.id === viewingPlayerId);
+  const concealed = concealSameRoundDepartures(state, viewingPlayerId);
+  const viewer = concealed.players.find((player) => player.id === viewingPlayerId);
   const reach = oneTurnReachClicks(viewer?.techLevel ?? 0);
-  const owned = state.map.planets.filter((planet) => planet.owner === viewingPlayerId);
+  const owned = concealed.map.planets.filter((planet) => planet.owner === viewingPlayerId);
   const inSight = (position: Position) =>
     owned.some((ownedPlanet) => isWithinOneTurn(ownedPlanet.position, position, reach));
 
   return {
-    ...state,
+    ...concealed,
     map: {
-      ...state.map,
-      planets: state.map.planets.map((planet) => {
+      ...concealed.map,
+      planets: concealed.map.planets.map((planet) => {
         if (planet.owner === viewingPlayerId) {
           return planet;
         }
@@ -147,11 +190,11 @@ export function applyVisibility(state: GameState, viewingPlayerId: string): Game
         };
       }),
     },
-    fleets: state.fleets.filter((fleet) => {
+    fleets: concealed.fleets.filter((fleet) => {
       if (fleet.ownerId === viewingPlayerId) {
         return true;
       }
-      const position = fleetClickPosition(fleet, state.map.planets);
+      const position = fleetClickPosition(fleet, concealed.map.planets);
       return position !== null && inSight(position);
     }),
     scheduledMovements,

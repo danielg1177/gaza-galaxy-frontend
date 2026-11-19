@@ -189,4 +189,54 @@ const capped = applyVisibility(state([home, atCap, pastCap], [], 'fog', 15), 'vi
 assert.equal(capped.map.planets.find((item) => item.id === 'cap')?.fogSight, 'scouted');
 assert.equal(capped.map.planets.find((item) => item.id === 'past')?.fogSight, 'hidden');
 
+const leftThisRound = {
+  id: 'left-now',
+  ownerId: 'enemy',
+  shipCount: 4,
+  originPlanetId: 'near',
+  destinationPlanetId: 'far',
+  turnsRemaining: 2,
+  totalTurns: 2,
+  dispatchedInRound: 3,
+} satisfies Fleet;
+const leftEarlier = {
+  id: 'left-earlier',
+  ownerId: 'enemy',
+  shipCount: 6,
+  originPlanetId: 'near',
+  destinationPlanetId: 'home',
+  turnsRemaining: 1,
+  totalTurns: 2,
+  dispatchedInRound: 2,
+} satisfies Fleet;
+const ownDeparture = {
+  id: 'own-now',
+  ownerId: 'viewer',
+  shipCount: 2,
+  originPlanetId: 'home',
+  destinationPlanetId: 'far',
+  turnsRemaining: 2,
+  totalTurns: 2,
+  dispatchedInRound: 3,
+} satisfies Fleet;
+const sameRound = applyVisibility(
+  {
+    ...state(
+      [home, { ...near, shipCount: 7 }, far],
+      [leftThisRound, leftEarlier, ownDeparture],
+      'fog',
+    ),
+    roundNumber: 3,
+  },
+  'viewer',
+);
+const sameRoundNear = sameRound.map.planets.find((item) => item.id === 'near');
+assert.equal(sameRoundNear?.fogSight, 'scouted');
+assert.equal(sameRoundNear?.shipCount, 11);
+assert.equal(sameRound.map.planets.find((item) => item.id === 'home')?.shipCount, 8);
+assert.deepEqual(
+  sameRound.fleets.map((fleet) => fleet.id).sort(),
+  ['left-earlier', 'own-now'],
+);
+
 console.log('visibility checks passed');

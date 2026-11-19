@@ -2,6 +2,12 @@
 
 This file records significant design decisions with rationale. Never delete entries — mark superseded decisions as obsolete with a note.
 
+## 2026-11-18 — Fog hides same-round departures until the round ends
+**Decision:** In Fog, ships another player sent during the current round still count on their origin planet, and that fleet stays hidden, until `roundNumber` advances. The viewer's own sends stay visible. A Fog AI plans from the same picture. Classic is unchanged: enemy fleets and garrisons stay hidden.
+**Rationale:** Turns in a round are sequential, but the round is one shared decision. Showing an earlier send to a later seat told that seat the planet was already weaker.
+**Alternatives considered:** Hiding the fleet but leaving the lower garrison (rejected — the missing troops still show that someone left); hiding departures in Classic too (rejected — Classic never shows enemy troops or fleets).
+
+---
 ## 2026-11-18 — Any member can delete a finished or week-idle game
 **Decision:** `DELETE /games/{id}` still allows the creator at any time, and the last sitting-in human after everyone else forfeits. Any human member can also delete when `status` is `finished`, or when the game has not been touched for 7 days. A touch is the latest of the game row, a seat change (join, leave, forfeit, rejoin, read cursor), a turn (including a mid-turn save), an invite update, or a chat message. Opening the map without saving does not count. `GET /games` returns `can_delete` and `last_activity_at` for the caller. Command Center ⋮ **Delete** follows `can_delete`. A week-idle Find Game lobby shows **Delete** to every seated player; non-hosts keep **Leave**.
 **Rationale:** Finished games and abandoned games were stuck unless the creator, or the last person still sitting in, removed them.
