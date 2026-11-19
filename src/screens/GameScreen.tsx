@@ -1641,8 +1641,8 @@ const PlanetNode = React.memo(function PlanetNode({
   const circleBorderWidth = highlighted ? PLANET_HIGHLIGHT_BORDER_WIDTH : 0;
   const classText = classLabelForPlanet(planet);
   const classLabelStyle = mapPlanetClassLabelStyle(size, circleBorderWidth, isOwned, classText);
-  const showShipCount =
-    planet.fogSight === 'scouted' || (isOwned && adjustedShipCount > 0);
+  const scoutedEnemy = planet.fogSight === 'scouted' && planet.owner !== 'neutral';
+  const showShipCount = scoutedEnemy || (isOwned && adjustedShipCount > 0);
   const shipLabel = planet.fogSight === 'scouted' ? planet.shipCount : adjustedShipCount;
 
   const showEnemyName =
