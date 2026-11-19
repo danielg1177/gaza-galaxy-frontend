@@ -30,12 +30,13 @@ export function formatResearchAmount(value: number): string {
 
 /**
  * Marks about one planet in ten, spread across the map. `rng` returns values in [0, 1).
- * Home worlds are included; the setting applies to every planet.
+ * Home worlds are never marked.
  */
 export function assignOutputMultipliers(planets: Planet[], rng: () => number): Planet[] {
-  const count = Math.round(planets.length / 10);
+  const eligible = planets.filter((planet) => !planet.isHomePlanet);
+  const count = Math.min(eligible.length, Math.round(planets.length / 10));
   if (count <= 0) return planets;
-  const chosen = new Set(pickSpreadPlanets(planets, count, rng).map((planet) => planet.id));
+  const chosen = new Set(pickSpreadPlanets(eligible, count, rng).map((planet) => planet.id));
   return planets.map((planet) => {
     if (!chosen.has(planet.id)) return planet;
     const multiplier =

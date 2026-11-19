@@ -44,6 +44,14 @@ const line = Array.from({ length: 20 }, (_, index) =>
 const marked = assignOutputMultipliers(line, rngFrom(7));
 const chosen = marked.filter((item) => item.outputMultiplier !== undefined);
 assert.equal(chosen.length, 2);
+const withHomes = line.map((item, index) =>
+  index < 4 ? { ...item, isHomePlanet: true } : item,
+);
+const markedHomes = assignOutputMultipliers(withHomes, rngFrom(7));
+assert.ok(markedHomes.filter((item) => item.outputMultiplier !== undefined).length > 0);
+assert.ok(
+  markedHomes.every((item) => item.outputMultiplier === undefined || !item.isHomePlanet),
+);
 for (const item of chosen) {
   assert.ok(OUTPUT_MULTIPLIER_VALUES.includes(item.outputMultiplier!));
 }

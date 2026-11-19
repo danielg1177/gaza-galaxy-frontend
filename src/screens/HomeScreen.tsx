@@ -1937,7 +1937,7 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={styles.settingHelpLine}>
                   <Text style={styles.settingHelpOption}>On. </Text>
-                  About one planet in ten is a hidden ×1.25, ×1.5, ×1.75, or ×2, spread across the map. Building there costs that much more, and its gold, troops, and research are multiplied the same way. The mark shows only after you own it.
+                  About one planet in ten is a hidden ×1.25, ×1.5, ×1.75, or ×2, spread across the map. Home planets are never marked. Building there costs that much more, and its gold, troops, and research are multiplied the same way. The mark shows only after you own it.
                 </Text>
               </View>
             )}
