@@ -9,7 +9,7 @@ import {
   effectiveSpeed,
   isInRange,
 } from './movementEngine';
-import { FACTORY_GOLD_COST, RESEARCH_LAB_GOLD_COST } from './productionEngine';
+import { scaledBuildingCost } from './productionEngine';
 import { runProduction } from './productionEngine';
 import { isAiControlled } from './playerControl';
 import type {
@@ -447,7 +447,7 @@ function processBuild(
     throw new Error(`No building slots available on planet ${action.planetId}`);
   }
 
-  const cost = action.buildingType === 'factory' ? FACTORY_GOLD_COST : RESEARCH_LAB_GOLD_COST;
+  const cost = scaledBuildingCost(action.buildingType, planet);
   const player = players.find((p) => p.id === playerId);
   if (player === undefined || player.gold < cost) {
     throw new Error(`Insufficient gold to build on planet ${action.planetId}`);

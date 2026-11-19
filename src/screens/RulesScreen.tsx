@@ -88,7 +88,18 @@ export default function RulesScreen() {
             Classic shows the class of every planet. Enemy fleets in transit stay hidden. You only see your own ships moving across the galaxy.
           </Text>
           <Text style={styles.bodyText}>
-            Fog shows a planet's class only when you own it, or when it is within one turn of travel of a planet you own. One turn is how far your fleets move at your current speed, and sight stops at 15 clicks. A planet that close also shows who holds it and how many troops are there. Farther planets keep their name and position, and their class is unknown. An enemy fleet is shown, with its owner and troop count, when its current position is within one turn of one of your planets.
+            Fog shows a planet's class only when you own it, or when it is within one turn of travel of a planet you own. One turn is how far your fleets move at your current speed, and sight stops at 15 clicks. A planet that close also shows who holds it and how many troops are there. Farther planets keep their name and position, and their class is unknown.             An enemy fleet is shown, with its owner and troop count, when its current position is within one turn of one of your planets.
+          </Text>
+        </View>
+
+        {/* Multipliers */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>✦ Multipliers</Text>
+          <Text style={styles.bodyText}>
+            A new game can turn Multipliers on. About one planet in ten then carries a hidden ×1.25, ×1.5, ×1.75, or ×2, spread across the map. Factories and research labs cost that much more there, and the gold, troops, and research that world produces are multiplied the same way.
+          </Text>
+          <Text style={styles.bodyText}>
+            You cannot see the mark on a planet you do not own. Once you take it, the map and the planet window show the multiplier.
           </Text>
         </View>
 

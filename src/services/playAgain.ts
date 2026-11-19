@@ -1,5 +1,6 @@
 import { DEFAULT_PLAYER_NAME } from '../constants/app';
-import { isGalaxyShape, type GalaxyShape, type MapSize, type VisibilityMode } from '../game/types';
+import { normalizePlanetMultipliers } from '../game/planetMultipliers';
+import { isGalaxyShape, type GalaxyShape, type MapSize, type PlanetMultiplierMode, type VisibilityMode } from '../game/types';
 import { normalizeVisibility } from '../game/visibility';
 import type { PlayerSlot } from '../store/gameStore';
 import type { ApiGame, ApiGamePlayer } from './gamesService';
@@ -19,6 +20,11 @@ export function resolveGalaxyShape(value: string | undefined): GalaxyShape | und
 /** Create Game visibility. Missing values stay on the original classic rules. */
 export function resolveVisibility(value: string | undefined): VisibilityMode {
   return normalizeVisibility(value);
+}
+
+/** Create Game multipliers. Missing values leave every planet at normal cost and output. */
+export function resolvePlanetMultipliers(value: string | undefined): PlanetMultiplierMode {
+  return normalizePlanetMultipliers(value);
 }
 
 function findHumanSlotIndex(

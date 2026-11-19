@@ -4,10 +4,10 @@ import {
   updateAiObservation,
   type AiDifficulty,
 } from '../game/aiEngine';
+import { assignOutputMultipliers } from '../game/planetMultipliers';
 import {
-  FACTORY_GOLD_COST,
-  RESEARCH_LAB_GOLD_COST,
   STARTING_GOLD,
+  scaledBuildingCost,
 } from '../game/productionEngine';
 import { generateMap } from '../game/mapGenerator';
 import { forfeitEliminatedPlayerPlanets } from '../game/combatEngine';
@@ -31,6 +31,7 @@ import type {
   GameState,
   MapSize,
   Planet,
+  PlanetMultiplierMode,
   PlayMode,
   Player,
   ScheduledMovement,
@@ -81,6 +82,8 @@ export interface GameConfig {
   galaxyShape?: GalaxyShape;
   /** Absent on older games, which play as classic. */
   visibility?: VisibilityMode;
+  /** Absent on older games, which play with no multiplied planets. */
+  planetMultipliers?: PlanetMultiplierMode;
   playMode: PlayMode;
 }
 
@@ -1026,9 +1029,17 @@ export function generateInitialGameState(config: GameConfig, seed: number): Game
     mapSize: config.mapSize,
     rng: mulberry32(seed + 1),
   });
+  const planetMultipliers = config.planetMultipliers === 'on' ? 'on' : 'off';
+  const playMap =
+    planetMultipliers === 'on'
+      ? {
+          ...mapWithSpawns,
+          planets: assignOutputMultipliers(mapWithSpawns.planets, mulberry32(seed + 3)),
+        }
+      : mapWithSpawns;
   const aiNameRng = mulberry32(seed + 2);
   const players = buildPlayers(
-    mapWithSpawns,
+    playMap,
     playerIds,
     homePlanetClassByPlayerId,
     config,
@@ -1036,7 +1047,7 @@ export function generateInitialGameState(config: GameConfig, seed: number): Game
   );
   const initialAiStates: Record<string, AiPlayerState> = {};
   const baseState: GameState = {
-    map: mapWithSpawns,
+    map: playMap,
     players,
     fleets: [],
     turnNumber: 1,
@@ -1045,6 +1056,7 @@ export function generateInitialGameState(config: GameConfig, seed: number): Game
     seed,
     playMode: config.playMode,
     visibility: config.visibility === 'fog' ? 'fog' : 'classic',
+    planetMultipliers,
     status: 'active',
     winnerId: null,
     scheduledMovements: [],
@@ -1263,6 +1275,7 @@ export const useGameStore = create<GameStore>()(
           mapHeight: state.map.height,
           planetCount: state.map.planets.length,
           visibility: state.visibility === 'fog' ? 'fog' : 'classic',
+          planetMultipliers: state.planetMultipliers === 'on' ? 'on' : 'off',
         },
         pendingTurnReport: detail.latestEvents?.length ? detail.latestEvents : undefined,
         pendingTurnReportAcknowledged: false,
@@ -1348,6 +1361,7 @@ export const useGameStore = create<GameStore>()(
         mapHeight: state.map.height,
         planetCount: state.map.planets.length,
         visibility: state.visibility === 'fog' ? 'fog' : 'classic',
+        planetMultipliers: state.planetMultipliers === 'on' ? 'on' : 'off',
       },
     };
     const { games } = get();
@@ -1459,8 +1473,7 @@ export const useGameStore = create<GameStore>()(
       return 'not_owner';
     }
 
-    const cost =
-      buildingType === 'factory' ? FACTORY_GOLD_COST : RESEARCH_LAB_GOLD_COST;
+    const cost = scaledBuildingCost(buildingType, planet);
     const committedBuildings = planet.buildings.filter(
       (building) => building.builtOnRound < gameState.roundNumber,
     ).length;
@@ -1526,8 +1539,7 @@ export const useGameStore = create<GameStore>()(
       return;
     }
 
-    const refund =
-      building.type === 'factory' ? FACTORY_GOLD_COST : RESEARCH_LAB_GOLD_COST;
+    const refund = scaledBuildingCost(building.type, planet);
     const nextBuildings = planet.buildings.filter((_, i) => i !== buildingIndex);
     const nextPlanets = gameState.map.planets.map((p) =>
       p.id === planetId ? { ...p, buildings: nextBuildings } : p,

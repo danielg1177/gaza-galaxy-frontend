@@ -9,3 +9,4 @@ export * from './combatEngine';
 export * from './aiEngine';
 export * from './validationEngine';
 export * from './visibility';
+export * from './planetMultipliers';

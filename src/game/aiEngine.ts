@@ -6,10 +6,9 @@ import {
   isInRange,
 } from './movementEngine';
 import {
-  FACTORY_GOLD_COST,
   FACTORY_GOLD_OUTPUT,
   FACTORY_TROOP_OUTPUT,
-  RESEARCH_LAB_GOLD_COST,
+  scaledBuildingCost,
 } from './productionEngine';
 import type { TurnInput } from './turnEngine';
 import type {
@@ -747,7 +746,7 @@ function decideBuildActions(ctx: AiContext): void {
 
     for (let slot = 0; slot < slotsToFill; slot++) {
       const buildingType = mix[existingCount + slot] ?? 'researchLab';
-      const cost = buildingType === 'factory' ? FACTORY_GOLD_COST : RESEARCH_LAB_GOLD_COST;
+      const cost = scaledBuildingCost(buildingType, planet);
 
       if (ctx.player.gold - goldSpent < cost) {
         return; // No more gold for buildings this turn.

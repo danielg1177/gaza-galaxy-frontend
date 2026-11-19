@@ -1,3 +1,4 @@
+import { planetOutputMultiplier } from './planetMultipliers';
 import type { GameMap, Planet, PlanetClass, Player, TurnEvent } from './types';
 
 export const FACTORY_GOLD_COST = 200;
@@ -60,17 +61,35 @@ export function roundToTenth(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+function roundToHundredth(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Factory and lab price on this planet. A ×1.25 lab is 313 gold (250 × 1.25).
+ * Planets with no multiplier keep the base price.
+ */
+export function scaledBuildingCost(
+  buildingType: 'factory' | 'researchLab',
+  planet: { outputMultiplier?: number },
+): number {
+  const base = buildingType === 'factory' ? FACTORY_GOLD_COST : RESEARCH_LAB_GOLD_COST;
+  return Math.round(base * planetOutputMultiplier(planet));
+}
+
 export function computeFactoryOutputs(
   factories: number,
   planetClass: PlanetClass,
   productionSlider: number,
+  outputMultiplier = 1,
 ): { troops: number; gold: number } {
+  const round = outputMultiplier === 1 ? roundToTenth : roundToHundredth;
   return {
-    troops: roundToTenth(
-      factories * FACTORY_TROOP_OUTPUT[planetClass] * productionSlider,
+    troops: round(
+      factories * FACTORY_TROOP_OUTPUT[planetClass] * productionSlider * outputMultiplier,
     ),
-    gold: roundToTenth(
-      factories * FACTORY_GOLD_OUTPUT[planetClass] * (1 - productionSlider),
+    gold: round(
+      factories * FACTORY_GOLD_OUTPUT[planetClass] * (1 - productionSlider) * outputMultiplier,
     ),
   };
 }
@@ -128,10 +147,12 @@ export function runProduction(
     const factories = countActiveBuildings(planet, 'factory', currentRound);
     const labs = countActiveBuildings(planet, 'researchLab', currentRound);
 
+    const outputMultiplier = planetOutputMultiplier(planet);
     const { troops: rawTroopOutput, gold: rawGoldOutput } = computeFactoryOutputs(
       factories,
       planet.class,
       planet.productionSlider,
+      outputMultiplier,
     );
 
     let troopAccumulator = planet.troopAccumulator + rawTroopOutput;
@@ -149,9 +170,12 @@ export function runProduction(
     }
 
     goldTotals.set(planet.owner, (goldTotals.get(planet.owner) ?? 0) + Math.floor(rawGoldOutput));
+    const researchGained = roundToHundredth(
+      labs * RESEARCH_LAB_POINTS_PER_TURN * outputMultiplier,
+    );
     researchTotals.set(
       planet.owner,
-      (researchTotals.get(planet.owner) ?? 0) + labs * RESEARCH_LAB_POINTS_PER_TURN,
+      roundToHundredth((researchTotals.get(planet.owner) ?? 0) + researchGained),
     );
 
     return {

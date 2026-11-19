@@ -38,6 +38,13 @@ Each new game chooses **Classic** or **Fog**. Older games with no setting play a
 - Planets farther away keep their position and name. Their class shows as unknown, and ownership and troop count stay hidden
 - Enemy fleets are visible, with owner and troop count, when the fleet's current position is within one turn of one of your planets. Your own fleets are always visible
 
+## Multipliers
+Each new game can turn **Multipliers** on. Older games, and games left off, keep normal costs and output.
+
+When it is on, about one planet in ten is marked, spread across the map. Each marked world randomly gets **×1.25**, **×1.5**, **×1.75**, or **×2**. Factory and research lab prices on that world are multiplied by that number, and so are the gold, troops, and research points it produces. A lab normally adds 1 research point per turn; a lab on a ×1.5 world adds 1.5.
+
+Players who do not own the planet cannot see that it has a multiplier. After you take it, the map and the planet window show the mark.
+
 ## Planet Classes
 | Class | Production Quality |
 |-------|--------------------|
@@ -77,6 +84,7 @@ Owned planets with a building queued this turn show a blue wrench on the map unt
 - Last player with an un-captured home planet wins
 
 ## Changelog
+- 2026-11-18: Optional Multipliers setting. About one planet in ten gets a hidden ×1.25, ×1.5, ×1.75, or ×2 on build cost and on gold, troops, and research output. The mark appears only after you own the planet.
 - 2026-11-18: Fog sight is capped at 15 clicks. Fleet speed can still exceed that.
 - 2026-11-18: Visibility setting. Classic keeps the original fog. Fog reveals class, owner, and troops only within one turn of an owned planet, and reveals nearby enemy fleets.
 - 2026-09-11: Same-turn build wrench on owned planets; scheduled repeating orders use dotted map routes (planet ⟳ badge removed).

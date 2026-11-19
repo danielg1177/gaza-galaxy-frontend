@@ -97,6 +97,9 @@ export type PlayMode = 'passAndPlay' | 'asyncMultiplayer';
  */
 export type VisibilityMode = 'classic' | 'fog';
 
+/** Off leaves every planet at normal cost and output. On marks about one in ten. */
+export type PlanetMultiplierMode = 'off' | 'on';
+
 export const GALAXY_SHAPES = [
   'scattered',
   'dense_core',
@@ -167,6 +170,12 @@ export interface Planet {
    * `hidden` — farther away: class, owner, and garrison are withheld.
    */
   fogSight?: 'scouted' | 'hidden';
+  /**
+   * Present only on worlds chosen by the multiplier setting.
+   * Scales factory and lab cost, and the gold, troops, and research produced here.
+   * Removed from any view of a planet the viewer does not own.
+   */
+  outputMultiplier?: 1.25 | 1.5 | 1.75 | 2;
 }
 
 /**
@@ -313,6 +322,8 @@ export interface GameState {
    * Setup choice for what each player can see. Absent on older saves, which play as classic.
    */
   visibility?: VisibilityMode;
+  /** Absent on older saves. Treated as off, so no planet carries a multiplier. */
+  planetMultipliers?: PlanetMultiplierMode;
   status: 'active' | 'finished';
   winnerId: string | null;
   /** Persistent fog-of-war brain state for each AI player. Keyed by player id. */

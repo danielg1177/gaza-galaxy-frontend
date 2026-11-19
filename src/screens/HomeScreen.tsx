@@ -18,7 +18,7 @@ import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { APP_NAME_UPPER, DEFAULT_PLAYER_NAME } from '../constants/app';
-import { GALAXY_SHAPES, isGalaxyShape, type GalaxyShape, type MapSize, type VisibilityMode } from '../game/types';
+import { GALAXY_SHAPES, isGalaxyShape, type GalaxyShape, type MapSize, type PlanetMultiplierMode, type VisibilityMode } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
 import { ConversationModal } from '../components/ConversationModal';
 import { EditGameNameModal } from '../components/EditGameNameModal';
@@ -46,6 +46,7 @@ import {
   canForfeitAsyncGame,
   resolveGalaxyShape,
   resolveMapSize,
+  resolvePlanetMultipliers,
   resolveVisibility,
 } from '../services/playAgain';
 import { useAuthStore } from '../store/authStore';
@@ -557,6 +558,7 @@ export default function HomeScreen() {
   const [mapSize, setMapSize] = useState<MapSize>('medium');
   const [galaxyShapeChoice, setGalaxyShapeChoice] = useState<GalaxyShapeChoice>('random');
   const [visibility, setVisibility] = useState<VisibilityMode>('classic');
+  const [planetMultipliers, setPlanetMultipliers] = useState<PlanetMultiplierMode>('off');
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [openGameCount, setOpenGameCount] = useState(0);
   const [pendingLobbyCount, setPendingLobbyCount] = useState(0);
@@ -1052,6 +1054,7 @@ export default function HomeScreen() {
     lobbyFill: 'invite' | 'open' = 'invite',
     galaxyShape?: GalaxyShape,
     visibilityMode: VisibilityMode = 'classic',
+    multiplierMode: PlanetMultiplierMode = 'off',
   ) => {
     const { width, height, planetCount } = computeMapDimensions(size, slots.length);
     const playerName = (slots[0]?.name ?? '').trim() || DEFAULT_PLAYER_NAME;
@@ -1061,6 +1064,7 @@ export default function HomeScreen() {
       mapHeight: height,
       planetCount,
       visibility: visibilityMode,
+      planetMultipliers: multiplierMode,
       ...(galaxyShape != null ? { galaxyShape } : {}),
     };
 
@@ -1180,6 +1184,7 @@ export default function HomeScreen() {
       fillMode,
       galaxyShape,
       visibility,
+      planetMultipliers,
     );
   };
 
@@ -1201,7 +1206,7 @@ export default function HomeScreen() {
     setCardMenu(null);
     showConfirm(
       'Play again?',
-      'Start a new game with the same players, map size, name, type, and visibility. The map will be randomized.',
+      'Start a new game with the same players, map size, name, type, visibility, and multipliers. The map will be randomized.',
       () => {
         const size = record.config.mapSize;
         const slots = record.config.playerSlots;
@@ -1218,6 +1223,9 @@ export default function HomeScreen() {
           planetCount,
           galaxyShape: record.config.galaxyShape,
           visibility: resolveVisibility(record.config.visibility ?? record.state.visibility),
+          planetMultipliers: resolvePlanetMultipliers(
+            record.config.planetMultipliers ?? record.state.planetMultipliers,
+          ),
           playMode: record.config.playMode,
         });
         navigation.navigate('Game');
@@ -1233,7 +1241,7 @@ export default function HomeScreen() {
     }
     showConfirm(
       'Play again?',
-      'Start a new game with the same players, map size, name, type, and visibility. The map will be randomized.',
+      'Start a new game with the same players, map size, name, type, visibility, and multipliers. The map will be randomized.',
       () => {
         const built = buildPlayAgainSlots(game, currentUser);
         if ('error' in built) {
@@ -1243,6 +1251,7 @@ export default function HomeScreen() {
         const size = resolveMapSize(game.mapConfig?.mapSize);
         const galaxyShape = resolveGalaxyShape(game.mapConfig?.galaxyShape);
         const visibilityMode = resolveVisibility(game.mapConfig?.visibility);
+        const multiplierMode = resolvePlanetMultipliers(game.mapConfig?.planetMultipliers);
         launchCampaign(
           game.name,
           built.slots,
@@ -1251,6 +1260,7 @@ export default function HomeScreen() {
           'invite',
           galaxyShape,
           visibilityMode,
+          multiplierMode,
         );
       },
     );
@@ -1857,6 +1867,36 @@ export default function HomeScreen() {
               {visibility === 'classic'
                 ? 'Planet class is visible on every world. Enemy fleets stay hidden.'
                 : 'Class, owner, and troop counts show only within one turn of your planets, up to 15 clicks. Enemy fleets appear, with owner and size, when they fly that close.'}
+            </Text>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Multipliers</Text>
+            <View style={styles.visibilityRow}>
+              {(['off', 'on'] as const).map((mode) => {
+                const selected = planetMultipliers === mode;
+                return (
+                  <Pressable
+                    key={mode}
+                    style={({ pressed }) => [
+                      styles.mapSizeButton,
+                      styles.visibilityButton,
+                      selected && styles.mapSizeButtonSelected,
+                      pressed && !selected && styles.mapSizeButtonPressed,
+                    ]}
+                    onPress={() => setPlanetMultipliers(mode)}
+                  >
+                    <Text style={[styles.mapSizeLabel, selected && styles.mapSizeLabelSelected]}>
+                      {mode === 'off' ? 'Off' : 'On'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.mapTypeEstimate}>
+              {planetMultipliers === 'off'
+                ? 'Every world has the normal build cost and output.'
+                : 'About one planet in ten is a hidden ×1.25, ×1.5, ×1.75, or ×2, spread across the map. Building there costs that much more, and its gold, troops, and research are multiplied the same way. The mark shows only after you own it.'}
             </Text>
           </View>
 

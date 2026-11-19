@@ -1,12 +1,13 @@
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated as RNAnimated,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -29,9 +30,16 @@ import type { RootStackParamList } from '../../App';
 import { ConversationModal } from '../components/ConversationModal';
 import StrategicMapModal from '../components/StrategicMapModal';
 import {
+  formatOutputMultiplier,
+  formatResearchAmount,
+  planetOutputMultiplier,
+} from '../game/planetMultipliers';
+import {
   computeFactoryOutputs,
   MAX_TECH_LEVEL,
+  RESEARCH_LAB_POINTS_PER_TURN,
   researchThreshold,
+  scaledBuildingCost,
 } from '../game/productionEngine';
 import {
   computeClickDistance,
@@ -89,6 +97,13 @@ function buildTypeLabel(buildingType: BuildingType): string {
 
 function buildTypePrefix(buildingType: BuildingType): string {
   return buildingType === 'factory' ? '🏭' : '🔬';
+}
+
+function formatProductionAmount(value: number): string {
+  const hundredths = Math.round(value * 100) / 100;
+  const tenths = Math.round(hundredths * 10) / 10;
+  if (Math.abs(hundredths - tenths) < 0.001) return tenths.toFixed(1);
+  return hundredths.toFixed(2);
 }
 
 /** UI label for planet tier letter (stored uppercase A–P in game state). */
@@ -1693,6 +1708,20 @@ const PlanetNode = React.memo(function PlanetNode({
           {shipLabel}
         </Text>
       )}
+      {isOwned && planetOutputMultiplier(planet) > 1 && (
+        <Text
+          numberOfLines={1}
+          style={[
+            styles.planetMultiplierLabel,
+            {
+              left: circleLeft + size + PLANET_BATTLE_ICON_MARGIN,
+              top: nameTop - (PLANET_LABEL_FONT_SIZE + 1),
+            },
+          ]}
+        >
+          {formatOutputMultiplier(planetOutputMultiplier(planet))}
+        </Text>
+      )}
       {isOwned && hasQueuedBuildThisTurn && (
         <View
           style={[
@@ -2125,7 +2154,13 @@ export default function GameScreen() {
   const initialSnapGameIdRef = useRef<string | null>(null);
   const prevShowingLockScreenRef = useRef(showingLockScreen);
   const pendingGameOverAlertRef = useRef(false);
-  const modalOpenedAtRef = useRef<number>(0);
+  // True while the click that opened the planet modal can still land on a
+  // control that mounted under the cursor. Cleared as soon as that click ends.
+  const planetModalPressLockedRef = useRef(false);
+  const primaryPointerDownCountRef = useRef(0);
+  // Web-only. Stays false until the gesture that opened the planet modal has
+  // finished its click, so an invisible shield can sit above the buttons.
+  const [planetModalArmed, setPlanetModalArmed] = useState(Platform.OS !== 'web');
   const [mapViewportSize, setMapViewportSize] = useState({ width: 0, height: 0 });
   const [canAdvanceAi, setCanAdvanceAi] = useState(false);
 
@@ -2436,8 +2471,8 @@ export default function GameScreen() {
   }, []);
 
   const dismissPlanetDetail = useCallback(() => {
-    if (Date.now() - modalOpenedAtRef.current < 400) {
-      return; // absorb phantom web click that arrives shortly after the tap that opened the modal
+    if (planetModalPressLockedRef.current) {
+      return;
     }
     selectPlanet(null);
     setPlanetBattleReportName(null);
@@ -2514,6 +2549,7 @@ export default function GameScreen() {
       selectedPlanetActiveFactories,
       selectedPlanet.class,
       selectedPlanet.productionSlider,
+      planetOutputMultiplier(selectedPlanet),
     );
   }, [selectedPlanet, selectedPlanetActiveFactories]);
   const selectedRoundNumber = gameState?.roundNumber ?? -1;
@@ -2564,15 +2600,30 @@ export default function GameScreen() {
           );
         }, 0)
       : 0;
+  const researchPointsPerTurn =
+    gameState && localHumanPlayerId !== undefined
+      ? gameState.map.planets.reduce((total, planet) => {
+          if (planet.owner !== localHumanPlayerId) {
+            return total;
+          }
+          const labs = planet.buildings.filter(
+            (building) =>
+              building.type === 'researchLab' && building.builtOnRound < gameState.roundNumber,
+          ).length;
+          return (
+            total + labs * RESEARCH_LAB_POINTS_PER_TURN * planetOutputMultiplier(planet)
+          );
+        }, 0)
+      : 0;
   const projectedTurnsToNextLevel =
     humanPlayer && humanPlayer.techLevel >= MAX_TECH_LEVEL
       ? null
-      : activeResearchLabCount === 0
+      : researchPointsPerTurn === 0
         ? '∞'
         : String(
             Math.ceil(
               Math.max(0, currentResearchThreshold - (humanPlayer?.researchPoints ?? 0)) /
-                activeResearchLabCount,
+                researchPointsPerTurn,
             ),
           );
 
@@ -2974,10 +3025,100 @@ export default function GameScreen() {
     }
   }, [selectedPlanetId]);
 
-  useEffect(() => {
-    if (selectedPlanetId !== null) {
-      modalOpenedAtRef.current = Date.now();
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
     }
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+      primaryPointerDownCountRef.current += 1;
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+      primaryPointerDownCountRef.current = Math.max(0, primaryPointerDownCountRef.current - 1);
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('pointerup', onPointerUp, true);
+    window.addEventListener('pointercancel', onPointerUp, true);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointerup', onPointerUp, true);
+      window.removeEventListener('pointercancel', onPointerUp, true);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    if (selectedPlanetId === null) {
+      planetModalPressLockedRef.current = false;
+      setPlanetModalArmed(false);
+      return;
+    }
+
+    // Map taps open this modal from pointerup, and React commits it before the
+    // browser dispatches the matching click. Swallow that click so a button
+    // mounted under the cursor cannot activate, then accept the next press on
+    // the following task — no artificial delay.
+    planetModalPressLockedRef.current = true;
+    let released = false;
+    let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+    let removePointerEnd = () => {};
+
+    const swallowOpeningClick = (event: Event) => {
+      if (!planetModalPressLockedRef.current) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const release = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      if (releaseTimer !== null) {
+        clearTimeout(releaseTimer);
+      }
+      removePointerEnd();
+      window.removeEventListener('click', swallowOpeningClick, true);
+      planetModalPressLockedRef.current = false;
+    };
+
+    window.addEventListener('click', swallowOpeningClick, true);
+
+    const releaseAfterOpeningClick = () => {
+      // click is dispatched in this task, after pointerup/mouseup and before timers.
+      releaseTimer = setTimeout(() => {
+        release();
+        setPlanetModalArmed(true);
+      }, 0);
+    };
+
+    if (primaryPointerDownCountRef.current > 0) {
+      const onPointerEnd = () => {
+        removePointerEnd();
+        releaseAfterOpeningClick();
+      };
+      window.addEventListener('pointerup', onPointerEnd, true);
+      window.addEventListener('mouseup', onPointerEnd, true);
+      window.addEventListener('pointercancel', onPointerEnd, true);
+      removePointerEnd = () => {
+        window.removeEventListener('pointerup', onPointerEnd, true);
+        window.removeEventListener('mouseup', onPointerEnd, true);
+        window.removeEventListener('pointercancel', onPointerEnd, true);
+      };
+    } else {
+      releaseAfterOpeningClick();
+    }
+
+    return release;
   }, [selectedPlanetId]);
 
   useEffect(() => {
@@ -4138,6 +4279,9 @@ export default function GameScreen() {
   }, [navigation]);
 
   const handleBuildChipPress = (type: 'factory' | 'researchLab') => {
+    if (planetModalPressLockedRef.current) {
+      return;
+    }
     if (selectedPlanet === undefined || noBuildSlotsRemaining) {
       return;
     }
@@ -4148,8 +4292,8 @@ export default function GameScreen() {
   };
 
   const handleFilledBuildingSlotPress = (slotIndex: number) => {
-    if (Date.now() - modalOpenedAtRef.current < 400) {
-      return; // absorb phantom web click
+    if (planetModalPressLockedRef.current) {
+      return;
     }
     if (selectedPlanet === undefined) {
       return;
@@ -4930,6 +5074,13 @@ export default function GameScreen() {
             <Pressable style={styles.planetDetailCard} onPress={() => {}}>
             <View style={styles.planetDetailHeader}>
               <View style={styles.planetDetailHeaderSpacer} />
+              {selectedPlanet !== undefined && planetOutputMultiplier(selectedPlanet) > 1 && (
+                <View style={styles.planetHeaderMultiplier} pointerEvents="none">
+                  <Text style={styles.planetClassMultiplier}>
+                    {formatOutputMultiplier(planetOutputMultiplier(selectedPlanet))}
+                  </Text>
+                </View>
+              )}
               <Text style={styles.planetDetailName}>{selectedPlanet?.name}</Text>
               <Pressable
                 onPress={dismissPlanetDetail}
@@ -4939,29 +5090,28 @@ export default function GameScreen() {
                 <Text style={styles.planetDetailClose}>✕</Text>
               </Pressable>
             </View>
-
             <View style={styles.planetInfoRow}>
               <View
                 style={[styles.planetClassTile, { backgroundColor: selectedPlanetFillColor }]}
               >
-                <Text
-                  style={[
-                    styles.planetClassTileText,
-                    {
-                      transform: [
-                        {
-                          translateY: planetClassOpticalOffsetY(
-                            selectedPlanet?.class ?? '',
-                            24,
-                          ),
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  {displayPlanetClass(selectedPlanet?.class ?? '')}
-                </Text>
-              </View>
+                  <Text
+                    style={[
+                      styles.planetClassTileText,
+                      {
+                        transform: [
+                          {
+                            translateY: planetClassOpticalOffsetY(
+                              selectedPlanet?.class ?? '',
+                              24,
+                            ),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
+                    {displayPlanetClass(selectedPlanet?.class ?? '')}
+                  </Text>
+                </View>
               <View style={styles.troopsSummary}>
                 <Text style={styles.troopsSummaryValue}>{selectedPlanet?.shipCount ?? 0}</Text>
                 <Text style={styles.troopsSummaryLabel}>troops</Text>
@@ -4982,7 +5132,12 @@ export default function GameScreen() {
                         ⟳ every turn → {destName} ({amountLabel})
                       </Text>
                       <Pressable
-                        onPress={() => cancelScheduledMovement(movement.id)}
+                        onPress={() => {
+                          if (planetModalPressLockedRef.current) {
+                            return;
+                          }
+                          cancelScheduledMovement(movement.id);
+                        }}
                         hitSlop={8}
                         accessibilityRole="button"
                         accessibilityLabel="Cancel scheduled movement"
@@ -5005,7 +5160,7 @@ export default function GameScreen() {
                   onPress={() => handleBuildChipPress('factory')}
                   disabled={noBuildSlotsRemaining}
                 >
-                  <Text
+                    <Text
                     style={[
                       styles.buildChipText,
                       noBuildSlotsRemaining && styles.buildChipTextDisabled,
@@ -5013,6 +5168,16 @@ export default function GameScreen() {
                   >
                     Factory
                   </Text>
+                  {selectedPlanet !== undefined && (
+                    <Text
+                      style={[
+                        styles.buildChipCost,
+                        noBuildSlotsRemaining && styles.buildChipTextDisabled,
+                      ]}
+                    >
+                      {scaledBuildingCost('factory', selectedPlanet)}
+                    </Text>
+                  )}
                 </Pressable>
                 <Pressable
                   style={[
@@ -5022,7 +5187,7 @@ export default function GameScreen() {
                   onPress={() => handleBuildChipPress('researchLab')}
                   disabled={noBuildSlotsRemaining}
                 >
-                  <Text
+                    <Text
                     style={[
                       styles.buildChipText,
                       noBuildSlotsRemaining && styles.buildChipTextDisabled,
@@ -5030,6 +5195,16 @@ export default function GameScreen() {
                   >
                     Research Lab
                   </Text>
+                  {selectedPlanet !== undefined && (
+                    <Text
+                      style={[
+                        styles.buildChipCost,
+                        noBuildSlotsRemaining && styles.buildChipTextDisabled,
+                      ]}
+                    >
+                      {scaledBuildingCost('researchLab', selectedPlanet)}
+                    </Text>
+                  )}
                 </Pressable>
               </View>
             )}
@@ -5082,9 +5257,10 @@ export default function GameScreen() {
                   maximumValue={1}
                   value={selectedPlanet?.productionSlider ?? 0.5}
                   onValueChange={(value) => {
-                    if (selectedPlanet !== undefined) {
-                      setProductionSlider(selectedPlanet.id, value);
+                    if (planetModalPressLockedRef.current || selectedPlanet === undefined) {
+                      return;
                     }
+                    setProductionSlider(selectedPlanet.id, value);
                   }}
                   minimumTrackTintColor={COLORS.accent}
                   maximumTrackTintColor={COLORS.border}
@@ -5095,12 +5271,15 @@ export default function GameScreen() {
                   {100 - Math.round((selectedPlanet?.productionSlider ?? 0.5) * 100)}% gold
                 </Text>
                 <Text style={styles.productionOutputLabel}>
-                  ⚔ {selectedPlanetLiveOutput.troops.toFixed(1)} troops/turn · 💰{' '}
-                  {selectedPlanetLiveOutput.gold.toFixed(1)} gold/turn
+                  ⚔ {formatProductionAmount(selectedPlanetLiveOutput.troops)} troops/turn · 💰{' '}
+                  {formatProductionAmount(selectedPlanetLiveOutput.gold)} gold/turn
                 </Text>
               </View>
             )}
           </Pressable>
+          {Platform.OS === 'web' && !planetModalArmed && (
+            <View pointerEvents="auto" style={styles.planetModalOpeningShield} />
+          )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -5158,6 +5337,9 @@ export default function GameScreen() {
                 : getOwnerName(selectedPlanet.owner, players)}
             </Text>
           </Pressable>
+          {Platform.OS === 'web' && !planetModalArmed && (
+            <View pointerEvents="auto" style={styles.planetModalOpeningShield} />
+          )}
         </Pressable>
       </Modal>
 
@@ -5229,9 +5411,13 @@ export default function GameScreen() {
             </View>
             <Text style={styles.researchLine}>Tech Level {humanPlayer.techLevel}</Text>
             <Text style={styles.researchLine}>
-              {humanPlayer.researchPoints} / {currentResearchThreshold} research points
+              {formatResearchAmount(humanPlayer.researchPoints)} / {currentResearchThreshold}{' '}
+              research points
             </Text>
             <Text style={styles.researchLine}>Active research labs: {activeResearchLabCount}</Text>
+            <Text style={styles.researchLine}>
+              Research per turn: {formatResearchAmount(researchPointsPerTurn)}
+            </Text>
             {humanPlayer.techLevel >= MAX_TECH_LEVEL ? (
               <Text style={styles.researchProjection}>Maximum tech level reached</Text>
             ) : (
@@ -5954,6 +6140,14 @@ const styles = StyleSheet.create({
     lineHeight: PLANET_LABEL_FONT_SIZE + 1,
     fontWeight: '600',
   },
+  planetMultiplierLabel: {
+    position: 'absolute',
+    textAlign: 'left',
+    color: '#f0c14a',
+    fontSize: Math.max(2, PLANET_LABEL_FONT_SIZE - 1),
+    lineHeight: PLANET_LABEL_FONT_SIZE + 1,
+    fontWeight: '700',
+  },
   planetNameLabelFogged: {
     color: '#ffffff',
   },
@@ -6331,6 +6525,14 @@ const styles = StyleSheet.create({
     width: '90%',
     maxWidth: 360,
     alignItems: 'center',
+  },
+  planetModalOpeningShield: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 30,
   },
   planetBattleReportAbove: {
     width: '100%',
@@ -6887,10 +7089,12 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   planetDetailHeader: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 14,
+    minHeight: 24,
   },
   planetDetailHeaderSpacer: {
     width: 28,
@@ -6906,6 +7110,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     flex: 1,
     textAlign: 'center',
+  },
+  planetHeaderMultiplier: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+  },
+  planetClassMultiplier: {
+    color: '#b8860b',
+    fontSize: 13,
+    fontWeight: '700',
   },
   planetDetailClose: {
     color: COLORS.textMuted,
@@ -6972,6 +7188,13 @@ const styles = StyleSheet.create({
   buildChipActive: {
     borderColor: COLORS.accent,
     backgroundColor: MODAL_BUTTON_BG_ACTIVE,
+  },
+  buildChipCost: {
+    color: '#f0c14a',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 1,
   },
   buildChipText: {
     color: '#ffffff',

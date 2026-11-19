@@ -71,9 +71,16 @@ function visibleSchedules(state: GameState, viewingPlayerId: string) {
   });
 }
 
+/** A multiplier is a secret until the viewer owns the planet. */
+function withoutOutputMultiplier(planet: Planet): Planet {
+  if (planet.outputMultiplier === undefined) return planet;
+  const { outputMultiplier: _multiplier, ...rest } = planet;
+  return rest;
+}
+
 function concealEconomy(planet: Planet): Planet {
   return {
-    ...planet,
+    ...withoutOutputMultiplier(planet),
     buildings: [],
     buildingSlots: 0,
     troopAccumulator: 0,
@@ -99,7 +106,7 @@ export function applyVisibility(state: GameState, viewingPlayerId: string): Game
             return planet;
           }
           return {
-            ...planet,
+            ...withoutOutputMultiplier(planet),
             shipCount: 0,
             buildings: [],
             troopAccumulator: 0,
