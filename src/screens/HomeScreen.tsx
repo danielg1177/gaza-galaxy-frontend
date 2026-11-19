@@ -559,6 +559,7 @@ export default function HomeScreen() {
   const [galaxyShapeChoice, setGalaxyShapeChoice] = useState<GalaxyShapeChoice>('random');
   const [visibility, setVisibility] = useState<VisibilityMode>('classic');
   const [planetMultipliers, setPlanetMultipliers] = useState<PlanetMultiplierMode>('off');
+  const [settingHelp, setSettingHelp] = useState<'visibility' | 'multipliers' | null>(null);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [openGameCount, setOpenGameCount] = useState(0);
   const [pendingLobbyCount, setPendingLobbyCount] = useState(0);
@@ -1527,7 +1528,6 @@ export default function HomeScreen() {
             <Text style={styles.eyebrow}>CREATE GAME</Text>
             <Text style={styles.title}>Create{'\n'}Game</Text>
             <View style={styles.titleRule} />
-            <Text style={styles.subtitle}>Configure your campaign before entering the galaxy.</Text>
           </View>
 
           <View style={styles.section}>
@@ -1841,7 +1841,42 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.label}>Visibility</Text>
+            <View style={styles.settingLabelRow}>
+              <Text style={styles.settingLabel}>Visibility</Text>
+              <Pressable
+                onPress={() =>
+                  setSettingHelp((current) => (current === 'visibility' ? null : 'visibility'))
+                }
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Explain visibility"
+                style={[
+                  styles.settingHelpButton,
+                  settingHelp === 'visibility' && styles.settingHelpButtonOpen,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.settingHelpMark,
+                    settingHelp === 'visibility' && styles.settingHelpMarkOpen,
+                  ]}
+                >
+                  ?
+                </Text>
+              </Pressable>
+            </View>
+            {settingHelp === 'visibility' && (
+              <View style={styles.settingHelpTooltip}>
+                <Text style={styles.settingHelpLine}>
+                  <Text style={styles.settingHelpOption}>Classic. </Text>
+                  Planet class is visible on every world. Enemy fleets stay hidden.
+                </Text>
+                <Text style={styles.settingHelpLine}>
+                  <Text style={styles.settingHelpOption}>Fog. </Text>
+                  Class, owner, and troop counts show only within one turn of your planets, up to 15 clicks. Enemy fleets appear, with owner and size, when they fly that close.
+                </Text>
+              </View>
+            )}
             <View style={styles.visibilityRow}>
               {(['classic', 'fog'] as const).map((mode) => {
                 const selected = visibility === mode;
@@ -1849,29 +1884,63 @@ export default function HomeScreen() {
                   <Pressable
                     key={mode}
                     style={({ pressed }) => [
-                      styles.mapSizeButton,
-                      styles.visibilityButton,
-                      selected && styles.mapSizeButtonSelected,
-                      pressed && !selected && styles.mapSizeButtonPressed,
+                      styles.slotTypeChip,
+                      selected && styles.slotTypeChipSelected,
+                      pressed && !selected && styles.slotTypeChipPressed,
                     ]}
                     onPress={() => setVisibility(mode)}
                   >
-                    <Text style={[styles.mapSizeLabel, selected && styles.mapSizeLabelSelected]}>
+                    <Text
+                      style={[
+                        styles.slotTypeChipText,
+                        selected && styles.slotTypeChipTextSelected,
+                      ]}
+                    >
                       {mode === 'classic' ? 'Classic' : 'Fog'}
                     </Text>
                   </Pressable>
                 );
               })}
             </View>
-            <Text style={styles.mapTypeEstimate}>
-              {visibility === 'classic'
-                ? 'Planet class is visible on every world. Enemy fleets stay hidden.'
-                : 'Class, owner, and troop counts show only within one turn of your planets, up to 15 clicks. Enemy fleets appear, with owner and size, when they fly that close.'}
-            </Text>
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.label}>Multipliers</Text>
+            <View style={styles.settingLabelRow}>
+              <Text style={styles.settingLabel}>Multipliers</Text>
+              <Pressable
+                onPress={() =>
+                  setSettingHelp((current) => (current === 'multipliers' ? null : 'multipliers'))
+                }
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Explain multipliers"
+                style={[
+                  styles.settingHelpButton,
+                  settingHelp === 'multipliers' && styles.settingHelpButtonOpen,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.settingHelpMark,
+                    settingHelp === 'multipliers' && styles.settingHelpMarkOpen,
+                  ]}
+                >
+                  ?
+                </Text>
+              </Pressable>
+            </View>
+            {settingHelp === 'multipliers' && (
+              <View style={styles.settingHelpTooltip}>
+                <Text style={styles.settingHelpLine}>
+                  <Text style={styles.settingHelpOption}>Off. </Text>
+                  Every world has the normal build cost and output.
+                </Text>
+                <Text style={styles.settingHelpLine}>
+                  <Text style={styles.settingHelpOption}>On. </Text>
+                  About one planet in ten is a hidden ×1.25, ×1.5, ×1.75, or ×2, spread across the map. Building there costs that much more, and its gold, troops, and research are multiplied the same way. The mark shows only after you own it.
+                </Text>
+              </View>
+            )}
             <View style={styles.visibilityRow}>
               {(['off', 'on'] as const).map((mode) => {
                 const selected = planetMultipliers === mode;
@@ -1879,25 +1948,24 @@ export default function HomeScreen() {
                   <Pressable
                     key={mode}
                     style={({ pressed }) => [
-                      styles.mapSizeButton,
-                      styles.visibilityButton,
-                      selected && styles.mapSizeButtonSelected,
-                      pressed && !selected && styles.mapSizeButtonPressed,
+                      styles.slotTypeChip,
+                      selected && styles.slotTypeChipSelected,
+                      pressed && !selected && styles.slotTypeChipPressed,
                     ]}
                     onPress={() => setPlanetMultipliers(mode)}
                   >
-                    <Text style={[styles.mapSizeLabel, selected && styles.mapSizeLabelSelected]}>
+                    <Text
+                      style={[
+                        styles.slotTypeChipText,
+                        selected && styles.slotTypeChipTextSelected,
+                      ]}
+                    >
                       {mode === 'off' ? 'Off' : 'On'}
                     </Text>
                   </Pressable>
                 );
               })}
             </View>
-            <Text style={styles.mapTypeEstimate}>
-              {planetMultipliers === 'off'
-                ? 'Every world has the normal build cost and output.'
-                : 'About one planet in ten is a hidden ×1.25, ×1.5, ×1.75, or ×2, spread across the map. Building there costs that much more, and its gold, troops, and research are multiplied the same way. The mark shows only after you own it.'}
-            </Text>
           </View>
 
           {playerSlots.some((slot) => slot.type === 'ai') && (
@@ -2340,12 +2408,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accent,
     marginTop: 16,
     marginBottom: 12,
-  },
-  subtitle: {
-    color: COLORS.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    letterSpacing: 0.5,
   },
   emptyMessage: {
     color: COLORS.textMuted,
@@ -3128,11 +3190,59 @@ const styles = StyleSheet.create({
   },
   visibilityRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
-  visibilityButton: {
-    flex: 1,
+  settingLabelRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+  },
+  settingLabel: {
+    color: COLORS.textMuted,
+    fontSize: 12,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  settingHelpButton: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingHelpButtonOpen: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accentDim,
+  },
+  settingHelpMark: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 13,
+  },
+  settingHelpMarkOpen: {
+    color: COLORS.accent,
+  },
+  settingHelpTooltip: {
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+    gap: 6,
+  },
+  settingHelpLine: {
+    color: COLORS.text,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  settingHelpOption: {
+    fontWeight: '700',
   },
   mapSizeButton: {
     paddingVertical: 14,
