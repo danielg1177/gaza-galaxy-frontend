@@ -1,4 +1,4 @@
-import { computeClickDistance, effectiveSpeed } from './movementEngine';
+import { computeClickDistance, effectiveSpeed, fleetMapPosition } from './movementEngine';
 import type { Fleet, GameState, Planet, Position, VisibilityMode } from './types';
 
 /** Missing or unknown values play as the original rules. */
@@ -23,16 +23,20 @@ export function isWithinOneTurn(from: Position, to: Position, reachClicks: numbe
 
 /** Current position of an in-flight fleet, in the same click coordinates as planets. */
 export function fleetClickPosition(fleet: Fleet, planets: Planet[]): Position | null {
-  const origin = planets.find((planet) => planet.id === fleet.originPlanetId);
-  const destination = planets.find((planet) => planet.id === fleet.destinationPlanetId);
-  if (origin === undefined || destination === undefined) {
-    return null;
+  return fleetMapPosition(fleet, planets);
+}
+
+function fleetStillAtLaunchOrigin(fleet: Fleet): boolean {
+  if (fleet.holding === true) {
+    return false;
   }
-  const progress = fleet.totalTurns > 0 ? 1 - fleet.turnsRemaining / fleet.totalTurns : 1;
-  return {
-    x: origin.position.x + (destination.position.x - origin.position.x) * progress,
-    y: origin.position.y + (destination.position.y - origin.position.y) * progress,
-  };
+  if (fleet.course !== undefined) {
+    return (
+      fleet.course.distanceTraveled <= 1e-6 &&
+      fleet.course.vertices[0]?.planetId === fleet.originPlanetId
+    );
+  }
+  return fleet.turnsRemaining === fleet.totalTurns;
 }
 
 export type PlanetSight = 'classic' | 'owned' | 'scouted' | 'hidden';
@@ -72,7 +76,7 @@ export function concealSameRoundDepartures(state: GameState, viewingPlayerId: st
     (fleet) =>
       fleet.ownerId !== viewingPlayerId &&
       fleet.dispatchedInRound === state.roundNumber &&
-      fleet.turnsRemaining === fleet.totalTurns,
+      fleetStillAtLaunchOrigin(fleet),
   );
   if (hidden.length === 0) {
     return state;

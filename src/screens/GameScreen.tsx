@@ -9,6 +9,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  useWindowDimensions,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,7 +19,17 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { PlatformSlider } from '../components/PlatformSlider';
 import { ShipIcon, SPACE_SHIP_IMAGE } from '../components/ShipIcon';
-import Svg, { Circle, G, Image as SvgImage, Line, Path, Text as SvgText } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  G,
+  Image as SvgImage,
+  Line,
+  Path,
+  RadialGradient,
+  Stop,
+  Text as SvgText,
+} from 'react-native-svg';
 import Animated, {
   runOnJS,
   runOnUI,
@@ -42,15 +53,21 @@ import {
   scaledBuildingCost,
 } from '../game/productionEngine';
 import {
+  clampPointToDistance,
   computeClickDistance,
   computeTurnsInTransit,
   effectiveRange,
   effectiveSpeed,
+  fleetMapPosition,
   isInRange,
+  positionAlongRoute,
+  routeLength,
+  stopStrandsFleet,
 } from '../game/movementEngine';
 import { scheduledMovementId, resolveScheduledShipCount } from '../game/turnEngine';
 import { mulberry32 } from '../game/mapGenerator';
-import type { BuildingType, Fleet, OwnerId, Planet, Player, ScheduledMovement, TurnEvent } from '../game/types';
+import type { BuildingType, Fleet, OwnerId, Planet, Player, Position, RouteVertex, ScheduledMovement, TurnEvent } from '../game/types';
+import { flexibleMovementEnabled } from '../game/types';
 import { applyVisibility, classifyPlanetSight } from '../game/visibility';
 import { needsForfeitPrompt, nextCommanderStatusNoticeFor } from '../game/playerControl';
 import { getFriendRequests } from '../services/friendsService';
@@ -89,6 +106,64 @@ interface BuildDisplayGroup {
 
 function isBuildOrder(order: PendingFleet | QueuedBuildOrder): order is QueuedBuildOrder {
   return 'type' in order && order.type === 'BUILD';
+}
+
+function isLaunchOrder(order: PendingFleet): boolean {
+  return order.holdFleetId === undefined && order.redirectFleetId === undefined;
+}
+
+/** One in-flight fleet keeps a single pending stop or redirect. */
+function queueFleetCourseChange(order: PendingFleet): void {
+  const fleetId = order.redirectFleetId ?? order.holdFleetId;
+  if (fleetId === undefined) {
+    useGameStore.getState().queueOrder(order);
+    return;
+  }
+  const kept = useGameStore.getState().queuedOrders.filter(
+    (existing) => existing.redirectFleetId !== fleetId && existing.holdFleetId !== fleetId,
+  );
+  useGameStore.setState({ queuedOrders: [...kept, order] });
+}
+
+interface PathDraft {
+  source: { kind: 'planet'; planetId: string } | { kind: 'fleet'; fleetId: string };
+  committed: RouteVertex[];
+  pending: RouteVertex | null;
+  extending: boolean;
+}
+
+function clampClickToMap(point: Position, width: number, height: number): Position {
+  const maxX = Math.max(0, width - 1);
+  const maxY = Math.max(0, height - 1);
+  return {
+    x: Math.min(maxX, Math.max(0, point.x)),
+    y: Math.min(maxY, Math.max(0, point.y)),
+  };
+}
+
+function pathSourcePosition(
+  source: PathDraft['source'],
+  planets: Planet[],
+  fleets: Fleet[],
+): Position | null {
+  if (source.kind === 'planet') {
+    return planets.find((planet) => planet.id === source.planetId)?.position ?? null;
+  }
+  const fleet = fleets.find((candidate) => candidate.id === source.fleetId);
+  return fleet === undefined ? null : fleetMapPosition(fleet, planets);
+}
+
+function pathFuelBudget(
+  source: PathDraft['source'],
+  fleets: Fleet[],
+  techLevel: number,
+): number {
+  const range = effectiveRange(techLevel);
+  if (source.kind === 'planet') {
+    return range;
+  }
+  const fleet = fleets.find((candidate) => candidate.id === source.fleetId);
+  return (fleet?.fuelFraction ?? 1) * range;
 }
 
 function buildTypeLabel(buildingType: BuildingType): string {
@@ -962,6 +1037,16 @@ const PLANET_HIGHLIGHT_GLOW_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZ
 const PLANET_BOX_SELECT_RING_PADDING = Math.max(2, Math.round((4 / 18) * CELL_SIZE * PLANET_VISUAL_SCALE));
 const PLANET_SELECTION_ACCENT = '#4060c8';
 const FLEET_SHIP_SIZE = Math.max(16, Math.round((20 / 18) * CELL_SIZE));
+/** Soft halo behind a ship that is holding in space. */
+const STATIONARY_GLOW_RADIUS = FLEET_SHIP_SIZE * 1.45;
+/** Wider bloom while that ship is the one being dragged. */
+const STATIONARY_GLOW_ACTIVE_RADIUS = STATIONARY_GLOW_RADIUS * 1.35;
+/** Extra SVG space so a marker on the map edge is not clipped. */
+const FLEET_LAYER_PAD = Math.ceil(STATIONARY_GLOW_ACTIVE_RADIUS + 4);
+/** A drop this close to where the drag started, and not on a planet, cancels it. */
+const PATH_POINT_MIN_CLICKS = 0.4;
+/** Releasing inside the glow shown while dragging from a ship cancels the redirect. */
+const STATIONARY_DRAG_CANCEL_CLICKS = STATIONARY_GLOW_ACTIVE_RADIUS / CELL_SIZE;
 const FLEET_MARKER_FONT_SIZE = Math.max(2, Math.round((8 / 18) * CELL_SIZE));
 const FLEET_IN_TRANSIT_FONT_SIZE = Math.max(2, Math.round((10 / 18) * CELL_SIZE));
 const FLEET_MARKER_TEXT_OFFSET_X = Math.max(1, Math.round((6 / 18) * CELL_SIZE));
@@ -1114,17 +1199,38 @@ type FleetTooltipData = {
   absY: number;
 };
 
+function fleetFuelReadout(
+  fleet: Fleet,
+  players: Player[],
+): { percent: number; clicks: string } | null {
+  if (fleet.fuelFraction === undefined && fleet.course === undefined) {
+    return null;
+  }
+  const owner = players.find((player) => player.id === fleet.ownerId);
+  const fraction = fleet.fuelFraction ?? 1;
+  const clicks = fraction * effectiveRange(owner?.techLevel ?? 0);
+  return {
+    percent: Math.round(fraction * 100),
+    clicks: clicks.toFixed(1),
+  };
+}
+
 function FleetTooltipOverlay({
   tooltip,
   players,
   localHumanPlayerId,
   onDismiss,
+  onLeave,
+  onRedirect,
 }: {
   tooltip: FleetTooltipData;
   players: Player[];
   localHumanPlayerId: string;
   onDismiss: () => void;
+  onLeave?: () => void;
+  onRedirect?: () => void;
 }) {
+  const { width: windowWidth } = useWindowDimensions();
   const opacity = useRef(new RNAnimated.Value(1)).current;
   const autoDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1149,14 +1255,20 @@ function FleetTooltipOverlay({
     });
   }, [clearAutoDismissTimer, onDismiss, opacity]);
 
+  const showOrders = onLeave !== undefined || onRedirect !== undefined;
+  const fuel = fleetFuelReadout(tooltip.fleet, players);
+  const cardWidth = 300;
   useEffect(() => {
     opacity.setValue(1);
     clearAutoDismissTimer();
+    if (showOrders) {
+      return clearAutoDismissTimer;
+    }
     autoDismissTimerRef.current = setTimeout(() => {
       fadeOutAndDismiss();
     }, FLEET_TOOLTIP_VISIBLE_MS);
     return clearAutoDismissTimer;
-  }, [tooltip.fleet.id, tooltip.absX, tooltip.absY, clearAutoDismissTimer, fadeOutAndDismiss, opacity]);
+  }, [tooltip.fleet.id, tooltip.absX, tooltip.absY, clearAutoDismissTimer, fadeOutAndDismiss, opacity, showOrders]);
 
   return (
     <RNAnimated.View
@@ -1164,8 +1276,9 @@ function FleetTooltipOverlay({
         styles.fleetTooltip,
         {
           opacity,
-          top: Math.max(8, tooltip.absY - 90),
-          left: Math.max(8, Math.min(tooltip.absX - 100, 280)),
+          width: cardWidth,
+          top: Math.max(8, tooltip.absY - (fuel !== null ? 196 : 150)),
+          left: Math.max(8, Math.min(tooltip.absX - cardWidth / 2, windowWidth - cardWidth - 8)),
         },
       ]}
       pointerEvents="box-none"
@@ -1200,13 +1313,56 @@ function FleetTooltipOverlay({
           </Pressable>
         </View>
         <Text style={styles.fleetTooltipTurns}>
-          {tooltip.fleet.turnsRemaining === 1
-            ? 'Arrives next round'
-            : `${tooltip.fleet.turnsRemaining} rounds remaining`}
+          {tooltip.fleet.holding === true
+            ? 'Holding in space'
+            : tooltip.fleet.turnsRemaining === 1
+              ? 'Arrives next round'
+              : `${tooltip.fleet.turnsRemaining} rounds remaining`}
         </Text>
+        {fuel !== null && (
+          <View style={styles.fleetTooltipFuel}>
+            <Text style={styles.fleetTooltipFuelText}>Fuel left: {fuel.percent}%</Text>
+            <Text style={styles.fleetTooltipFuelText}>Can fly {fuel.clicks} clicks</Text>
+          </View>
+        )}
+        {showOrders && (
+          <View style={styles.fleetTooltipActions}>
+            {onLeave !== undefined && (
+              <Pressable style={styles.fleetTooltipAction} onPress={onLeave}>
+                <Text style={styles.fleetTooltipActionText}>Leave here</Text>
+              </Pressable>
+            )}
+            {onRedirect !== undefined && (
+              <Pressable
+                style={[styles.fleetTooltipAction, styles.fleetTooltipActionPrimary]}
+                onPress={onRedirect}
+              >
+                <Text style={styles.fleetTooltipActionPrimaryText}>Redirect</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
       </View>
     </RNAnimated.View>
   );
+}
+
+function clickToPixel(point: Position): { x: number; y: number } {
+  return {
+    x: point.x * CELL_SIZE + CELL_SIZE / 2,
+    y: point.y * CELL_SIZE + CELL_SIZE / 2,
+  };
+}
+
+function pixelToClick(pixelX: number, pixelY: number): Position {
+  return {
+    x: (pixelX - CELL_SIZE / 2) / CELL_SIZE,
+    y: (pixelY - CELL_SIZE / 2) / CELL_SIZE,
+  };
+}
+
+function positionAhead(vertices: RouteVertex[], distance: number): Position {
+  return positionAlongRoute(vertices, Math.min(routeLength(vertices), distance + 0.4));
 }
 
 function planetCenterPx(planet: Planet): { x: number; y: number } {
@@ -1276,12 +1432,10 @@ function screenToMapCoords(
   };
 }
 
-function mapPixelPointToPosition(mapX: number, mapY: number): { x: number; y: number } {
-  return { x: mapX / CELL_SIZE, y: mapY / CELL_SIZE };
-}
-
 function formatDragDistanceLabel(origin: Planet, mapPixelX: number, mapPixelY: number): string {
-  const fingerPosition = mapPixelPointToPosition(mapPixelX, mapPixelY);
+  // Planet centers sit half a cell in from the cell corner. Dividing raw pixels
+  // by the cell size shifts the finger by half a click on each axis.
+  const fingerPosition = pixelToClick(mapPixelX, mapPixelY);
   const clicks = computeClickDistance(origin.position, fingerPosition);
   return `${clicks.toFixed(1)} clicks`;
 }
@@ -1320,20 +1474,17 @@ function findFleetAtMapCoords(
   planets: Planet[],
   scale: number,
 ): Fleet | undefined {
-  const hitRadius = Math.max(FLEET_SHIP_SIZE / 2, (FLEET_SHIP_SIZE * 1.1) / scale);
+  const hitRadius = Math.max(36 / scale, FLEET_SHIP_SIZE * 0.9);
   let best: Fleet | undefined;
   let bestDist = Infinity;
   for (const fleet of fleets) {
-    const originPlanet = planets.find((p) => p.id === fleet.originPlanetId);
-    const destPlanet = planets.find((p) => p.id === fleet.destinationPlanetId);
-    if (originPlanet === undefined || destPlanet === undefined) {
+    const click = fleetMapPosition(fleet, planets);
+    if (click === null) {
       continue;
     }
-    const progress = fleet.totalTurns > 0 ? 1 - fleet.turnsRemaining / fleet.totalTurns : 1;
-    const originCenter = planetCenterPx(originPlanet);
-    const destCenter = planetCenterPx(destPlanet);
-    const fleetX = originCenter.x + (destCenter.x - originCenter.x) * progress;
-    const fleetY = originCenter.y + (destCenter.y - originCenter.y) * progress;
+    const center = clickToPixel(click);
+    const fleetX = center.x;
+    const fleetY = center.y;
     const dx = mapX - fleetX;
     const dy = mapY - fleetY;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1863,6 +2014,8 @@ function FleetLayer({
   players,
   mapPixelWidth,
   mapPixelHeight,
+  pathVertices,
+  dragHighlightFleetId,
 }: {
   fleets: Fleet[];
   planets: Planet[];
@@ -1873,21 +2026,79 @@ function FleetLayer({
   players: Player[];
   mapPixelWidth: number;
   mapPixelHeight: number;
+  pathVertices?: RouteVertex[];
+  /** Fleet currently being dragged onto a new route, so its glow brightens. */
+  dragHighlightFleetId?: string;
 }) {
   return (
     <Svg
-      width={mapPixelWidth}
-      height={mapPixelHeight}
-      style={styles.fleetLayer}
+      width={mapPixelWidth + FLEET_LAYER_PAD * 2}
+      height={mapPixelHeight + FLEET_LAYER_PAD * 2}
+      style={[styles.fleetLayer, { top: -FLEET_LAYER_PAD, left: -FLEET_LAYER_PAD }]}
       pointerEvents="none"
     >
+    <Defs>
+      <RadialGradient id="fleetStationaryGlow" cx="50%" cy="50%" r="50%">
+        <Stop offset="0%" stopColor={FLEET_MOTION_COLOR} stopOpacity="0.85" />
+        <Stop offset="40%" stopColor={FLEET_MOTION_COLOR} stopOpacity="0.38" />
+        <Stop offset="100%" stopColor={FLEET_MOTION_COLOR} stopOpacity="0" />
+      </RadialGradient>
+      <RadialGradient id="fleetStationaryGlowActive" cx="50%" cy="50%" r="50%">
+        <Stop offset="0%" stopColor="#e7f0ff" stopOpacity="1" />
+        <Stop offset="28%" stopColor="#b9d2ff" stopOpacity="0.85" />
+        <Stop offset="62%" stopColor={FLEET_MOTION_COLOR} stopOpacity="0.42" />
+        <Stop offset="100%" stopColor={FLEET_MOTION_COLOR} stopOpacity="0" />
+      </RadialGradient>
+    </Defs>
+    <G transform={`translate(${FLEET_LAYER_PAD}, ${FLEET_LAYER_PAD})`}>
+      {pathVertices !== undefined && pathVertices.length > 1 &&
+        pathVertices.slice(1).map((vertex, index) => {
+          const from = clickToPixel(pathVertices[index]);
+          const to = clickToPixel(vertex);
+          return (
+            <Line
+              key={`draft-${index}`}
+              x1={from.x}
+              y1={from.y}
+              x2={to.x}
+              y2={to.y}
+              stroke={FLEET_MOTION_COLOR}
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              opacity={0.9}
+            />
+          );
+        })}
       {scheduledMovements.map((movement) => {
         const originPlanet = planets.find((p) => p.id === movement.fromPlanetId);
         const destPlanet = planets.find((p) => p.id === movement.toPlanetId);
-        if (originPlanet === undefined || destPlanet === undefined) {
+        if (originPlanet === undefined || originPlanet.owner !== movement.ownerId) {
           return null;
         }
-        if (originPlanet.owner !== movement.ownerId) {
+        if (movement.stops !== undefined && movement.stops.length > 0) {
+          const points = [
+            clickToPixel(originPlanet.position),
+            ...movement.stops.map((stop) => clickToPixel(stop)),
+          ];
+          return (
+            <G key={`schedule-${movement.id}`}>
+              {points.slice(1).map((point, index) => (
+                <Line
+                  key={`${movement.id}-seg-${index}`}
+                  x1={points[index].x}
+                  y1={points[index].y}
+                  x2={point.x}
+                  y2={point.y}
+                  stroke={SCHEDULE_BADGE_COLOR}
+                  strokeWidth={1.5}
+                  strokeDasharray="3 3"
+                  opacity={0.85}
+                />
+              ))}
+            </G>
+          );
+        }
+        if (destPlanet === undefined) {
           return null;
         }
         const geometry = scheduledRouteGeometry(originPlanet, destPlanet);
@@ -1911,32 +2122,84 @@ function FleetLayer({
         );
       })}
       {fleets.map((fleet) => {
+        const click = fleetMapPosition(fleet, planets);
+        if (click === null) {
+          return null;
+        }
         const originPlanet = planets.find((p) => p.id === fleet.originPlanetId);
         const destPlanet = planets.find((p) => p.id === fleet.destinationPlanetId);
-        if (originPlanet === undefined || destPlanet === undefined) {
-          return null;
+        const marker = clickToPixel(click);
+        const x = marker.x;
+        const y = marker.y;
+        const redirectOrder = [...queuedOrders].reverse().find(
+          (order) =>
+            order.redirectFleetId === fleet.id &&
+            order.stops !== undefined &&
+            order.stops.length > 0,
+        );
+        const holdQueued = queuedOrders.some((order) => order.holdFleetId === fleet.id);
+        const replacingCourse = redirectOrder !== undefined || holdQueued;
+        let destX = x;
+        let destY = y;
+        const remainingPixels: Array<{ x: number; y: number }> = [];
+        if (redirectOrder?.stops !== undefined) {
+          remainingPixels.push(marker, ...redirectOrder.stops.map((stop) => clickToPixel(stop)));
+          const last = remainingPixels[remainingPixels.length - 1];
+          destX = last.x;
+          destY = last.y;
+        } else if (
+          !replacingCourse &&
+          fleet.course !== undefined &&
+          fleet.holding !== true
+        ) {
+          const ahead = clickToPixel(positionAhead(fleet.course.vertices, fleet.course.distanceTraveled));
+          destX = ahead.x;
+          destY = ahead.y;
+          let walked = 0;
+          remainingPixels.push(marker);
+          for (let index = 1; index < fleet.course.vertices.length; index += 1) {
+            const segment = computeClickDistance(
+              fleet.course.vertices[index - 1],
+              fleet.course.vertices[index],
+            );
+            walked += segment;
+            if (walked >= fleet.course.distanceTraveled - 1e-6) {
+              remainingPixels.push(clickToPixel(fleet.course.vertices[index]));
+            }
+          }
+        } else if (
+          !replacingCourse &&
+          destPlanet !== undefined &&
+          originPlanet !== undefined
+        ) {
+          const destCenter = planetCenterPx(destPlanet);
+          destX = destCenter.x;
+          destY = destCenter.y;
         }
         const baseColor = getPlayerColor(fleet.ownerId, humanPlayerId, players);
         const color = fleet.ownerId === humanPlayerId ? FLEET_MOTION_COLOR : baseColor;
-        const totalTurns = fleet.totalTurns;
-        const progress = totalTurns > 0 ? 1 - fleet.turnsRemaining / totalTurns : 1;
-        const x =
-          originPlanet.position.x * CELL_SIZE +
-          CELL_SIZE / 2 +
-          (destPlanet.position.x - originPlanet.position.x) * CELL_SIZE * progress;
-        const y =
-          originPlanet.position.y * CELL_SIZE +
-          CELL_SIZE / 2 +
-          (destPlanet.position.y - originPlanet.position.y) * CELL_SIZE * progress;
-        const destX = destPlanet.position.x * CELL_SIZE + CELL_SIZE / 2;
-        const destY = destPlanet.position.y * CELL_SIZE + CELL_SIZE / 2;
-
-        const showDestinationLine = fleet.ownerId === viewingPlayerId;
-        const labelColor = showDestinationLine ? color : ENEMY_PLANET_COLOR;
+        const stationary = fleet.holding === true || holdQueued;
+        const showDestinationLine =
+          fleet.ownerId === viewingPlayerId && !stationary;
+        const labelColor = stationary || showDestinationLine ? color : ENEMY_PLANET_COLOR;
 
         return (
           <G key={fleet.id}>
-            {showDestinationLine && (
+            {showDestinationLine && remainingPixels.length > 1 &&
+              remainingPixels.slice(1).map((point, index) => (
+                <Line
+                  key={`${fleet.id}-leg-${index}`}
+                  x1={remainingPixels[index].x}
+                  y1={remainingPixels[index].y}
+                  x2={point.x}
+                  y2={point.y}
+                  stroke={color}
+                  strokeWidth={1}
+                  strokeDasharray="3 3"
+                  opacity={0.6}
+                />
+              ))}
+            {showDestinationLine && remainingPixels.length <= 1 && (
               <Line
                 x1={x}
                 y1={y}
@@ -1946,6 +2209,22 @@ function FleetLayer({
                 strokeWidth={1}
                 strokeDasharray="3 3"
                 opacity={0.6}
+              />
+            )}
+            {(stationary || fleet.id === dragHighlightFleetId) && (
+              <Circle
+                cx={x}
+                cy={y}
+                r={
+                  fleet.id === dragHighlightFleetId
+                    ? STATIONARY_GLOW_ACTIVE_RADIUS
+                    : STATIONARY_GLOW_RADIUS
+                }
+                fill={
+                  fleet.id === dragHighlightFleetId
+                    ? 'url(#fleetStationaryGlowActive)'
+                    : 'url(#fleetStationaryGlow)'
+                }
               />
             )}
             <FleetShipMarker cx={x} cy={y} towardX={destX} towardY={destY} size={FLEET_SHIP_SIZE} />
@@ -1973,14 +2252,17 @@ function FleetLayer({
         );
       })}
       <G pointerEvents="none">
-        {queuedOrders.filter((order) => !isBuildOrder(order)).map((order, index) => {
+        {queuedOrders.filter((order) => !isBuildOrder(order) && isLaunchOrder(order)).map((order, index) => {
           const originPlanet = planets.find((p) => p.id === order.fromPlanetId);
           const destPlanet = planets.find((p) => p.id === order.toPlanetId);
-          if (originPlanet === undefined || destPlanet === undefined) {
+          const firstStop = order.stops?.[0];
+          if (originPlanet === undefined || (destPlanet === undefined && firstStop === undefined)) {
             return null;
           }
           const originCenter = planetCenterPx(originPlanet);
-          const destCenter = planetCenterPx(destPlanet);
+          const destCenter = destPlanet !== undefined
+            ? planetCenterPx(destPlanet)
+            : clickToPixel(firstStop!);
           const dx = destCenter.x - originCenter.x;
           const dy = destCenter.y - originCenter.y;
           const length = Math.sqrt(dx * dx + dy * dy);
@@ -2025,6 +2307,7 @@ function FleetLayer({
           );
         })}
       </G>
+    </G>
     </Svg>
   );
 }
@@ -2115,6 +2398,13 @@ export default function GameScreen() {
   const [dragDistanceLabel, setDragDistanceLabel] = useState<string | null>(null);
   const [dragHoverPlanetId, setDragHoverPlanetId] = useState<string | null>(null);
   const dragHoverPlanetIdRef = useRef<string | null>(null);
+  const [pathDraft, setPathDraft] = useState<PathDraft | null>(null);
+  const [pathLineFrom, setPathLineFrom] = useState<Position | null>(null);
+  const pathDraftRef = useRef<PathDraft | null>(null);
+  pathDraftRef.current = pathDraft;
+  const pathExtendFromRef = useRef<Position | null>(null);
+  /** This gesture began on a stationary fleet, so a tiny release should not leave redirect mode on. */
+  const directFleetDragRef = useRef(false);
   const fleetDragActivatedRef = useRef(false);
   const measureDragActivatedRef = useRef(false);
   const fleetDragOriginPlanetRef = useRef<Planet | null>(null);
@@ -2494,7 +2784,11 @@ export default function GameScreen() {
     if (pendingFleet === null) {
       return undefined;
     }
-    const id = scheduledMovementId(pendingFleet.fromPlanetId, pendingFleet.toPlanetId);
+    const id = scheduledMovementId(
+      pendingFleet.fromPlanetId,
+      pendingFleet.toPlanetId,
+      pendingFleet.stops,
+    );
     return scheduledMovements.find((movement) => movement.id === id);
   }, [pendingFleet, scheduledMovements]);
 
@@ -2506,11 +2800,21 @@ export default function GameScreen() {
   }, [scheduledMovements, selectedPlanetId]);
 
   const pendingTransitInfo = useMemo(() => {
-    if (
-      pendingOriginPlanet === undefined ||
-      pendingDestPlanet === undefined ||
-      humanPlayer === undefined
-    ) {
+    if (pendingOriginPlanet === undefined || humanPlayer === undefined) {
+      return null;
+    }
+    const speed = effectiveSpeed(humanPlayer.techLevel);
+    if (pendingFleet?.stops !== undefined && pendingFleet.stops.length > 0) {
+      const length = routeLength([
+        { ...pendingOriginPlanet.position, planetId: pendingOriginPlanet.id },
+        ...pendingFleet.stops,
+      ]);
+      return {
+        clickDistLabel: length.toFixed(1),
+        turnsInTransit: Math.max(1, Math.ceil(length / speed)),
+      };
+    }
+    if (pendingDestPlanet === undefined) {
       return null;
     }
     const clickDist = computeClickDistance(
@@ -2520,13 +2824,13 @@ export default function GameScreen() {
     const turnsInTransit = computeTurnsInTransit(
       pendingOriginPlanet.position,
       pendingDestPlanet.position,
-      effectiveSpeed(humanPlayer.techLevel),
+      speed,
     );
     return {
       clickDistLabel: clickDist.toFixed(1),
       turnsInTransit,
     };
-  }, [humanPlayer, pendingDestPlanet, pendingOriginPlanet]);
+  }, [humanPlayer, pendingDestPlanet, pendingFleet?.stops, pendingOriginPlanet]);
 
   const selectedPlanetFactories = useMemo(
     () =>
@@ -2800,7 +3104,7 @@ export default function GameScreen() {
   const queuedShipsPerPlanet = useMemo(() => {
     const map: Record<string, number> = {};
     for (const order of queuedOrders) {
-      if (isBuildOrder(order)) {
+      if (isBuildOrder(order) || !isLaunchOrder(order)) {
         continue;
       }
       map[order.fromPlanetId] = (map[order.fromPlanetId] ?? 0) + order.shipCount;
@@ -2812,6 +3116,7 @@ export default function GameScreen() {
     .filter(
       (o, i) =>
         !isBuildOrder(o) &&
+        isLaunchOrder(o) &&
         o.fromPlanetId === pendingFleet?.fromPlanetId &&
         i !== editingOrderIndex,
     )
@@ -2921,7 +3226,12 @@ export default function GameScreen() {
       setIsEditingScheduleAmount(false);
       setScheduleAmountDraft('');
     }
-    upsertScheduledMovement(pendingFleet.fromPlanetId, pendingFleet.toPlanetId, amount);
+    upsertScheduledMovement(
+      pendingFleet.fromPlanetId,
+      pendingFleet.toPlanetId,
+      amount,
+      pendingFleet.stops,
+    );
     setSchedulePanelOpen(false);
   };
 
@@ -2974,6 +3284,37 @@ export default function GameScreen() {
   const mapWidthSV = useSharedValue(1);
   const mapHeightSV = useSharedValue(1);
   const isFleetDragging = useSharedValue(false);
+  // True while a redirect or extra path point is waiting for the next drag,
+  // so that drag moves the route instead of the map.
+  const isPathExtending = useSharedValue(false);
+  useEffect(() => {
+    isPathExtending.value = pathDraft?.extending === true;
+  }, [isPathExtending, pathDraft]);
+  const ownFleetDragMarkers = useSharedValue<{ x: number; y: number }[]>([]);
+  useEffect(() => {
+    if (
+      gameState === null ||
+      localHumanPlayerId === undefined ||
+      gameState.status !== 'active' ||
+      gameState.currentPlayerId !== localHumanPlayerId ||
+      !flexibleMovementEnabled(gameState.flexibleMovement)
+    ) {
+      ownFleetDragMarkers.value = [];
+      return;
+    }
+    const markers: { x: number; y: number }[] = [];
+    for (const fleet of gameState.fleets) {
+      if (fleet.ownerId !== localHumanPlayerId) {
+        continue;
+      }
+      const click = fleetMapPosition(fleet, gameState.map.planets);
+      if (click === null) {
+        continue;
+      }
+      markers.push(clickToPixel(click));
+    }
+    ownFleetDragMarkers.value = markers;
+  }, [gameState, localHumanPlayerId, ownFleetDragMarkers]);
 
   // Box-select shared values (accessible from gesture worklets)
   const isBoxSelectModeSV = useSharedValue(false);
@@ -3288,6 +3629,27 @@ export default function GameScreen() {
       savedTranslateY.value = clamped.y;
     });
 
+  const pointerHitsOwnFleet = (localX: number, localY: number) => {
+    'worklet';
+    const markers = ownFleetDragMarkers.value;
+    if (markers.length === 0) {
+      return false;
+    }
+    const mapX = (localX - translateX.value) / scale.value;
+    const mapY = (localY - translateY.value) / scale.value;
+    const radius = Math.max(36 / scale.value, FLEET_SHIP_SIZE * 0.9);
+    const radiusSq = radius * radius;
+    for (let index = 0; index < markers.length; index += 1) {
+      const marker = markers[index];
+      const dx = mapX - marker.x;
+      const dy = mapY - marker.y;
+      if (dx * dx + dy * dy <= radiusSq) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const pan = Gesture.Pan()
     .minDistance(8)
     .onStart(() => {
@@ -3303,7 +3665,16 @@ export default function GameScreen() {
       panPrevTranslationY.value = event.translationY;
       // Bail out without writing translateX while a fleet drag, pinch, or
       // box-select draw is active.
-      if (isFleetDragging.value || isPinching.value || isBoxSelecting.value) {
+      if (
+        isFleetDragging.value ||
+        isPathExtending.value ||
+        isPinching.value ||
+        isBoxSelecting.value ||
+        pointerHitsOwnFleet(event.x - event.translationX, event.y - event.translationY)
+      ) {
+        if (pointerHitsOwnFleet(event.x - event.translationX, event.y - event.translationY)) {
+          isFleetDragging.value = true;
+        }
         return;
       }
       const clamped = clampTranslation(
@@ -3361,9 +3732,12 @@ export default function GameScreen() {
 
   const cancelDrag = useCallback(() => {
     fleetDragActivatedRef.current = false;
+    directFleetDragRef.current = false;
     fleetDragOriginPlanetRef.current = null;
+    pathExtendFromRef.current = null;
     dragHoverPlanetIdRef.current = null;
     setDragOriginPlanetId(null);
+    setPathLineFrom(null);
     setDragHoverPlanetId(null);
     setDragFingerLocal(null);
     setDragDistanceLabel(null);
@@ -3610,6 +3984,29 @@ export default function GameScreen() {
       ) {
         return;
       }
+      const draft = pathDraftRef.current;
+      if (draft !== null && draft.pending !== null && draft.extending !== true) {
+        fleetDragOriginPlanetRef.current = null;
+        return;
+      }
+      if (draft?.extending === true && humanPlayer !== undefined) {
+        const from = pathSourcePosition(draft.source, gameState.map.planets, gameState.fleets);
+        if (from !== null) {
+          const anchor =
+            draft.committed.length > 0 ? draft.committed[draft.committed.length - 1] : from;
+          pathExtendFromRef.current = anchor;
+          fleetDragOriginPlanetRef.current = null;
+          measureMapArea();
+          setPathLineFrom(anchor);
+          setDragOriginPlanetId(null);
+          setDragFingerLocal(null);
+          runOnUI(() => {
+            'worklet';
+            isFleetDragging.value = true;
+          })();
+          return;
+        }
+      }
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
       const planet = findPlanetAtMapCoords(
         mapPoint.x,
@@ -3617,9 +4014,65 @@ export default function GameScreen() {
         gameState.map.planets,
         s,
       );
+      const fleet = findFleetAtMapCoords(
+        mapPoint.x,
+        mapPoint.y,
+        gameState.fleets,
+        gameState.map.planets,
+        s,
+      );
+      const ownFleet =
+        fleet !== undefined &&
+        fleet.ownerId === localHumanPlayerId &&
+        gameState.status === 'active' &&
+        gameState.currentPlayerId === localHumanPlayerId &&
+        flexibleMovementEnabled(gameState.flexibleMovement)
+          ? fleet
+          : undefined;
+      if (ownFleet !== undefined) {
+        const fleetPosition = fleetMapPosition(ownFleet, gameState.map.planets);
+        const fleetPixel = fleetPosition !== null ? clickToPixel(fleetPosition) : null;
+        const fleetDist =
+          fleetPixel === null
+            ? Infinity
+            : Math.hypot(mapPoint.x - fleetPixel.x, mapPoint.y - fleetPixel.y);
+        const planetDist =
+          planet !== undefined && planet.owner === localHumanPlayerId
+            ? Math.hypot(
+                mapPoint.x - planetCenterPx(planet).x,
+                mapPoint.y - planetCenterPx(planet).y,
+              )
+            : Infinity;
+        if (fleetPosition !== null && fleetDist <= planetDist) {
+          const nextDraft: PathDraft = {
+            source: { kind: 'fleet', fleetId: ownFleet.id },
+            committed: [],
+            pending: null,
+            extending: true,
+          };
+          pathDraftRef.current = nextDraft;
+          pathExtendFromRef.current = fleetPosition;
+          directFleetDragRef.current = true;
+          fleetDragOriginPlanetRef.current = null;
+          measureMapArea();
+          setPathDraft(nextDraft);
+          setPathLineFrom(fleetPosition);
+          setDragOriginPlanetId(null);
+          setDragFingerLocal(null);
+          setFleetTooltip(null);
+          runOnUI(() => {
+            'worklet';
+            isFleetDragging.value = true;
+          })();
+          return;
+        }
+      }
       if (planet === undefined || planet.owner !== localHumanPlayerId) {
         fleetDragOriginPlanetRef.current = null;
         return;
+      }
+      if (draft !== null) {
+        setPathDraft(null);
       }
       measureMapArea();
       fleetDragOriginPlanetRef.current = planet;
@@ -3630,7 +4083,7 @@ export default function GameScreen() {
         isFleetDragging.value = true;
       })();
     },
-    [isReadOnly, isViewingFinishedGame, showingAiObserver, gameState, localHumanPlayerId, measureMapArea, boxSelectMode],
+    [isReadOnly, isViewingFinishedGame, showingAiObserver, gameState, humanPlayer, localHumanPlayerId, measureMapArea, boxSelectMode, queuedOrders],
   );
 
   const handleFleetPanUpdate = useCallback(
@@ -3649,6 +4102,56 @@ export default function GameScreen() {
       }
       const originPlanet = fleetDragOriginPlanetRef.current;
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+      const movementOn =
+        gameState !== null && flexibleMovementEnabled(gameState.flexibleMovement);
+      const extendFrom = pathExtendFromRef.current;
+      if (
+        movementOn &&
+        gameState !== null &&
+        humanPlayer !== undefined &&
+        (extendFrom !== null || originPlanet !== null)
+      ) {
+        const draft = pathDraftRef.current;
+        const anchor = extendFrom ?? originPlanet!.position;
+        const source: PathDraft['source'] =
+          extendFrom !== null && draft !== null
+            ? draft.source
+            : { kind: 'planet', planetId: originPlanet!.id };
+        const start =
+          pathSourcePosition(source, gameState.map.planets, gameState.fleets) ?? anchor;
+        const committed = extendFrom !== null && draft !== null ? draft.committed : [];
+        const fuelLeft = Math.max(
+          0,
+          pathFuelBudget(source, gameState.fleets, humanPlayer.techLevel) -
+            routeLength([start, ...committed]),
+        );
+        const raw = clampClickToMap(
+          pixelToClick(mapPoint.x, mapPoint.y),
+          gameState.map.width,
+          gameState.map.height,
+        );
+        const legal = clampPointToDistance(anchor, raw, fuelLeft);
+        const hovered = findPlanetAtMapCoords(
+          clickToPixel(legal).x,
+          clickToPixel(legal).y,
+          gameState.map.planets,
+          s,
+          dragCatchRadius(s),
+        );
+        const withinFuel =
+          hovered !== undefined &&
+          computeClickDistance(anchor, hovered.position) <= fuelLeft + 1e-6;
+        const caught =
+          withinFuel && hovered.id !== originPlanet?.id ? hovered : undefined;
+        dragHoverPlanetIdRef.current = caught?.id ?? null;
+        setDragHoverPlanetId(caught?.id ?? null);
+        const finger = clickToPixel(caught !== undefined ? caught.position : legal);
+        setDragFingerLocal({ x: finger.x * s + tx, y: finger.y * s + ty });
+        setDragDistanceLabel(
+          `${computeClickDistance(anchor, caught !== undefined ? caught.position : legal).toFixed(1)} clicks`,
+        );
+        return;
+      }
       const hovered =
         originPlanet !== null && gameState !== null
           ? findPlanetAtMapCoords(
@@ -3679,7 +4182,7 @@ export default function GameScreen() {
         }
       }
     },
-    [gameState, handleDragStart],
+    [gameState, handleDragStart, humanPlayer],
   );
 
   const handleMeasureDragStart = useCallback(
@@ -3774,7 +4277,102 @@ export default function GameScreen() {
       // React has committed dragOriginPlanetId. Reading that state here dropped
       // the send on nearby planets.
       const originPlanet = fleetDragOriginPlanetRef.current;
-      if (gameState === null || humanPlayer === undefined || originPlanet === null) {
+      const extendFrom = pathExtendFromRef.current;
+      const draft = pathDraftRef.current;
+      if (gameState === null || humanPlayer === undefined) {
+        cancelDrag();
+        return;
+      }
+      if (extendFrom !== null && draft !== null) {
+        const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
+        const start =
+          pathSourcePosition(draft.source, gameState.map.planets, gameState.fleets) ?? extendFrom;
+        const fuelLeft = Math.max(
+          0,
+          pathFuelBudget(draft.source, gameState.fleets, humanPlayer.techLevel) -
+            routeLength([start, ...draft.committed]),
+        );
+        const raw = clampClickToMap(
+          pixelToClick(mapPoint.x, mapPoint.y),
+          gameState.map.width,
+          gameState.map.height,
+        );
+        const legal = clampPointToDistance(extendFrom, raw, fuelLeft);
+        const releasedInsideTroopGlow =
+          draft.source.kind === 'fleet' &&
+          draft.committed.length === 0 &&
+          computeClickDistance(extendFrom, legal) < STATIONARY_DRAG_CANCEL_CLICKS;
+        if (releasedInsideTroopGlow) {
+          cancelDrag();
+          pathDraftRef.current = null;
+          setPathDraft(null);
+          return;
+        }
+        const hoveredId = dragHoverPlanetIdRef.current;
+        const hoveredPlanet =
+          hoveredId !== null
+            ? gameState.map.planets.find((planet) => planet.id === hoveredId)
+            : undefined;
+        cancelDrag();
+        const planetOk =
+          hoveredPlanet !== undefined &&
+          computeClickDistance(extendFrom, hoveredPlanet.position) <= fuelLeft + 1e-6;
+        const vertex: RouteVertex = planetOk
+          ? {
+              x: hoveredPlanet.position.x,
+              y: hoveredPlanet.position.y,
+              planetId: hoveredPlanet.id,
+            }
+          : legal;
+        if (vertex.planetId !== undefined) {
+          const stops = [...draft.committed, vertex];
+          if (draft.source.kind === 'fleet') {
+            queueFleetCourseChange({
+              fromPlanetId: '',
+              toPlanetId: vertex.planetId,
+              shipCount: 0,
+              stops,
+              redirectFleetId: draft.source.fleetId,
+            });
+            setPathDraft(null);
+          } else {
+            const fromPlanetId = draft.source.planetId;
+            const origin = gameState.map.planets.find((planet) => planet.id === fromPlanetId);
+            const shipsAlreadyQueuedFromOrigin = queuedOrders
+              .filter((order) => !isBuildOrder(order) && isLaunchOrder(order) && order.fromPlanetId === fromPlanetId)
+              .reduce((sum, order) => sum + order.shipCount, 0);
+            const maxShips = Math.max(0, (origin?.shipCount ?? 0) - shipsAlreadyQueuedFromOrigin);
+            setPendingFleet({
+              fromPlanetId,
+              toPlanetId: vertex.planetId,
+              shipCount: Math.min(1, maxShips),
+              stops,
+            });
+            setPathDraft(null);
+          }
+          return;
+        }
+        if (computeClickDistance(extendFrom, vertex) < PATH_POINT_MIN_CLICKS) {
+          if (draft.committed.length === 0) {
+            pathDraftRef.current = null;
+            setPathDraft(null);
+          } else {
+            const previous = draft.committed[draft.committed.length - 1];
+            const restored = {
+              ...draft,
+              committed: draft.committed.slice(0, -1),
+              pending: previous,
+              extending: false,
+            };
+            pathDraftRef.current = restored;
+            setPathDraft(restored);
+          }
+          return;
+        }
+        setPathDraft({ ...draft, pending: vertex, extending: false });
+        return;
+      }
+      if (originPlanet === null) {
         cancelDrag();
         return;
       }
@@ -3798,6 +4396,28 @@ export default function GameScreen() {
       const fromPlanetId = originPlanet.id;
       cancelDrag();
 
+      if (
+        flexibleMovementEnabled(gameState.flexibleMovement) &&
+        destPlanet === undefined
+      ) {
+        const raw = clampClickToMap(
+          pixelToClick(mapPoint.x, mapPoint.y),
+          gameState.map.width,
+          gameState.map.height,
+        );
+        const fuelLeft = effectiveRange(humanPlayer.techLevel);
+        const legal = clampPointToDistance(originPlanet.position, raw, fuelLeft);
+        if (computeClickDistance(originPlanet.position, legal) >= PATH_POINT_MIN_CLICKS) {
+          setPathDraft({
+            source: { kind: 'planet', planetId: fromPlanetId },
+            committed: [],
+            pending: legal,
+            extending: false,
+          });
+          return;
+        }
+      }
+
       if (destPlanet === undefined || destPlanet.id === fromPlanetId) {
         const ordersFromPlanet = queuedOrders
           .map((o, i) => ({ order: o, index: i }))
@@ -3818,6 +4438,18 @@ export default function GameScreen() {
 
       const range = effectiveRange(humanPlayer.techLevel);
       if (!isInRange(originPlanet.position, destPlanet.position, range)) {
+        if (flexibleMovementEnabled(gameState.flexibleMovement)) {
+          const legal = clampPointToDistance(originPlanet.position, destPlanet.position, range);
+          if (computeClickDistance(originPlanet.position, legal) >= PATH_POINT_MIN_CLICKS) {
+            setPathDraft({
+              source: { kind: 'planet', planetId: fromPlanetId },
+              committed: [],
+              pending: legal,
+              extending: false,
+            });
+          }
+          return;
+        }
         setOutOfRangeMessage(true);
         return;
       }
@@ -3861,6 +4493,7 @@ export default function GameScreen() {
       gameState,
       humanPlayer,
       queuedOrders,
+      queueOrder,
       setEditingOrderIndex,
       setPendingFleet,
     ],
@@ -3911,6 +4544,22 @@ export default function GameScreen() {
       }
       const mapPoint = screenToMapCoords(localX, localY, s, tx, ty);
       const visibleState = applyVisibility(record.state, viewingPlayerId);
+      const fleetOwnerId = record.localPlayerId ?? freshHumanId;
+      const fleet = findFleetAtMapCoords(
+        mapPoint.x,
+        mapPoint.y,
+        visibleState.fleets,
+        record.state.map.planets,
+        s,
+      );
+      if (
+        fleet !== undefined &&
+        fleetOwnerId !== undefined &&
+        fleet.ownerId === fleetOwnerId
+      ) {
+        setFleetTooltip({ fleet, absX, absY });
+        return;
+      }
       const planet = findPlanetAtMapCoords(
         mapPoint.x,
         mapPoint.y,
@@ -3918,23 +4567,7 @@ export default function GameScreen() {
         s,
       );
       if (planet === undefined) {
-        const fleet = findFleetAtMapCoords(
-          mapPoint.x,
-          mapPoint.y,
-          visibleState.fleets,
-          record.state.map.planets,
-          s,
-        );
-        const fleetOwnerId = record.localPlayerId ?? freshHumanId;
-        if (
-          fleet !== undefined &&
-          fleetOwnerId !== undefined &&
-          fleet.ownerId === fleetOwnerId
-        ) {
-          setFleetTooltip({ fleet, absX, absY });
-        } else {
-          setFleetTooltip(null);
-        }
+        setFleetTooltip(null);
         return;
       }
 
@@ -3990,6 +4623,13 @@ export default function GameScreen() {
 
   const fleetDrag = Gesture.Pan()
     .minDistance(5)
+    .onStart((event) => {
+      const startX = event.x - event.translationX;
+      const startY = event.y - event.translationY;
+      if (isPathExtending.value || pointerHitsOwnFleet(startX, startY)) {
+        isFleetDragging.value = true;
+      }
+    })
     .onUpdate((event) => {
       runOnJS(handleFleetPanUpdate)(
         event.x - event.translationX,
@@ -4392,15 +5032,135 @@ export default function GameScreen() {
   const dragLineOriginPlanet = dragOriginPlanet ?? measureDragOriginPlanet;
 
   const dragLineStart =
-    dragLineOriginPlanet !== undefined
+    pathLineFrom !== null
       ? (() => {
-          const center = planetCenterPx(dragLineOriginPlanet);
+          const center = clickToPixel(pathLineFrom);
           const s = scale.value;
           const tx = translateX.value;
           const ty = translateY.value;
           return { x: center.x * s + tx, y: center.y * s + ty };
         })()
-      : null;
+      : dragLineOriginPlanet !== undefined
+        ? (() => {
+            const center = planetCenterPx(dragLineOriginPlanet);
+            const s = scale.value;
+            const tx = translateX.value;
+            const ty = translateY.value;
+            return { x: center.x * s + tx, y: center.y * s + ty };
+          })()
+        : null;
+
+  const draftPathVertices = (() => {
+    if (pathDraft === null) {
+      return undefined;
+    }
+    const start = pathSourcePosition(pathDraft.source, gameState.map.planets, gameState.fleets);
+    if (start === null) {
+      return undefined;
+    }
+    const vertices: RouteVertex[] = [start, ...pathDraft.committed];
+    if (pathDraft.pending !== null) {
+      vertices.push(pathDraft.pending);
+    }
+    return vertices.length > 1 ? vertices : undefined;
+  })();
+
+  const pathChoiceWarning =
+    pathDraft?.pending !== null &&
+    pathDraft?.pending !== undefined &&
+    gameState !== null &&
+    humanPlayer !== undefined &&
+    pathDraft.pending.planetId === undefined &&
+    stopStrandsFleet(
+      pathDraft.pending,
+      Math.max(
+        0,
+        pathFuelBudget(pathDraft.source, gameState.fleets, humanPlayer.techLevel) -
+          routeLength([
+            pathSourcePosition(pathDraft.source, gameState.map.planets, gameState.fleets) ??
+              pathDraft.pending,
+            ...pathDraft.committed,
+            pathDraft.pending,
+          ]),
+      ),
+      gameState.map.planets,
+    );
+
+  const canAddNextPath = (() => {
+    if (pathDraft?.pending === null || pathDraft?.pending === undefined || humanPlayer === undefined) {
+      return false;
+    }
+    const start = pathSourcePosition(pathDraft.source, gameState.map.planets, gameState.fleets);
+    if (start === null) {
+      return false;
+    }
+    const spent = routeLength([start, ...pathDraft.committed, pathDraft.pending]);
+    return pathFuelBudget(pathDraft.source, gameState.fleets, humanPlayer.techLevel) - spent >= 0.05;
+  })();
+
+  const commitDraftStops = (stops: RouteVertex[]) => {
+    if (pathDraft === null || gameState === null || humanPlayer === undefined || stops.length === 0) {
+      setPathDraft(null);
+      return;
+    }
+    const last = stops[stops.length - 1];
+    if (pathDraft.source.kind === 'fleet') {
+      queueFleetCourseChange({
+        fromPlanetId: '',
+        toPlanetId: last.planetId ?? '',
+        shipCount: 0,
+        stops,
+        redirectFleetId: pathDraft.source.fleetId,
+      });
+      setPathDraft(null);
+      return;
+    }
+    const fromPlanetId = pathDraft.source.planetId;
+    const origin = gameState.map.planets.find((planet) => planet.id === fromPlanetId);
+    const shipsAlreadyQueuedFromOrigin = queuedOrders
+      .filter(
+        (order) => !isBuildOrder(order) && isLaunchOrder(order) && order.fromPlanetId === fromPlanetId,
+      )
+      .reduce((sum, order) => sum + order.shipCount, 0);
+    const maxShips = Math.max(0, (origin?.shipCount ?? 0) - shipsAlreadyQueuedFromOrigin);
+    setPendingFleet({
+      fromPlanetId,
+      toPlanetId: last.planetId ?? '',
+      shipCount: Math.min(1, maxShips),
+      stops,
+    });
+    setPathDraft(null);
+  };
+
+  const cancelPathPoint = () => {
+    if (pathDraft === null || pathDraft.pending === null) {
+      setPathDraft(null);
+      return;
+    }
+    if (pathDraft.committed.length === 0) {
+      setPathDraft(null);
+      return;
+    }
+    const previous = pathDraft.committed[pathDraft.committed.length - 1];
+    setPathDraft({
+      ...pathDraft,
+      committed: pathDraft.committed.slice(0, -1),
+      pending: previous,
+      extending: false,
+    });
+  };
+
+  const addNextPathPoint = () => {
+    if (pathDraft?.pending === null || pathDraft?.pending === undefined) {
+      return;
+    }
+    setPathDraft({
+      ...pathDraft,
+      committed: [...pathDraft.committed, pathDraft.pending],
+      pending: null,
+      extending: true,
+    });
+  };
 
   const selectionHint = boxSelectHint(boxSelectAction, boxSelectPhase, boxSelectMode);
   const boxTroopPercent = Math.round(boxSliderValue * 100);
@@ -4666,6 +5426,7 @@ export default function GameScreen() {
                 {
                   width: mapPixelWidth,
                   height: mapPixelHeight,
+                  overflow: 'visible',
                 },
                 animatedStyle,
               ]}
@@ -4718,6 +5479,12 @@ export default function GameScreen() {
                 players={players}
                 mapPixelWidth={mapPixelWidth}
                 mapPixelHeight={mapPixelHeight}
+                pathVertices={draftPathVertices}
+                dragHighlightFleetId={
+                  pathDraft?.extending === true && pathDraft.source.kind === 'fleet'
+                    ? pathDraft.source.fleetId
+                    : undefined
+                }
               />
             </Animated.View>
           </View>
@@ -4756,11 +5523,29 @@ export default function GameScreen() {
             <Text style={styles.modalTitle}>
               {editingOrderIndex !== null ? 'Edit Fleet' : 'Send Fleet'}
             </Text>
-            {pendingOriginPlanet !== undefined && pendingDestPlanet !== undefined && (
+            {pendingOriginPlanet !== undefined && (
               <Text style={styles.modalRoute}>
-                {pendingOriginPlanet.name} → {pendingDestPlanet.name}
+                {pendingOriginPlanet.name} → {pendingDestPlanet?.name ?? 'space'}
               </Text>
             )}
+            {pendingFleet?.stops !== undefined &&
+              pendingFleet.stops.length > 0 &&
+              pendingDestPlanet === undefined &&
+              pendingOriginPlanet !== undefined &&
+              humanPlayer !== undefined &&
+              stopStrandsFleet(
+                pendingFleet.stops[pendingFleet.stops.length - 1],
+                effectiveRange(humanPlayer.techLevel) -
+                  routeLength([
+                    { ...pendingOriginPlanet.position, planetId: pendingOriginPlanet.id },
+                    ...pendingFleet.stops,
+                  ]),
+                map.planets,
+              ) && (
+                <Text style={styles.pathWarning}>
+                  These troops will not be able to reach a planet from here.
+                </Text>
+              )}
             {pendingTransitInfo !== null && (
               <Text style={styles.modalRouteInfo}>
                 Distance: {pendingTransitInfo.clickDistLabel} clicks · ETA:{' '}
@@ -5476,15 +6261,23 @@ export default function GameScreen() {
                   const { order, queueIndex } = item;
                   const originPlanet = map.planets.find((p) => p.id === order.fromPlanetId);
                   const destPlanet = map.planets.find((p) => p.id === order.toPlanetId);
-                  const originLabel = originPlanet?.name ?? formatPlanetId(order.fromPlanetId);
-                  const destLabel = destPlanet?.name ?? formatPlanetId(order.toPlanetId);
+                  const originLabel = order.holdFleetId
+                    ? 'Hold fleet'
+                    : order.redirectFleetId
+                      ? 'Redirect fleet'
+                      : (originPlanet?.name ?? formatPlanetId(order.fromPlanetId));
+                  const destLabel = order.holdFleetId || order.redirectFleetId
+                    ? ''
+                    : (destPlanet?.name ?? (order.stops !== undefined ? 'space' : formatPlanetId(order.toPlanetId)));
                   return (
                     <View
                       key={`fleet-${order.fromPlanetId}-${order.toPlanetId}-${queueIndex}`}
                       style={styles.queuedModalRow}
                     >
                       <Text style={styles.queuedModalText} numberOfLines={1}>
-                        {originLabel} → {destLabel} · {order.shipCount}
+                        {order.holdFleetId || order.redirectFleetId
+                          ? originLabel
+                          : `${originLabel} → ${destLabel} · ${order.shipCount}`}
                       </Text>
                       {!showingAiObserver && (
                         <Pressable onPress={() => cancelQueuedOrder(queueIndex)} hitSlop={8}>
@@ -5804,12 +6597,80 @@ export default function GameScreen() {
         </Pressable>
       )}
 
+      {pathDraft?.extending === true && pathDraft.pending === null && (
+        <View style={[styles.pathChoiceCard, { bottom: insets.bottom + 88 }]} pointerEvents="none">
+          <Text style={styles.pathChoiceHint}>Drag the next point</Text>
+        </View>
+      )}
+
+      {pathDraft?.pending !== null && pathDraft?.pending !== undefined && (
+        <View style={[styles.pathChoiceCard, { bottom: insets.bottom + 88 }]}>
+          {pathChoiceWarning && (
+            <Text style={styles.pathWarning}>
+              These troops will not be able to reach a planet from here.
+            </Text>
+          )}
+          <View style={styles.pathChoiceRow}>
+            <Pressable style={styles.pathChoiceButton} onPress={cancelPathPoint}>
+              <Text style={styles.pathChoiceButtonText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.pathChoiceButton, !canAddNextPath && styles.pathChoiceButtonDisabled]}
+              onPress={addNextPathPoint}
+              disabled={!canAddNextPath}
+            >
+              <Text style={styles.pathChoiceButtonText}>Add next path</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.pathChoiceButton, styles.pathChoiceButtonPrimary]}
+              onPress={() => {
+                if (pathDraft.pending === null) {
+                  return;
+                }
+                commitDraftStops([...pathDraft.committed, pathDraft.pending]);
+              }}
+            >
+              <Text style={styles.pathChoiceButtonPrimaryText}>Confirm</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
       {fleetTooltip !== null && gameState !== null && localHumanPlayerId !== undefined && (
         <FleetTooltipOverlay
           tooltip={fleetTooltip}
           players={gameState.players}
           localHumanPlayerId={localHumanPlayerId}
           onDismiss={dismissFleetTooltip}
+          onLeave={
+            flexibleMovementEnabled(gameState.flexibleMovement) &&
+            isHumanTurn &&
+            !isReadOnly &&
+            fleetTooltip.fleet.holding !== true
+              ? () => {
+                  queueFleetCourseChange({
+                    fromPlanetId: '',
+                    toPlanetId: '',
+                    shipCount: 0,
+                    holdFleetId: fleetTooltip.fleet.id,
+                  });
+                  setFleetTooltip(null);
+                }
+              : undefined
+          }
+          onRedirect={
+            flexibleMovementEnabled(gameState.flexibleMovement) && isHumanTurn && !isReadOnly
+              ? () => {
+                  setPathDraft({
+                    source: { kind: 'fleet', fleetId: fleetTooltip.fleet.id },
+                    committed: [],
+                    pending: null,
+                    extending: true,
+                  });
+                  setFleetTooltip(null);
+                }
+              : undefined
+          }
         />
       )}
 
@@ -6093,6 +6954,7 @@ const styles = StyleSheet.create({
   },
   mapGestureHost: {
     flex: 1,
+    overflow: 'visible',
   },
   dragLine: {
     position: 'absolute',
@@ -7428,23 +8290,21 @@ const styles = StyleSheet.create({
   fleetTooltip: {
     position: 'absolute',
     flexDirection: 'row',
-    backgroundColor: 'rgba(20, 18, 40, 0.78)',
-    borderRadius: 8,
+    backgroundColor: COLORS.panel,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: COLORS.border,
     overflow: 'hidden',
     zIndex: 20,
-    minWidth: 200,
-    maxWidth: 280,
   },
   fleetTooltipAccent: {
-    width: 4,
+    width: 6,
   },
   fleetTooltipBody: {
     flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 6,
   },
   fleetTooltipHeader: {
     flexDirection: 'row',
@@ -7460,19 +8320,105 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   fleetTooltipCloseText: {
-    color: 'rgba(255, 255, 255, 0.55)',
-    fontSize: 14,
+    color: COLORS.textMuted,
+    fontSize: 16,
     fontWeight: '600',
   },
   fleetTooltipShips: {
     flex: 1,
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  pathChoiceCard: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    backgroundColor: COLORS.panel,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 12,
+    gap: 8,
+  },
+  pathChoiceHint: {
+    color: COLORS.text,
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  pathChoiceRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  pathChoiceButton: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  pathChoiceButtonDisabled: {
+    opacity: 0.4,
+  },
+  pathChoiceButtonPrimary: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  pathChoiceButtonText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pathChoiceButtonPrimaryText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pathWarning: {
+    color: '#e0a040',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  fleetTooltipActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  fleetTooltipAction: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#ffffff',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  fleetTooltipActionPrimary: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  fleetTooltipActionText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fleetTooltipActionPrimaryText: {
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '700',
   },
   fleetTooltipTurns: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 12,
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  fleetTooltipFuel: {
+    gap: 2,
+  },
+  fleetTooltipFuelText: {
+    color: COLORS.textMuted,
+    fontSize: 14,
     fontWeight: '500',
   },
 });

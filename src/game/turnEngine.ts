@@ -3,11 +3,14 @@ import { resolveArrival, resolveMultiwayCombat, type MultiwayCombatant } from '.
 import { mulberry32 } from './mapGenerator';
 import {
   advanceFleets,
+  computeClickDistance,
   computeTurnsInTransit,
   createFleet,
   effectiveRange,
   effectiveSpeed,
+  fleetMapPosition,
   isInRange,
+  routeLength,
 } from './movementEngine';
 import { scaledBuildingCost } from './productionEngine';
 import { runProduction } from './productionEngine';
@@ -19,14 +22,25 @@ import type {
   GameState,
   Planet,
   Player,
+  RouteVertex,
   ScheduledMovement,
   TurnEvent,
 } from './types';
+import { flexibleMovementEnabled } from './types';
 
 export type ResolveTurnResult = GameState & { events: TurnEvent[] };
 
 export type PlayerAction =
-  | { type: 'SEND_FLEET'; fromPlanetId: string; toPlanetId: string; shipCount: number }
+  | {
+      type: 'SEND_FLEET';
+      fromPlanetId: string;
+      toPlanetId: string;
+      shipCount: number;
+      /** Path after the origin. Absent for a straight flight. */
+      stops?: RouteVertex[];
+    }
+  | { type: 'HOLD_FLEET'; fleetId: string }
+  | { type: 'REDIRECT_FLEET'; fleetId: string; stops: RouteVertex[] }
   | { type: 'BUILD'; planetId: string; buildingType: BuildingType }
   | { type: 'SET_PRODUCTION_SLIDER'; planetId: string; value: number }
   | { type: 'END_TURN' };
@@ -162,6 +176,75 @@ function nextNonEliminatedPlayerId(players: Player[], currentPlayerId: string): 
   return currentPlayerId;
 }
 
+function clampVertex(vertex: RouteVertex, map: GameMap): RouteVertex {
+  return {
+    ...vertex,
+    x: Math.min(map.width, Math.max(0, vertex.x)),
+    y: Math.min(map.height, Math.max(0, vertex.y)),
+  };
+}
+
+function launchVertices(
+  origin: Planet,
+  stops: RouteVertex[] | undefined,
+  map: GameMap,
+): RouteVertex[] {
+  const start: RouteVertex = {
+    x: origin.position.x,
+    y: origin.position.y,
+    planetId: origin.id,
+  };
+  const path = [start];
+  for (const stop of stops ?? []) {
+    const clamped = clampVertex(stop, map);
+    const previous = path[path.length - 1];
+    if (computeClickDistance(previous, clamped) < 0.05) {
+      continue;
+    }
+    path.push(clamped);
+  }
+  return path;
+}
+
+function attachFlexibleCourse(
+  fleet: Fleet,
+  vertices: RouteVertex[],
+  fuelFraction: number,
+  orderRange: number,
+  orderSpeed: number,
+): Fleet {
+  const length = routeLength(vertices);
+  const turns = Math.max(1, Math.ceil(length / orderSpeed));
+  const end = vertices[vertices.length - 1];
+  return {
+    ...fleet,
+    destinationPlanetId: end?.planetId ?? '',
+    turnsRemaining: turns,
+    totalTurns: turns,
+    course: { vertices, distanceTraveled: 0 },
+    fuelFraction,
+    orderRange,
+    orderSpeed,
+    holding: false,
+  };
+}
+
+function assertFuelPath(vertices: RouteVertex[], fuelClicks: number): void {
+  const length = routeLength(vertices);
+  if (length < 0.05) {
+    throw new Error('Path is too short');
+  }
+  if (length > fuelClicks + 1e-6) {
+    throw new Error(
+      `Path is ${length.toFixed(1)} clicks and fuel covers ${fuelClicks.toFixed(1)} clicks`,
+    );
+  }
+  const end = vertices[vertices.length - 1];
+  if (end?.planetId !== undefined && end.planetId === vertices[0]?.planetId && vertices.length === 2) {
+    throw new Error('Origin and destination planets must be different');
+  }
+}
+
 function processSendFleet(
   map: GameMap,
   fleets: Fleet[],
@@ -171,6 +254,7 @@ function processSendFleet(
   turnNumber: number,
   roundNumber: number,
   fleetIndex: number,
+  flexible: boolean,
 ): { map: GameMap; fleets: Fleet[] } {
   const origin = findPlanet(map, action.fromPlanetId);
   if (origin === undefined) {
@@ -180,12 +264,16 @@ function processSendFleet(
     throw new Error(`Origin planet ${action.fromPlanetId} is not owned by player ${playerId}`);
   }
   
-  const destination = findPlanet(map, action.toPlanetId);
-  if (destination === undefined) {
-    throw new Error(`Destination planet not found: ${action.toPlanetId}`);
-  }
-  if (action.fromPlanetId === action.toPlanetId) {
-    throw new Error('Origin and destination planets must be different');
+  const destination =
+    action.toPlanetId.length > 0 ? findPlanet(map, action.toPlanetId) : undefined;
+  const usingPath = flexible && action.stops !== undefined && action.stops.length > 0;
+  if (!usingPath) {
+    if (destination === undefined) {
+      throw new Error(`Destination planet not found: ${action.toPlanetId}`);
+    }
+    if (action.fromPlanetId === action.toPlanetId) {
+      throw new Error('Origin and destination planets must be different');
+    }
   }
   
   if (action.shipCount < 1) {
@@ -193,21 +281,36 @@ function processSendFleet(
   }
   if (action.shipCount > origin.shipCount) {
     throw new Error(
-      `Cannot send ${action.shipCount} ships from ${origin.name} to ${destination.name}; ${origin.name} only has ${origin.shipCount} ships`,
+      `Cannot send ${action.shipCount} ships from ${origin.name}; ${origin.name} only has ${origin.shipCount} ships`,
     );
   }
 
   const player = players.find((p) => p.id === playerId);
   const range = effectiveRange(player?.techLevel ?? 0);
   const speed = effectiveSpeed(player?.techLevel ?? 0);
+  const vertices = flexible
+    ? launchVertices(
+        origin,
+        usingPath
+          ? action.stops
+          : destination === undefined
+            ? undefined
+            : [{ x: destination.position.x, y: destination.position.y, planetId: destination.id }],
+        map,
+      )
+    : [];
 
-  if (!isInRange(origin.position, destination.position, range)) {
+  if (flexible) {
+    assertFuelPath(vertices, range);
+  } else if (destination !== undefined && !isInRange(origin.position, destination.position, range)) {
     throw new Error(
       `Destination planet ${action.toPlanetId} is out of range (max ${range} clicks)`,
     );
   }
 
-  const turnsRemaining = computeTurnsInTransit(origin.position, destination.position, speed);
+  const turnsRemaining = flexible
+    ? Math.max(1, Math.ceil(routeLength(vertices) / speed))
+    : computeTurnsInTransit(origin.position, destination!.position, speed);
 
   const updatedMap: GameMap = {
     ...map,
@@ -218,21 +321,121 @@ function processSendFleet(
     ),
   };
 
-  const fleet = createFleet(
+  let fleet = createFleet(
     playerId,
     action.shipCount,
     action.fromPlanetId,
-    action.toPlanetId,
+    destination?.id ?? action.toPlanetId,
     turnsRemaining,
     turnNumber,
     fleetIndex,
     roundNumber,
   );
+  if (flexible) {
+    fleet = attachFlexibleCourse(fleet, vertices, 1, range, speed);
+  }
 
   return { map: updatedMap, fleets: [...fleets, fleet] };
 }
 
-export function scheduledMovementId(fromPlanetId: string, toPlanetId: string): string {
+function processHoldFleet(
+  map: GameMap,
+  fleets: Fleet[],
+  action: Extract<PlayerAction, { type: 'HOLD_FLEET' }>,
+  playerId: string,
+): { map: GameMap; fleets: Fleet[] } {
+  const fleet = fleets.find((candidate) => candidate.id === action.fleetId);
+  if (fleet === undefined || fleet.ownerId !== playerId || fleet.course === undefined) {
+    return { map, fleets };
+  }
+  const unmoved =
+    fleet.course.distanceTraveled <= 1e-6 &&
+    fleet.course.vertices[0]?.planetId === fleet.originPlanetId;
+  const origin = findPlanet(map, fleet.originPlanetId);
+  if (unmoved && origin !== undefined && origin.owner === playerId) {
+    return {
+      map: {
+        ...map,
+        planets: map.planets.map((planet) =>
+          planet.id === origin.id
+            ? { ...planet, shipCount: planet.shipCount + fleet.shipCount }
+            : planet,
+        ),
+      },
+      fleets: fleets.filter((candidate) => candidate.id !== fleet.id),
+    };
+  }
+  const position = fleetMapPosition(fleet, map.planets) ?? fleet.course.vertices[0];
+  const held: Fleet = {
+    ...fleet,
+    holding: true,
+    turnsRemaining: Math.max(1, fleet.turnsRemaining),
+    destinationPlanetId: '',
+    course: {
+      vertices: [{ x: position.x, y: position.y }],
+      distanceTraveled: 0,
+    },
+  };
+  return {
+    map,
+    fleets: fleets.map((candidate) => (candidate.id === fleet.id ? held : candidate)),
+  };
+}
+
+function processRedirectFleet(
+  map: GameMap,
+  fleets: Fleet[],
+  action: Extract<PlayerAction, { type: 'REDIRECT_FLEET' }>,
+  playerId: string,
+  players: Player[],
+): { map: GameMap; fleets: Fleet[] } {
+  const fleet = fleets.find((candidate) => candidate.id === action.fleetId);
+  if (fleet === undefined || fleet.ownerId !== playerId) {
+    return { map, fleets };
+  }
+  const position = fleetMapPosition(fleet, map.planets);
+  if (position === undefined || position === null) {
+    return { map, fleets };
+  }
+  const player = players.find((candidate) => candidate.id === playerId);
+  const range = effectiveRange(player?.techLevel ?? 0);
+  const speed = effectiveSpeed(player?.techLevel ?? 0);
+  const fuelClicks = (fleet.fuelFraction ?? 1) * range;
+  const start: RouteVertex = { x: position.x, y: position.y };
+  const vertices = [start];
+  for (const stop of action.stops) {
+    const clamped = clampVertex(stop, map);
+    const previous = vertices[vertices.length - 1];
+    if (computeClickDistance(previous, clamped) < 0.05) {
+      continue;
+    }
+    vertices.push(clamped);
+  }
+  assertFuelPath(vertices, fuelClicks);
+  const redirected = attachFlexibleCourse(
+    fleet,
+    vertices,
+    fleet.fuelFraction ?? 1,
+    range,
+    speed,
+  );
+  return {
+    map,
+    fleets: fleets.map((candidate) => (candidate.id === fleet.id ? redirected : candidate)),
+  };
+}
+
+export function scheduledMovementId(
+  fromPlanetId: string,
+  toPlanetId: string,
+  stops?: RouteVertex[],
+): string {
+  if (stops !== undefined && stops.length > 0) {
+    const body = stops
+      .map((stop) => `${stop.x.toFixed(2)},${stop.y.toFixed(2)},${stop.planetId ?? ''}`)
+      .join('|');
+    return `${fromPlanetId}:path:${body}`;
+  }
   return `${fromPlanetId}:${toPlanetId}`;
 }
 
@@ -281,6 +484,16 @@ export function pruneScheduledMovements(
     if (origin.owner !== movement.ownerId) {
       return false;
     }
+    if (movement.stops !== undefined && movement.stops.length > 0) {
+      const last = movement.stops[movement.stops.length - 1];
+      if (last.planetId !== undefined) {
+        const destination = findPlanet(map, last.planetId);
+        if (destination === undefined || destination.id === origin.id) {
+          return false;
+        }
+      }
+      return true;
+    }
     const destination = findPlanet(map, movement.toPlanetId);
     if (destination === undefined || destination.id === origin.id) {
       return false;
@@ -292,8 +505,20 @@ export function pruneScheduledMovements(
 export function collectScheduledQueueOrders(
   state: GameState,
   playerId: string,
-  existingQueued: Array<{ fromPlanetId: string; toPlanetId: string; shipCount: number }>,
-): Array<{ fromPlanetId: string; toPlanetId: string; shipCount: number }> {
+  existingQueued: Array<{
+    fromPlanetId: string;
+    toPlanetId: string;
+    shipCount: number;
+    stops?: RouteVertex[];
+    holdFleetId?: string;
+    redirectFleetId?: string;
+  }>,
+): Array<{
+  fromPlanetId: string;
+  toPlanetId: string;
+  shipCount: number;
+  stops?: RouteVertex[];
+}> {
   const player = state.players.find((p) => p.id === playerId);
   const range = effectiveRange(player?.techLevel ?? 0);
   const movements = sortScheduledMovementsForDispatch(
@@ -305,7 +530,9 @@ export function collectScheduledQueueOrders(
   );
 
   const occupied = new Set(
-    existingQueued.map((order) => `${order.fromPlanetId}:${order.toPlanetId}`),
+    existingQueued
+      .filter((order) => order.holdFleetId === undefined && order.redirectFleetId === undefined)
+      .map((order) => scheduledMovementId(order.fromPlanetId, order.toPlanetId, order.stops)),
   );
   const reservedByPlanet: Record<string, number> = {};
   for (const order of existingQueued) {
@@ -313,18 +540,33 @@ export function collectScheduledQueueOrders(
       (reservedByPlanet[order.fromPlanetId] ?? 0) + order.shipCount;
   }
 
-  const orders: Array<{ fromPlanetId: string; toPlanetId: string; shipCount: number }> = [];
+  const orders: Array<{
+    fromPlanetId: string;
+    toPlanetId: string;
+    shipCount: number;
+    stops?: RouteVertex[];
+  }> = [];
+  const flexible = flexibleMovementEnabled(state.flexibleMovement);
   for (const movement of movements) {
-    const pair = `${movement.fromPlanetId}:${movement.toPlanetId}`;
+    const pair = scheduledMovementId(movement.fromPlanetId, movement.toPlanetId, movement.stops);
     if (occupied.has(pair)) {
       continue;
     }
     const origin = findPlanet(state.map, movement.fromPlanetId);
-    const destination = findPlanet(state.map, movement.toPlanetId);
-    if (origin === undefined || destination === undefined) {
+    if (origin === undefined) {
       continue;
     }
-    if (!isInRange(origin.position, destination.position, range)) {
+    const stops = flexible ? movement.stops : undefined;
+    const destination = findPlanet(state.map, movement.toPlanetId);
+    if (stops !== undefined && stops.length > 0) {
+      const vertices = launchVertices(origin, stops, state.map);
+      if (routeLength(vertices) > range + 1e-6) {
+        continue;
+      }
+    } else if (
+      destination === undefined ||
+      !isInRange(origin.position, destination.position, range)
+    ) {
       continue;
     }
     const available = origin.shipCount - (reservedByPlanet[origin.id] ?? 0);
@@ -332,10 +574,12 @@ export function collectScheduledQueueOrders(
     if (shipCount < 1) {
       continue;
     }
+    const last = stops?.[stops.length - 1];
     orders.push({
       fromPlanetId: movement.fromPlanetId,
-      toPlanetId: movement.toPlanetId,
+      toPlanetId: last?.planetId ?? movement.toPlanetId,
       shipCount,
+      ...(stops !== undefined && stops.length > 0 ? { stops } : {}),
     });
     occupied.add(pair);
     reservedByPlanet[origin.id] = (reservedByPlanet[origin.id] ?? 0) + shipCount;
@@ -351,15 +595,15 @@ function dispatchScheduledFleet(
   turnNumber: number,
   roundNumber: number,
   fleetIndex: number,
+  flexible: boolean,
 ): { map: GameMap; fleets: Fleet[] } {
   const origin = findPlanet(map, movement.fromPlanetId);
   const destination = findPlanet(map, movement.toPlanetId);
-  if (
-    origin === undefined ||
-    destination === undefined ||
-    origin.owner !== movement.ownerId ||
-    origin.id === destination.id
-  ) {
+  const stops = flexible ? movement.stops : undefined;
+  if (origin === undefined || origin.owner !== movement.ownerId) {
+    return { map, fleets };
+  }
+  if ((stops === undefined || stops.length === 0) && (destination === undefined || origin.id === destination.id)) {
     return { map, fleets };
   }
 
@@ -371,11 +615,27 @@ function dispatchScheduledFleet(
   const player = players.find((p) => p.id === movement.ownerId);
   const range = effectiveRange(player?.techLevel ?? 0);
   const speed = effectiveSpeed(player?.techLevel ?? 0);
-  if (!isInRange(origin.position, destination.position, range)) {
+  const vertices =
+    stops !== undefined && stops.length > 0
+      ? launchVertices(origin, stops, map)
+      : destination === undefined
+        ? []
+        : launchVertices(
+            origin,
+            [{ x: destination.position.x, y: destination.position.y, planetId: destination.id }],
+            map,
+          );
+  if (!flexible) {
+    if (destination === undefined || !isInRange(origin.position, destination.position, range)) {
+      return { map, fleets };
+    }
+  } else if (vertices.length < 2 || routeLength(vertices) > range + 1e-6) {
     return { map, fleets };
   }
 
-  const turnsRemaining = computeTurnsInTransit(origin.position, destination.position, speed);
+  const turnsRemaining = flexible
+    ? Math.max(1, Math.ceil(routeLength(vertices) / speed))
+    : computeTurnsInTransit(origin.position, destination!.position, speed);
   const updatedMap: GameMap = {
     ...map,
     planets: map.planets.map((planet) =>
@@ -384,16 +644,19 @@ function dispatchScheduledFleet(
         : planet,
     ),
   };
-  const fleet = createFleet(
+  let fleet = createFleet(
     movement.ownerId,
     shipCount,
     movement.fromPlanetId,
-    movement.toPlanetId,
+    vertices[vertices.length - 1]?.planetId ?? movement.toPlanetId,
     turnsRemaining,
     turnNumber,
     fleetIndex,
     roundNumber,
   );
+  if (flexible) {
+    fleet = attachFlexibleCourse(fleet, vertices, 1, range, speed);
+  }
   return { map: updatedMap, fleets: [...fleets, fleet] };
 }
 
@@ -405,6 +668,7 @@ function applyScheduledMovementsForPlayer(
   players: Player[],
   turnNumber: number,
   roundNumber: number,
+  flexible: boolean,
 ): { map: GameMap; fleets: Fleet[] } {
   let nextMap = map;
   let nextFleets = fleets;
@@ -420,6 +684,7 @@ function applyScheduledMovementsForPlayer(
       turnNumber,
       roundNumber,
       nextFleets.length,
+      flexible,
     );
     nextMap = result.map;
     nextFleets = result.fleets;
@@ -531,7 +796,11 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
   let combatRngCounter = 0;
 
   for (const fleet of fleets) {
-    if (fleet.turnsRemaining <= 0 && fleet.dispatchedInRound < state.roundNumber) {
+    if (
+      fleet.holding !== true &&
+      fleet.turnsRemaining <= 0 &&
+      fleet.dispatchedInRound < state.roundNumber
+    ) {
       eligibleArrivals.push(fleet);
     } else {
       stillInTransit.push(fleet);
@@ -622,6 +891,21 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     map = processSetProductionSlider(map, action, input.playerId);
   }
 
+  const flexible = flexibleMovementEnabled(state.flexibleMovement);
+  if (flexible) {
+    for (const action of input.actions) {
+      if (action.type === 'HOLD_FLEET') {
+        const held = processHoldFleet(map, fleets, action, input.playerId);
+        map = held.map;
+        fleets = held.fleets;
+      } else if (action.type === 'REDIRECT_FLEET') {
+        const redirected = processRedirectFleet(map, fleets, action, input.playerId, players);
+        map = redirected.map;
+        fleets = redirected.fleets;
+      }
+    }
+  }
+
   const sendFleetActions = input.actions.filter(
     (action): action is Extract<PlayerAction, { type: 'SEND_FLEET' }> => action.type === 'SEND_FLEET',
   );
@@ -636,6 +920,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
       state.turnNumber,
       state.roundNumber,
       index,
+      flexibleMovementEnabled(state.flexibleMovement),
     );
     map = result.map;
     fleets = result.fleets;
@@ -766,6 +1051,7 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
         players,
         nextTurnNumber,
         roundNumber,
+        flexibleMovementEnabled(state.flexibleMovement),
       );
       map = applied.map;
       fleets = applied.fleets;

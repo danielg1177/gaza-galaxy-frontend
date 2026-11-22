@@ -18,7 +18,7 @@ import { showAlert, showConfirm } from '../utils/webAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { APP_NAME_UPPER, DEFAULT_PLAYER_NAME } from '../constants/app';
-import { GALAXY_SHAPES, isGalaxyShape, type GalaxyShape, type MapSize, type PlanetMultiplierMode, type VisibilityMode } from '../game/types';
+import { GALAXY_SHAPES, isGalaxyShape, type FlexibleMovementMode, type GalaxyShape, type MapSize, type PlanetMultiplierMode, type VisibilityMode } from '../game/types';
 import { getFriendRequests, getFriends, type Friend } from '../services/friendsService';
 import { ConversationModal } from '../components/ConversationModal';
 import { EditGameNameModal } from '../components/EditGameNameModal';
@@ -46,6 +46,7 @@ import {
   canForfeitAsyncGame,
   resolveGalaxyShape,
   resolveMapSize,
+  resolveFlexibleMovement,
   resolvePlanetMultipliers,
   resolveVisibility,
 } from '../services/playAgain';
@@ -559,7 +560,8 @@ export default function HomeScreen() {
   const [galaxyShapeChoice, setGalaxyShapeChoice] = useState<GalaxyShapeChoice>('random');
   const [visibility, setVisibility] = useState<VisibilityMode>('classic');
   const [planetMultipliers, setPlanetMultipliers] = useState<PlanetMultiplierMode>('off');
-  const [settingHelp, setSettingHelp] = useState<'visibility' | 'multipliers' | null>(null);
+  const [flexibleMovement, setFlexibleMovement] = useState<FlexibleMovementMode>('off');
+  const [settingHelp, setSettingHelp] = useState<'visibility' | 'multipliers' | 'movement' | null>(null);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [openGameCount, setOpenGameCount] = useState(0);
   const [pendingLobbyCount, setPendingLobbyCount] = useState(0);
@@ -1056,6 +1058,7 @@ export default function HomeScreen() {
     galaxyShape?: GalaxyShape,
     visibilityMode: VisibilityMode = 'classic',
     multiplierMode: PlanetMultiplierMode = 'off',
+    movementMode: FlexibleMovementMode = 'off',
   ) => {
     const { width, height, planetCount } = computeMapDimensions(size, slots.length);
     const playerName = (slots[0]?.name ?? '').trim() || DEFAULT_PLAYER_NAME;
@@ -1066,6 +1069,7 @@ export default function HomeScreen() {
       planetCount,
       visibility: visibilityMode,
       planetMultipliers: multiplierMode,
+      flexibleMovement: movementMode,
       ...(galaxyShape != null ? { galaxyShape } : {}),
     };
 
@@ -1186,6 +1190,7 @@ export default function HomeScreen() {
       galaxyShape,
       visibility,
       planetMultipliers,
+      flexibleMovement,
     );
   };
 
@@ -1207,7 +1212,7 @@ export default function HomeScreen() {
     setCardMenu(null);
     showConfirm(
       'Play again?',
-      'Start a new game with the same players, map size, name, type, visibility, and multipliers. The map will be randomized.',
+      'Start a new game with the same players, map size, name, type, visibility, multipliers, and movement. The map will be randomized.',
       () => {
         const size = record.config.mapSize;
         const slots = record.config.playerSlots;
@@ -1227,6 +1232,9 @@ export default function HomeScreen() {
           planetMultipliers: resolvePlanetMultipliers(
             record.config.planetMultipliers ?? record.state.planetMultipliers,
           ),
+          flexibleMovement: resolveFlexibleMovement(
+            record.config.flexibleMovement ?? record.state.flexibleMovement,
+          ),
           playMode: record.config.playMode,
         });
         navigation.navigate('Game');
@@ -1242,7 +1250,7 @@ export default function HomeScreen() {
     }
     showConfirm(
       'Play again?',
-      'Start a new game with the same players, map size, name, type, visibility, and multipliers. The map will be randomized.',
+      'Start a new game with the same players, map size, name, type, visibility, multipliers, and movement. The map will be randomized.',
       () => {
         const built = buildPlayAgainSlots(game, currentUser);
         if ('error' in built) {
@@ -1253,6 +1261,7 @@ export default function HomeScreen() {
         const galaxyShape = resolveGalaxyShape(game.mapConfig?.galaxyShape);
         const visibilityMode = resolveVisibility(game.mapConfig?.visibility);
         const multiplierMode = resolvePlanetMultipliers(game.mapConfig?.planetMultipliers);
+        const movementMode = resolveFlexibleMovement(game.mapConfig?.flexibleMovement);
         launchCampaign(
           game.name,
           built.slots,
@@ -1262,6 +1271,7 @@ export default function HomeScreen() {
           galaxyShape,
           visibilityMode,
           multiplierMode,
+          movementMode,
         );
       },
     );
@@ -1953,6 +1963,70 @@ export default function HomeScreen() {
                       pressed && !selected && styles.slotTypeChipPressed,
                     ]}
                     onPress={() => setPlanetMultipliers(mode)}
+                  >
+                    <Text
+                      style={[
+                        styles.slotTypeChipText,
+                        selected && styles.slotTypeChipTextSelected,
+                      ]}
+                    >
+                      {mode === 'off' ? 'Off' : 'On'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <View style={styles.settingLabelRow}>
+              <Text style={styles.settingLabel}>Movement</Text>
+              <Pressable
+                onPress={() =>
+                  setSettingHelp((current) => (current === 'movement' ? null : 'movement'))
+                }
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Explain movement"
+                style={[
+                  styles.settingHelpButton,
+                  settingHelp === 'movement' && styles.settingHelpButtonOpen,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.settingHelpMark,
+                    settingHelp === 'movement' && styles.settingHelpMarkOpen,
+                  ]}
+                >
+                  ?
+                </Text>
+              </Pressable>
+            </View>
+            {settingHelp === 'movement' && (
+              <View style={styles.settingHelpTooltip}>
+                <Text style={styles.settingHelpLine}>
+                  <Text style={styles.settingHelpOption}>Off. </Text>
+                  Troops fly straight from one planet to another.
+                </Text>
+                <Text style={styles.settingHelpLine}>
+                  <Text style={styles.settingHelpOption}>On. </Text>
+                  Research range is a fuel tank. Drag a path that can bend or stop in space. A longer path than the tank allows cannot be plotted. Landing on a planet refills the tank. Troops stopped in space keep the fuel they have left, and later research stretches that share.
+                </Text>
+              </View>
+            )}
+            <View style={styles.visibilityRow}>
+              {(['off', 'on'] as const).map((mode) => {
+                const selected = flexibleMovement === mode;
+                return (
+                  <Pressable
+                    key={mode}
+                    style={({ pressed }) => [
+                      styles.slotTypeChip,
+                      selected && styles.slotTypeChipSelected,
+                      pressed && !selected && styles.slotTypeChipPressed,
+                    ]}
+                    onPress={() => setFlexibleMovement(mode)}
                   >
                     <Text
                       style={[

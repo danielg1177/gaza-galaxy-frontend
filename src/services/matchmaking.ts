@@ -2,6 +2,7 @@ import { DEFAULT_PLAYER_NAME } from '../constants/app';
 import { isGalaxyShape, type MapSize } from '../game/types';
 import { normalizePlanetMultipliers } from '../game/planetMultipliers';
 import { normalizeVisibility } from '../game/visibility';
+import { resolveFlexibleMovement } from './playAgain';
 import {
   generateInitialGameState,
   type GameConfig,
@@ -62,6 +63,7 @@ export async function startMatchmakingFromLobby(
     galaxyShape: isGalaxyShape(map.galaxyShape) ? map.galaxyShape : undefined,
     visibility: normalizeVisibility(map.visibility),
     planetMultipliers: normalizePlanetMultipliers(map.planetMultipliers),
+    flexibleMovement: resolveFlexibleMovement(map.flexibleMovement),
     playMode: 'asyncMultiplayer',
   };
   const seed = typeof map.seed === 'number' ? map.seed : Date.now();

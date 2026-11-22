@@ -36,6 +36,7 @@ export interface ApiMapConfig {
   galaxyShape?: string;
   visibility?: string;
   planetMultipliers?: string;
+  flexibleMovement?: string;
 }
 
 export interface ApiGame {
@@ -101,6 +102,9 @@ export interface InProgressTurnPayload {
     fromPlanetId: string;
     toPlanetId: string;
     shipCount: number;
+    stops?: Array<{ x: number; y: number; planetId?: string }>;
+    holdFleetId?: string;
+    redirectFleetId?: string;
   }>;
 }
 
@@ -131,6 +135,7 @@ export interface CreateGamePayload {
     galaxyShape?: string;
     visibility?: string;
     planetMultipliers?: string;
+    flexibleMovement?: string;
   };
   playerSlots: Array<{
     type: 'human' | 'ai';

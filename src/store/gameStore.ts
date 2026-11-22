@@ -31,9 +31,11 @@ import type {
   GameState,
   MapSize,
   Planet,
+  FlexibleMovementMode,
   PlanetMultiplierMode,
   PlayMode,
   Player,
+  RouteVertex,
   ScheduledMovement,
   TurnEvent,
   VisibilityMode,
@@ -84,6 +86,8 @@ export interface GameConfig {
   visibility?: VisibilityMode;
   /** Absent on older games, which play with no multiplied planets. */
   planetMultipliers?: PlanetMultiplierMode;
+  /** Absent on older games, which fly straight from planet to planet. */
+  flexibleMovement?: FlexibleMovementMode;
   playMode: PlayMode;
 }
 
@@ -124,6 +128,32 @@ export interface PendingFleet {
   fromPlanetId: string;
   toPlanetId: string;
   shipCount: number;
+  /** Path after the origin planet. Absent for a straight flight. */
+  stops?: RouteVertex[];
+  /** Stop this in-flight fleet where it is. */
+  holdFleetId?: string;
+  /** Replace the rest of this fleet's path. */
+  redirectFleetId?: string;
+}
+
+function pendingOrderToAction(order: PendingFleet): PlayerAction {
+  if (order.holdFleetId !== undefined) {
+    return { type: 'HOLD_FLEET', fleetId: order.holdFleetId };
+  }
+  if (order.redirectFleetId !== undefined) {
+    return {
+      type: 'REDIRECT_FLEET',
+      fleetId: order.redirectFleetId,
+      stops: order.stops ?? [],
+    };
+  }
+  return {
+    type: 'SEND_FLEET',
+    fromPlanetId: order.fromPlanetId,
+    toPlanetId: order.toPlanetId,
+    shipCount: order.shipCount,
+    ...(order.stops !== undefined && order.stops.length > 0 ? { stops: order.stops } : {}),
+  };
 }
 
 export type QueueBuildOrderResult =
@@ -193,6 +223,7 @@ export interface GameStore {
     fromPlanetId: string,
     toPlanetId: string,
     amount: number | 'all',
+    stops?: RouteVertex[],
   ) => void;
   scheduleSendAll: (fromPlanetIds: string[], toPlanetId: string) => void;
   cancelScheduledMovement: (id: string) => void;
@@ -239,7 +270,7 @@ function drainStaleFleets(state: GameState): GameState {
   return {
     ...state,
     // drain stale turnsRemaining=0 fleets that may have persisted before the fix
-    fleets: state.fleets.filter((fleet) => fleet.turnsRemaining > 0),
+    fleets: state.fleets.filter((fleet) => fleet.holding === true || fleet.turnsRemaining > 0),
   };
 }
 
@@ -1057,6 +1088,7 @@ export function generateInitialGameState(config: GameConfig, seed: number): Game
     playMode: config.playMode,
     visibility: config.visibility === 'fog' ? 'fog' : 'classic',
     planetMultipliers,
+    flexibleMovement: config.flexibleMovement === 'on' ? 'on' : 'off',
     status: 'active',
     winnerId: null,
     scheduledMovements: [],
@@ -1276,6 +1308,7 @@ export const useGameStore = create<GameStore>()(
           planetCount: state.map.planets.length,
           visibility: state.visibility === 'fog' ? 'fog' : 'classic',
           planetMultipliers: state.planetMultipliers === 'on' ? 'on' : 'off',
+          flexibleMovement: state.flexibleMovement === 'on' ? 'on' : 'off',
         },
         pendingTurnReport: detail.latestEvents?.length ? detail.latestEvents : undefined,
         pendingTurnReportAcknowledged: false,
@@ -1325,6 +1358,9 @@ export const useGameStore = create<GameStore>()(
         fromPlanetId: order.fromPlanetId,
         toPlanetId: order.toPlanetId,
         shipCount: order.shipCount,
+        ...(order.stops !== undefined ? { stops: order.stops } : {}),
+        ...(order.holdFleetId !== undefined ? { holdFleetId: order.holdFleetId } : {}),
+        ...(order.redirectFleetId !== undefined ? { redirectFleetId: order.redirectFleetId } : {}),
       }));
     } else {
       state = JSON.parse(detail.stateJson) as GameState;
@@ -1362,6 +1398,7 @@ export const useGameStore = create<GameStore>()(
         planetCount: state.map.planets.length,
         visibility: state.visibility === 'fog' ? 'fog' : 'classic',
         planetMultipliers: state.planetMultipliers === 'on' ? 'on' : 'off',
+        flexibleMovement: state.flexibleMovement === 'on' ? 'on' : 'off',
       },
     };
     const { games } = get();
@@ -1706,7 +1743,7 @@ export const useGameStore = create<GameStore>()(
     });
   },
 
-  upsertScheduledMovement: (fromPlanetId, toPlanetId, amount) => {
+  upsertScheduledMovement: (fromPlanetId, toPlanetId, amount, stops) => {
     const record = get().getActiveRecord();
     if (record === null) {
       return;
@@ -1714,24 +1751,27 @@ export const useGameStore = create<GameStore>()(
     const gameState = record.state;
     const currentPlayerId = gameState.currentPlayerId;
     const origin = gameState.map.planets.find((p) => p.id === fromPlanetId);
-    const destination = gameState.map.planets.find((p) => p.id === toPlanetId);
-    if (
-      origin === undefined ||
-      destination === undefined ||
-      origin.owner !== currentPlayerId ||
-      fromPlanetId === toPlanetId
-    ) {
+    const destination =
+      toPlanetId.length > 0
+        ? gameState.map.planets.find((p) => p.id === toPlanetId)
+        : undefined;
+    const pathStops = stops !== undefined && stops.length > 0 ? stops : undefined;
+    if (origin === undefined || origin.owner !== currentPlayerId) {
+      return;
+    }
+    if (pathStops === undefined && (destination === undefined || fromPlanetId === toPlanetId)) {
       return;
     }
     const normalizedAmount: ScheduledMovement['amount'] =
       amount === 'all' ? 'all' : Math.max(1, Math.floor(amount));
-    const id = scheduledMovementId(fromPlanetId, toPlanetId);
+    const id = scheduledMovementId(fromPlanetId, toPlanetId, pathStops);
     const nextMovement: ScheduledMovement = {
       id,
       ownerId: currentPlayerId,
       fromPlanetId,
-      toPlanetId,
+      toPlanetId: pathStops?.[pathStops.length - 1]?.planetId ?? toPlanetId,
       amount: normalizedAmount,
+      ...(pathStops !== undefined ? { stops: pathStops } : {}),
     };
     const existing = gameState.scheduledMovements ?? [];
     const withoutPair = existing.filter((movement) => movement.id !== id);
@@ -1961,12 +2001,7 @@ export const useGameStore = create<GameStore>()(
     const { queuedOrders: queuedOrdersSnapshot } = get();
     const input = {
       actions: [
-        ...queuedOrdersSnapshot.map((o) => ({
-          type: 'SEND_FLEET' as const,
-          fromPlanetId: o.fromPlanetId,
-          toPlanetId: o.toPlanetId,
-          shipCount: o.shipCount,
-        })),
+        ...queuedOrdersSnapshot.map((order) => pendingOrderToAction(order)),
         { type: 'END_TURN' as const },
       ],
       playerId: humanPlayer.id,
@@ -2137,12 +2172,7 @@ export const useGameStore = create<GameStore>()(
     }
 
     const submitActions = [
-      ...queuedOrdersSnapshot.map((o) => ({
-        type: 'SEND_FLEET' as const,
-        fromPlanetId: o.fromPlanetId,
-        toPlanetId: o.toPlanetId,
-        shipCount: o.shipCount,
-      })),
+      ...queuedOrdersSnapshot.map((order) => pendingOrderToAction(order)),
       { type: 'END_TURN' as const },
     ];
 

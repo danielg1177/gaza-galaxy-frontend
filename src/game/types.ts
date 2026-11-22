@@ -100,6 +100,31 @@ export type VisibilityMode = 'classic' | 'fog';
 /** Off leaves every planet at normal cost and output. On marks about one in ten. */
 export type PlanetMultiplierMode = 'off' | 'on';
 
+/**
+ * Off keeps straight planet-to-planet flights.
+ * On spends the same research range as fuel along a path that can bend, stop, and redirect.
+ */
+export type FlexibleMovementMode = 'off' | 'on';
+
+export function flexibleMovementEnabled(
+  value: FlexibleMovementMode | undefined,
+): boolean {
+  return value === 'on';
+}
+
+/** A corner or stop on a fleet path. `planetId` is set when the vertex is a planet. */
+export interface RouteVertex {
+  x: number;
+  y: number;
+  planetId?: string;
+}
+
+/** Polyline a fleet is flying. Distance is in clicks from the first vertex. */
+export interface FleetCourse {
+  vertices: RouteVertex[];
+  distanceTraveled: number;
+}
+
 export const GALAXY_SHAPES = [
   'scattered',
   'dense_core',
@@ -208,6 +233,11 @@ export interface ScheduledMovement {
   toPlanetId: string;
   /** Fixed troop count, or `'all'` to send the entire garrison each turn. */
   amount: number | 'all';
+  /**
+   * Path after the origin planet. Absent on a straight planet-to-planet order.
+   * The last vertex is a planet when `planetId` is set, and a space stop otherwise.
+   */
+  stops?: RouteVertex[];
 }
 
 /**
@@ -223,6 +253,19 @@ export interface Fleet {
   /** Total turns from dispatch to arrival (same value as turnsRemaining at creation). */
   totalTurns: number;
   dispatchedInRound: number;
+  /**
+   * Set when flexible movement plotted this flight. Absent on straight classic fleets.
+   * The first vertex is where the current order started.
+   */
+  course?: FleetCourse;
+  /** Share of a full tank still unused, from 0 to 1. */
+  fuelFraction?: number;
+  /** Research range that spends fuel for the order now being flown. */
+  orderRange?: number;
+  /** Clicks this order moves per round. */
+  orderSpeed?: number;
+  /** Sitting at a space point with no path left. */
+  holding?: boolean;
 }
 
 /**
@@ -324,6 +367,8 @@ export interface GameState {
   visibility?: VisibilityMode;
   /** Absent on older saves. Treated as off, so no planet carries a multiplier. */
   planetMultipliers?: PlanetMultiplierMode;
+  /** Absent on older saves. Treated as off, so fleets fly straight from planet to planet. */
+  flexibleMovement?: FlexibleMovementMode;
   status: 'active' | 'finished';
   winnerId: string | null;
   /** Persistent fog-of-war brain state for each AI player. Keyed by player id. */
