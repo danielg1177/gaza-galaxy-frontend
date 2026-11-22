@@ -239,4 +239,107 @@ assert.deepEqual(
   ['left-earlier', 'own-now'],
 );
 
+const shipAtTwenty = {
+  id: 'mid-flight',
+  ownerId: 'viewer',
+  shipCount: 3,
+  originPlanetId: 'home',
+  destinationPlanetId: 'route-end',
+  turnsRemaining: 2,
+  totalTurns: 4,
+  dispatchedInRound: 1,
+} satisfies Fleet;
+const routeEnd = planet({ id: 'route-end', position: { x: 40, y: 0 }, owner: 'neutral', shipCount: 1 });
+const besideShip = planet({ id: 'beside-ship', position: { x: 25, y: 0 }, owner: 'enemy', shipCount: 6, class: 'B' });
+const pastShipTech0 = planet({ id: 'past-ship', position: { x: 26, y: 0 }, owner: 'enemy', shipCount: 5 });
+const fromShip = applyVisibility(
+  state([home, routeEnd, besideShip, pastShipTech0], [shipAtTwenty], 'fog', 0),
+  'viewer',
+);
+assert.equal(fromShip.map.planets.find((item) => item.id === 'beside-ship')?.fogSight, 'scouted');
+assert.equal(fromShip.map.planets.find((item) => item.id === 'beside-ship')?.owner, 'enemy');
+assert.equal(fromShip.map.planets.find((item) => item.id === 'beside-ship')?.shipCount, 6);
+assert.equal(fromShip.map.planets.find((item) => item.id === 'past-ship')?.fogSight, 'hidden');
+assert.equal(fromShip.map.planets.find((item) => item.id === 'route-end')?.fogSight, 'hidden');
+assert.equal(
+  classifyPlanetSight(
+    state([home, routeEnd, besideShip], [shipAtTwenty], 'fog', 0),
+    'viewer',
+    besideShip,
+  ),
+  'scouted',
+);
+
+const stillHome = {
+  ...shipAtTwenty,
+  id: 'still-home',
+  turnsRemaining: 4,
+  totalTurns: 4,
+} satisfies Fleet;
+const unmoved = applyVisibility(
+  state([home, besideShip], [stillHome], 'fog', 0),
+  'viewer',
+);
+assert.equal(unmoved.map.planets.find((item) => item.id === 'beside-ship')?.fogSight, 'hidden');
+
+const parked = {
+  id: 'parked',
+  ownerId: 'viewer',
+  shipCount: 3,
+  originPlanetId: 'home',
+  destinationPlanetId: 'home',
+  turnsRemaining: 1,
+  totalTurns: 1,
+  dispatchedInRound: 1,
+  holding: true,
+  course: {
+    vertices: [
+      { x: 0, y: 0, planetId: 'home' },
+      { x: 20, y: 0 },
+    ],
+    distanceTraveled: 20,
+  },
+} satisfies Fleet;
+const parkedView = applyVisibility(
+  state([home, besideShip], [parked], 'fog', 0),
+  'viewer',
+);
+assert.equal(parkedView.map.planets.find((item) => item.id === 'beside-ship')?.fogSight, 'scouted');
+assert.equal(parkedView.map.planets.find((item) => item.id === 'beside-ship')?.owner, 'enemy');
+assert.equal(parkedView.map.planets.find((item) => item.id === 'beside-ship')?.shipCount, 6);
+
+const atShipCap = planet({ id: 'ship-cap', position: { x: 27, y: 0 }, owner: 'enemy', shipCount: 2 });
+const pastShipCap = planet({ id: 'past-ship-cap', position: { x: 27.01, y: 0 }, owner: 'enemy', shipCount: 2 });
+const cappedShip = applyVisibility(
+  state([home, routeEnd, atShipCap, pastShipCap], [shipAtTwenty], 'fog', 10),
+  'viewer',
+);
+assert.equal(cappedShip.map.planets.find((item) => item.id === 'ship-cap')?.fogSight, 'scouted');
+assert.equal(cappedShip.map.planets.find((item) => item.id === 'past-ship-cap')?.fogSight, 'hidden');
+
+const enemyByShip = {
+  id: 'enemy-by-ship',
+  ownerId: 'enemy',
+  shipCount: 8,
+  originPlanetId: 'route-end',
+  destinationPlanetId: 'home',
+  turnsRemaining: 2,
+  totalTurns: 4,
+  dispatchedInRound: 1,
+} satisfies Fleet;
+const enemyPastShip = {
+  ...enemyByShip,
+  id: 'enemy-past-ship',
+  turnsRemaining: 3,
+  totalTurns: 4,
+} satisfies Fleet;
+const fleetsFromShip = applyVisibility(
+  state([home, routeEnd], [shipAtTwenty, enemyByShip, enemyPastShip], 'fog', 0),
+  'viewer',
+);
+assert.deepEqual(
+  fleetsFromShip.fleets.map((fleet) => fleet.id).sort(),
+  ['enemy-by-ship', 'mid-flight'],
+);
+
 console.log('visibility checks passed');

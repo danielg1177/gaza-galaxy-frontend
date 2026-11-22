@@ -6,8 +6,11 @@ export function normalizeVisibility(value: string | undefined | null): Visibilit
   return value === 'fog' ? 'fog' : 'classic';
 }
 
-/** Fog never reveals farther than this, even when fleet speed is higher. */
+/** Fog never reveals farther than this from an owned planet, even when fleet speed is higher. */
 export const MAX_VISIBILITY_CLICKS = 15;
+
+/** Fog from a ship in space stops growing at 7 clicks. */
+export const MAX_SHIP_VISIBILITY_CLICKS = 7;
 
 /**
  * How far Fog can see from an owned planet.
@@ -15,6 +18,14 @@ export const MAX_VISIBILITY_CLICKS = 15;
  */
 export function oneTurnReachClicks(techLevel: number): number {
   return Math.min(MAX_VISIBILITY_CLICKS, effectiveSpeed(techLevel));
+}
+
+/**
+ * How far Fog can see from one of the viewer's ships in space.
+ * One turn of fleet speed, and never more than 7 clicks.
+ */
+export function shipSightClicks(techLevel: number): number {
+  return Math.min(MAX_SHIP_VISIBILITY_CLICKS, effectiveSpeed(techLevel));
 }
 
 export function isWithinOneTurn(from: Position, to: Position, reachClicks: number): boolean {
@@ -56,13 +67,33 @@ export function classifyPlanetSight(
   if (planet.owner === viewingPlayerId) {
     return 'owned';
   }
+  return positionInFogSight(state, viewingPlayerId, planet.position) ? 'scouted' : 'hidden';
+}
+
+/**
+ * True when `position` is within fog sight of a planet the viewer owns,
+ * or within the shorter ship sight of one of the viewer's fleets in space.
+ */
+function positionInFogSight(
+  state: GameState,
+  viewingPlayerId: string,
+  position: Position,
+): boolean {
   const viewer = state.players.find((player) => player.id === viewingPlayerId);
-  const reach = oneTurnReachClicks(viewer?.techLevel ?? 0);
+  const techLevel = viewer?.techLevel ?? 0;
+  const planetReach = oneTurnReachClicks(techLevel);
   const owned = state.map.planets.filter((candidate) => candidate.owner === viewingPlayerId);
-  const scouted = owned.some((ownedPlanet) =>
-    isWithinOneTurn(ownedPlanet.position, planet.position, reach),
-  );
-  return scouted ? 'scouted' : 'hidden';
+  if (owned.some((ownedPlanet) => isWithinOneTurn(ownedPlanet.position, position, planetReach))) {
+    return true;
+  }
+  const shipReach = shipSightClicks(techLevel);
+  return state.fleets.some((fleet) => {
+    if (fleet.ownerId !== viewingPlayerId || fleetStillAtLaunchOrigin(fleet)) {
+      return false;
+    }
+    const fleetPosition = fleetClickPosition(fleet, state.map.planets);
+    return fleetPosition !== null && isWithinOneTurn(fleetPosition, position, shipReach);
+  });
 }
 
 /**
@@ -166,11 +197,8 @@ export function applyVisibility(state: GameState, viewingPlayerId: string): Game
   }
 
   const concealed = concealSameRoundDepartures(state, viewingPlayerId);
-  const viewer = concealed.players.find((player) => player.id === viewingPlayerId);
-  const reach = oneTurnReachClicks(viewer?.techLevel ?? 0);
-  const owned = concealed.map.planets.filter((planet) => planet.owner === viewingPlayerId);
   const inSight = (position: Position) =>
-    owned.some((ownedPlanet) => isWithinOneTurn(ownedPlanet.position, position, reach));
+    positionInFogSight(concealed, viewingPlayerId, position);
 
   return {
     ...concealed,

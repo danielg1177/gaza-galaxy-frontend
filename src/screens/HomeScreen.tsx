@@ -1883,7 +1883,7 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={styles.settingHelpLine}>
                   <Text style={styles.settingHelpOption}>Fog. </Text>
-                  Class, owner, and troop counts show only within one turn of your planets, up to 15 clicks. Enemy fleets appear, with owner and size, when they fly that close. Ships sent earlier in the same round stay hidden until the round ends.
+                  Class, owner, and troop counts show within one turn of your planets, up to 15 clicks, and within one turn of your ships in space, up to 7 clicks. Enemy fleets appear, with owner and size, when they fly that close. Ships sent earlier in the same round stay hidden until the round ends.
                 </Text>
               </View>
             )}

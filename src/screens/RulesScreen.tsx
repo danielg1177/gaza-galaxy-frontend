@@ -88,7 +88,7 @@ export default function RulesScreen() {
             Classic shows the class of every planet. Enemy fleets in transit stay hidden. You only see your own ships moving across the galaxy.
           </Text>
           <Text style={styles.bodyText}>
-            Fog shows a planet's class only when you own it, or when it is within one turn of travel of a planet you own. One turn is how far your fleets move at your current speed, and sight stops at 15 clicks. A planet that close also shows who holds it and how many troops are there. Farther planets keep their name and position, and their class is unknown. An enemy fleet is shown, with its owner and troop count, when its current position is within one turn of one of your planets. Ships sent earlier in the same round still look like they are on their planet until the round ends, so turn order does not reveal who has already moved.
+            Fog shows a planet's class when you own it, when it is within one turn of travel of a planet you own, or when it is within one turn of your ships in space. One turn is how far your fleets move at your current speed. Sight from a planet stops at 15 clicks, and sight from a ship in space stops at 7 clicks. A planet that close also shows who holds it and how many troops are there. Farther planets keep their name and position, and their class is unknown. An enemy fleet is shown, with its owner and troop count, when its current position is inside that same sight. Ships sent earlier in the same round still look like they are on their planet until the round ends, so turn order does not reveal who has already moved.
           </Text>
         </View>
 
