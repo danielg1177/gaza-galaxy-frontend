@@ -80,10 +80,12 @@ The planet modal shows `Alert.alert` ("Demolish building?", no-refund warning) b
 
 ## Production slider
 
-Each owned planet has `productionSlider` in `[0, 1]` (default `0.5` at generation). Both the engine and the planet-modal label use `computeFactoryOutputs(factories, class, productionSlider)`:
+Each owned planet has `productionSlider` in `[0, 1]` (default `0.5` at generation). Both the engine and the planet-modal label use `computeFactoryOutputs(factories, class, productionSlider, outputMultiplier)`:
 
-- **Troops:** `rawTroopOutput = roundToTenth(factories × FACTORY_TROOP_OUTPUT[class] × productionSlider)`
-- **Gold:** `rawGoldOutput = roundToTenth(factories × FACTORY_GOLD_OUTPUT[class] × (1 - productionSlider))`
+- **Troops:** `rawTroopOutput = roundToTenth(factories × FACTORY_TROOP_OUTPUT[class] × productionSlider × outputMultiplier)`
+- **Gold:** `rawGoldOutput = roundToTenth(factories × FACTORY_GOLD_OUTPUT[class] × (1 - productionSlider) × outputMultiplier)`
+
+`outputMultiplier` defaults to `1`. Rounding always happens **after** the multiplier so boosted planets still show/credit nearest tenths (not hundredths).
 
 `roundToTenth(value)` is `Math.round(value * 10) / 10`. That is the same one-decimal rounding the slider used to apply only at display time via `.toFixed(1)`, so a label of `4.0 troops/turn` is the value added to the accumulator (not an unrounded `3.96` that then floors to 3).
 

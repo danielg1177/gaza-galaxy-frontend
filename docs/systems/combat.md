@@ -164,7 +164,9 @@ When an attacker wins combat on a defender's `homePlanetId`, `resolveArrival` tr
 
 The captured home planet keeps the attacker's garrison (`owner = fleet.ownerId`, `shipCount = remainingShips`).
 
-`turnEngine` also re-checks home ownership after each turn as a safety net (`isEliminated` when home is not owned by the player), but forfeiture and fleet removal happen only in `combatEngine`.
+Same-batch arrivals for that eliminated owner later in `applyArrivalsAtDestinations` are discarded (they must not re-capture after forfeit). After each arrival phase, and again after the end-of-turn `isEliminated` safety-net remap, `turnEngine` re-runs `forfeitEliminatedPlayerPlanets` for every eliminated player and strips their leftover fleets.
+
+`turnEngine` also re-checks home ownership after each turn as a safety net (`isEliminated` when home is not owned by the player).
 
 ### Battle report UI (Task 125)
 When `resolveArrival` emits a combat event with `isHomePlanetConquest: true`, the **Battle Report** modal in `GameScreen` sorts those cards to the top. If the local human player was the winning attacker, the card shows a bold blue banner **"You took their home planet!"** (`#2255cc`) and a blue-tinted card (`#e8eeff` background, `#2255cc` left border) instead of the standard victory green.

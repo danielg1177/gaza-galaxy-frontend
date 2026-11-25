@@ -83,12 +83,13 @@ export function computeFactoryOutputs(
   productionSlider: number,
   outputMultiplier = 1,
 ): { troops: number; gold: number } {
-  const round = outputMultiplier === 1 ? roundToTenth : roundToHundredth;
+  // Round after the multiplier so the slider label and credit stay on tenths
+  // (e.g. 1 × A × 1 × 1.25 → 1.3), not hundredths of a pre-boosted product.
   return {
-    troops: round(
+    troops: roundToTenth(
       factories * FACTORY_TROOP_OUTPUT[planetClass] * productionSlider * outputMultiplier,
     ),
-    gold: round(
+    gold: roundToTenth(
       factories * FACTORY_GOLD_OUTPUT[planetClass] * (1 - productionSlider) * outputMultiplier,
     ),
   };

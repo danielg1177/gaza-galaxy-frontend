@@ -1,5 +1,10 @@
 import { updateAiObservation } from './aiEngine';
-import { resolveArrival, resolveMultiwayCombat, type MultiwayCombatant } from './combatEngine';
+import {
+  forfeitEliminatedPlayerPlanets,
+  resolveArrival,
+  resolveMultiwayCombat,
+  type MultiwayCombatant,
+} from './combatEngine';
 import { mulberry32 } from './mapGenerator';
 import {
   advanceFleets,
@@ -180,6 +185,127 @@ function nextNonEliminatedPlayerId(players: Player[], currentPlayerId: string): 
   }
 
   return currentPlayerId;
+}
+
+function isPlayerEliminated(players: Player[], playerId: string): boolean {
+  return players.some((player) => player.id === playerId && player.isEliminated);
+}
+
+/** Neutralize every planet still held by any eliminated player (buildings intact). */
+function forfeitAllEliminatedPlayers(map: GameMap, players: Player[]): GameMap {
+  let next = map;
+  for (const player of players) {
+    if (player.isEliminated) {
+      next = forfeitEliminatedPlayerPlanets(next, player.id);
+    }
+  }
+  return next;
+}
+
+function livingOwnerFleets(fleets: Fleet[], players: Player[]): Fleet[] {
+  return fleets.filter((fleet) => !isPlayerEliminated(players, fleet.ownerId));
+}
+
+/**
+ * Resolve arrivals one destination at a time. Home-planet elimination can mark an
+ * owner mid-batch; discard their later fleets and re-forfeit after the pass so
+ * they cannot keep same-turn conquests.
+ */
+function applyArrivalsAtDestinations(
+  arrivalsByDest: Map<string, Fleet[]>,
+  map: GameMap,
+  players: Player[],
+  fleetsInTransit: Fleet[],
+  seed: number,
+  roundNumber: number,
+  events: TurnEvent[],
+  combatRngCounterStart: number,
+): {
+  map: GameMap;
+  players: Player[];
+  fleets: Fleet[];
+  combatRngCounter: number;
+} {
+  let nextMap = map;
+  let nextPlayers = players;
+  let nextFleets = fleetsInTransit;
+  let combatRngCounter = combatRngCounterStart;
+
+  for (const [destPlanetId, destFleets] of arrivalsByDest) {
+    const activeFleets = livingOwnerFleets(destFleets, nextPlayers);
+    if (activeFleets.length === 0) {
+      continue;
+    }
+
+    const destPlanet = findPlanet(nextMap, destPlanetId);
+    const totalCombatants = countTotalCombatants(activeFleets, destPlanet);
+
+    if (totalCombatants >= 3) {
+      const combatants = buildCombatantList(activeFleets, destPlanet);
+      const combatRng = mulberry32(hashSeed(seed + roundNumber * 10000 + combatRngCounter * 100));
+      combatRngCounter += 1;
+      const result = resolveMultiwayCombat(
+        combatRng,
+        combatants,
+        nextMap,
+        destPlanetId,
+        roundNumber,
+        events,
+        nextPlayers,
+        nextFleets,
+      );
+      nextMap = result.map;
+      if (result.players !== undefined) {
+        nextPlayers = result.players;
+      }
+      if (result.fleets !== undefined) {
+        nextFleets = result.fleets;
+      }
+    } else {
+      for (let i = 0; i < activeFleets.length; i++) {
+        const fleet = activeFleets[i];
+        if (isPlayerEliminated(nextPlayers, fleet.ownerId)) {
+          continue;
+        }
+        const destP = findPlanet(nextMap, fleet.destinationPlanetId);
+        const nextFleet = activeFleets[i + 1];
+        const isSilentReinforcement =
+          destP !== undefined &&
+          fleet.ownerId === destP.owner &&
+          nextFleet !== undefined &&
+          nextFleet.destinationPlanetId === fleet.destinationPlanetId &&
+          !isPlayerEliminated(nextPlayers, nextFleet.ownerId);
+        const combatRng = mulberry32(hashSeed(seed + roundNumber * 10000 + combatRngCounter * 100));
+        combatRngCounter += 1;
+        const arrivalResult = resolveArrival(
+          combatRng,
+          fleet,
+          nextMap,
+          roundNumber,
+          isSilentReinforcement ? undefined : events,
+          nextPlayers,
+          nextFleets,
+        );
+        nextMap = arrivalResult.map;
+        if (arrivalResult.players !== undefined) {
+          nextPlayers = arrivalResult.players;
+        }
+        if (arrivalResult.fleets !== undefined) {
+          nextFleets = arrivalResult.fleets;
+        }
+      }
+    }
+  }
+
+  nextMap = forfeitAllEliminatedPlayers(nextMap, nextPlayers);
+  nextFleets = livingOwnerFleets(nextFleets, nextPlayers);
+
+  return {
+    map: nextMap,
+    players: nextPlayers,
+    fleets: nextFleets,
+    combatRngCounter,
+  };
 }
 
 function clampVertex(vertex: RouteVertex, map: GameMap): RouteVertex {
@@ -899,65 +1025,20 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     }
   }
 
-  const arrivalsByDest = groupArrivalsByDestination(eligibleArrivals, map);
-  for (const [destPlanetId, destFleets] of arrivalsByDest) {
-    const destPlanet = findPlanet(map, destPlanetId);
-    const totalCombatants = countTotalCombatants(destFleets, destPlanet);
-
-    if (totalCombatants >= 3) {
-      const combatants = buildCombatantList(destFleets, destPlanet);
-      const combatRng = mulberry32(hashSeed(state.seed + state.roundNumber * 10000 + combatRngCounter * 100));
-      combatRngCounter += 1;
-      const result = resolveMultiwayCombat(
-        combatRng,
-        combatants,
-        map,
-        destPlanetId,
-        state.roundNumber,
-        events,
-        players,
-        stillInTransit,
-      );
-      map = result.map;
-      if (result.players !== undefined) {
-        players = result.players;
-      }
-      if (result.fleets !== undefined) {
-        stillInTransit = result.fleets;
-      }
-    } else {
-      for (let i = 0; i < destFleets.length; i++) {
-        const fleet = destFleets[i];
-        const destP = findPlanet(map, fleet.destinationPlanetId);
-        const nextFleet = destFleets[i + 1];
-        const isSilentReinforcement =
-          destP !== undefined &&
-          fleet.ownerId === destP.owner &&
-          nextFleet !== undefined &&
-          nextFleet.destinationPlanetId === fleet.destinationPlanetId;
-        const combatRng = mulberry32(hashSeed(state.seed + state.roundNumber * 10000 + combatRngCounter * 100));
-        combatRngCounter += 1;
-        const arrivalResult = resolveArrival(
-          combatRng,
-          fleet,
-          map,
-          state.roundNumber,
-          isSilentReinforcement ? undefined : events,
-          players,
-          stillInTransit,
-        );
-        map = arrivalResult.map;
-        if (arrivalResult.players !== undefined) {
-          players = arrivalResult.players;
-        }
-        if (arrivalResult.fleets !== undefined) {
-          stillInTransit = arrivalResult.fleets;
-        }
-      }
-    }
-  }
-
-  fleets = stillInTransit;
+  const early = applyArrivalsAtDestinations(
+    groupArrivalsByDestination(eligibleArrivals, map),
+    map,
+    players,
+    stillInTransit,
+    state.seed,
+    state.roundNumber,
+    events,
+    combatRngCounter,
+  );
+  map = early.map;
+  players = early.players;
+  fleets = early.fleets;
+  combatRngCounter = early.combatRngCounter;
   let scheduledMovements = pruneScheduledMovements(
     state.scheduledMovements ?? [],
     map,
@@ -1042,6 +1123,10 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     const isEliminated = home === undefined || home.owner !== player.id;
     return { ...player, isEliminated };
   });
+  // Safety net only flips flags above; sweep planets/fleets so a home lost
+  // without combat-time forfeit cannot leave a zombie empire.
+  map = forfeitAllEliminatedPlayers(map, players);
+  fleets = livingOwnerFleets(fleets, players);
 
   let status: GameState['status'] = state.status;
   let winnerId: string | null = state.winnerId;
@@ -1077,64 +1162,20 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
     }
 
     const { inTransit, arrived } = advanceFleets(fleets);
-    fleets = inTransit;
-    const arrivalsByDest = groupArrivalsByDestination(arrived, map);
-    for (const [destPlanetId, destFleets] of arrivalsByDest) {
-      const destPlanet = findPlanet(map, destPlanetId);
-      const totalCombatants = countTotalCombatants(destFleets, destPlanet);
-
-      if (totalCombatants >= 3) {
-        const combatants = buildCombatantList(destFleets, destPlanet);
-        const combatRng = mulberry32(hashSeed(state.seed + state.roundNumber * 10000 + combatRngCounter * 100));
-        combatRngCounter += 1;
-        const result = resolveMultiwayCombat(
-          combatRng,
-          combatants,
-          map,
-          destPlanetId,
-          state.roundNumber,
-          events,
-          players,
-          fleets,
-        );
-        map = result.map;
-        if (result.players !== undefined) {
-          players = result.players;
-        }
-        if (result.fleets !== undefined) {
-          fleets = result.fleets;
-        }
-      } else {
-        for (let i = 0; i < destFleets.length; i++) {
-          const fleet = destFleets[i];
-          const destP = findPlanet(map, fleet.destinationPlanetId);
-          const nextFleet = destFleets[i + 1];
-          const isSilentReinforcement =
-            destP !== undefined &&
-            fleet.ownerId === destP.owner &&
-            nextFleet !== undefined &&
-            nextFleet.destinationPlanetId === fleet.destinationPlanetId;
-          const combatRng = mulberry32(hashSeed(state.seed + state.roundNumber * 10000 + combatRngCounter * 100));
-          combatRngCounter += 1;
-          const arrivalResult = resolveArrival(
-            combatRng,
-            fleet,
-            map,
-            state.roundNumber,
-            isSilentReinforcement ? undefined : events,
-            players,
-            fleets,
-          );
-          map = arrivalResult.map;
-          if (arrivalResult.players !== undefined) {
-            players = arrivalResult.players;
-          }
-          if (arrivalResult.fleets !== undefined) {
-            fleets = arrivalResult.fleets;
-          }
-        }
-      }
-    }
+    const late = applyArrivalsAtDestinations(
+      groupArrivalsByDestination(arrived, map),
+      map,
+      players,
+      inTransit,
+      state.seed,
+      state.roundNumber,
+      events,
+      combatRngCounter,
+    );
+    map = late.map;
+    players = late.players;
+    fleets = late.fleets;
+    combatRngCounter = late.combatRngCounter;
     scheduledMovements = pruneScheduledMovements(scheduledMovements, map, players);
   }
 

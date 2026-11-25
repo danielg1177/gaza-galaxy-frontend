@@ -88,8 +88,12 @@ assert.equal(scaledBuildingCost('researchLab', { outputMultiplier: 1.25 }), 313)
 assert.equal(scaledBuildingCost('factory', {}), 200);
 
 const fullTroops = computeFactoryOutputs(1, 'A', 1, 1.25);
-assert.equal(fullTroops.troops, 1.25);
+// Multiplier is applied first, then roundToTenth (1.25 → 1.3).
+assert.equal(fullTroops.troops, 1.3);
 assert.equal(fullTroops.gold, 0);
+const halfBoosted = computeFactoryOutputs(1, 'A', 0.5, 1.5);
+assert.equal(halfBoosted.troops, 0.8);
+assert.equal(halfBoosted.gold, 37.5);
 const plain = computeFactoryOutputs(1, 'A', 1);
 assert.equal(plain.troops, 1);
 assert.equal(plain.gold, 0);
