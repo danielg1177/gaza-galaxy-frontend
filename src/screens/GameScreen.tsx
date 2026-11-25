@@ -1623,12 +1623,12 @@ function ScrollModeToggleIcon({ color }: { color: string }) {
   };
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24">
-      <Line x1="12" y1="6" x2="12" y2="18" {...stroke} />
-      <Line x1="6" y1="12" x2="18" y2="12" {...stroke} />
-      <Path d="M9 7.5 L12 4 L15 7.5" fill="none" {...stroke} />
-      <Path d="M9 16.5 L12 20 L15 16.5" fill="none" {...stroke} />
-      <Path d="M7.5 9 L4 12 L7.5 15" fill="none" {...stroke} />
-      <Path d="M16.5 9 L20 12 L16.5 15" fill="none" {...stroke} />
+      <Line x1="12" y1="9" x2="12" y2="15" {...stroke} />
+      <Line x1="9" y1="12" x2="15" y2="12" {...stroke} />
+      <Path d="M12 3 L9 7 L15 7 Z" fill={color} stroke="none" />
+      <Path d="M12 21 L9 17 L15 17 Z" fill={color} stroke="none" />
+      <Path d="M3 12 L7 9 L7 15 Z" fill={color} stroke="none" />
+      <Path d="M21 12 L17 9 L17 15 Z" fill={color} stroke="none" />
     </Svg>
   );
 }
@@ -7913,12 +7913,17 @@ const styles = StyleSheet.create({
     left: 16,
     width: 44,
     height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.panel,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 42,
   },
   scrollModeToggleActive: {
-    opacity: 1,
+    backgroundColor: '#007a84',
+    borderColor: '#00c9d4',
   },
   boxSelectAboveMenu: {
     zIndex: 42,
