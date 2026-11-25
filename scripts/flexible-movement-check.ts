@@ -177,4 +177,33 @@ const classic = resolveTurn(
 assert.equal(classic.fleets[0].course, undefined);
 assert.equal(classic.fleets[0].turnsRemaining, 3);
 
+const stack: Fleet = {
+  ...half,
+  id: 'stack',
+  shipCount: 5,
+  holding: true,
+};
+const split = resolveTurn(
+  { ...state([home0, home1, far], [stack], 'player-0', 1) },
+  {
+    playerId: 'player-0',
+    actions: [
+      {
+        type: 'SPLIT_FLEET',
+        fleetId: 'stack',
+        shipCount: 2,
+        stops: [{ x: 5, y: 6.5, planetId: undefined }],
+      },
+      { type: 'END_TURN' },
+    ],
+  },
+);
+const remainder = split.fleets.find((fleet) => fleet.id === 'stack');
+const peeled = split.fleets.find((fleet) => fleet.id !== 'stack');
+assert.equal(remainder?.shipCount, 3);
+assert.equal(remainder?.holding, true);
+assert.equal(peeled?.shipCount, 2);
+assert.equal(peeled?.holding, false);
+assert.ok((peeled?.course?.vertices.length ?? 0) >= 2);
+
 console.log('flexible movement checks passed');

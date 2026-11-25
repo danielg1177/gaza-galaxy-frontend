@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
-import type { Fleet, GameState, Planet, Player } from '../src/game/types';
-import { applyVisibility, classifyPlanetSight, oneTurnReachClicks } from '../src/game/visibility';
+import type { Fleet, GameState, Planet, Player, TurnEvent } from '../src/game/types';
+import {
+  applyVisibility,
+  classifyPlanetSight,
+  collectBattleLossRevealIds,
+  oneTurnReachClicks,
+} from '../src/game/visibility';
 
 function planet(partial: Partial<Planet> & Pick<Planet, 'id' | 'position' | 'owner'>): Planet {
   return {
@@ -340,6 +345,41 @@ const fleetsFromShip = applyVisibility(
 assert.deepEqual(
   fleetsFromShip.fleets.map((fleet) => fleet.id).sort(),
   ['enemy-by-ship', 'mid-flight'],
+);
+
+const lostFight: TurnEvent = {
+  kind: 'combat',
+  planetName: 'far',
+  planetId: 'far',
+  attackerName: 'viewer',
+  defenderName: 'enemy',
+  attackerWon: false,
+  attackerLost: 5,
+  defenderLost: 1,
+  attackerShipsBefore: 5,
+  defenderShipsBefore: 40,
+  remainingShips: 39,
+};
+const lossRevealIds = collectBattleLossRevealIds(
+  [lostFight],
+  'viewer',
+  state([home, far], [], 'fog').players,
+  state([home, far], [], 'fog'),
+);
+assert.ok(lossRevealIds.has('far'));
+const afterLoss = applyVisibility(
+  state([home, far], [], 'fog'),
+  'viewer',
+  lossRevealIds,
+);
+const revealedFar = afterLoss.map.planets.find((item) => item.id === 'far');
+assert.equal(revealedFar?.fogSight, 'scouted');
+assert.equal(revealedFar?.owner, 'enemy');
+assert.equal(revealedFar?.shipCount, 40);
+assert.equal(revealedFar?.class, 'C');
+assert.equal(
+  classifyPlanetSight(state([home, far], [], 'fog'), 'viewer', far, lossRevealIds),
+  'scouted',
 );
 
 console.log('visibility checks passed');

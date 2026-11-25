@@ -1,5 +1,13 @@
 import { computeClickDistance, effectiveSpeed, fleetMapPosition } from './movementEngine';
-import type { Fleet, GameState, Planet, Position, VisibilityMode } from './types';
+import type {
+  Fleet,
+  GameState,
+  Planet,
+  Player,
+  Position,
+  TurnEvent,
+  VisibilityMode,
+} from './types';
 
 /** Missing or unknown values play as the original rules. */
 export function normalizeVisibility(value: string | undefined | null): VisibilityMode {
@@ -60,6 +68,7 @@ export function classifyPlanetSight(
   state: GameState,
   viewingPlayerId: string,
   planet: Planet,
+  battleLossRevealIds?: ReadonlySet<string>,
 ): PlanetSight {
   if (normalizeVisibility(state.visibility) !== 'fog') {
     return 'classic';
@@ -67,7 +76,64 @@ export function classifyPlanetSight(
   if (planet.owner === viewingPlayerId) {
     return 'owned';
   }
+  if (battleLossRevealIds?.has(planet.id) === true) {
+    return 'scouted';
+  }
   return positionInFogSight(state, viewingPlayerId, planet.position) ? 'scouted' : 'hidden';
+}
+
+/**
+ * Planets the viewer fought and lost this turn. Those stay fog-scouted until
+ * their battle archive clears on a later turn.
+ */
+export function collectBattleLossRevealIds(
+  events: TurnEvent[],
+  viewingPlayerId: string,
+  players: Player[],
+  state: GameState,
+): Set<string> {
+  const viewer = players.find((player) => player.id === viewingPlayerId);
+  if (viewer === undefined) {
+    return new Set();
+  }
+  const ids = new Set<string>();
+  const addPlanet = (planetId: string | undefined, planetName: string | undefined) => {
+    if (planetId !== undefined && planetId.length > 0) {
+      ids.add(planetId);
+      return;
+    }
+    if (planetName === undefined || planetName.length === 0) {
+      return;
+    }
+    const match = state.map.planets.find((planet) => planet.name === planetName);
+    if (match !== undefined) {
+      ids.add(match.id);
+    }
+  };
+
+  for (const event of events) {
+    if (event.kind === 'combat') {
+      const isAttacker = event.attackerName === viewer.name;
+      const isDefender = event.defenderName === viewer.name;
+      if (!isAttacker && !isDefender) {
+        continue;
+      }
+      const lost = isAttacker ? !event.attackerWon : event.attackerWon;
+      if (lost) {
+        addPlanet(event.planetId, event.planetName);
+      }
+      continue;
+    }
+    if (event.kind === 'multiway_combat') {
+      const participant = event.participants.find(
+        (entry) => entry.ownerId === viewingPlayerId || entry.name === viewer.name,
+      );
+      if (participant !== undefined && participant.survived !== true) {
+        addPlanet(event.planetId, event.planetName);
+      }
+    }
+  }
+  return ids;
 }
 
 /**
@@ -169,8 +235,14 @@ function concealEconomy(planet: Planet): Planet {
 /**
  * Client-side view of a match for one player.
  * Does not mutate `state`. Authoritative saves must keep using the unfiltered game.
+ * `battleLossRevealIds` are planet ids the viewer lost a fight on this turn;
+ * those stay scouted even outside normal fog range.
  */
-export function applyVisibility(state: GameState, viewingPlayerId: string): GameState {
+export function applyVisibility(
+  state: GameState,
+  viewingPlayerId: string,
+  battleLossRevealIds: ReadonlySet<string> = new Set(),
+): GameState {
   const scheduledMovements = visibleSchedules(state, viewingPlayerId);
 
   if (normalizeVisibility(state.visibility) !== 'fog') {
@@ -199,6 +271,8 @@ export function applyVisibility(state: GameState, viewingPlayerId: string): Game
   const concealed = concealSameRoundDepartures(state, viewingPlayerId);
   const inSight = (position: Position) =>
     positionInFogSight(concealed, viewingPlayerId, position);
+  const revealed = (planetId: string, position: Position) =>
+    battleLossRevealIds.has(planetId) || inSight(position);
 
   return {
     ...concealed,
@@ -208,7 +282,7 @@ export function applyVisibility(state: GameState, viewingPlayerId: string): Game
         if (planet.owner === viewingPlayerId) {
           return planet;
         }
-        if (!inSight(planet.position)) {
+        if (!revealed(planet.id, planet.position)) {
           return {
             ...concealEconomy(planet),
             fogSight: 'hidden',

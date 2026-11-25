@@ -105,6 +105,7 @@ export interface InProgressTurnPayload {
     stops?: Array<{ x: number; y: number; planetId?: string }>;
     holdFleetId?: string;
     redirectFleetId?: string;
+    splitFleetId?: string;
   }>;
 }
 

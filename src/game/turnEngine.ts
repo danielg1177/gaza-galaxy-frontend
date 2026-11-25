@@ -41,6 +41,12 @@ export type PlayerAction =
     }
   | { type: 'HOLD_FLEET'; fleetId: string }
   | { type: 'REDIRECT_FLEET'; fleetId: string; stops: RouteVertex[] }
+  | {
+      type: 'SPLIT_FLEET';
+      fleetId: string;
+      shipCount: number;
+      stops: RouteVertex[];
+    }
   | { type: 'BUILD'; planetId: string; buildingType: BuildingType }
   | { type: 'SET_PRODUCTION_SLIDER'; planetId: string; value: number }
   | { type: 'END_TURN' };
@@ -422,6 +428,92 @@ function processRedirectFleet(
   return {
     map,
     fleets: fleets.map((candidate) => (candidate.id === fleet.id ? redirected : candidate)),
+  };
+}
+
+/**
+ * Peel some ships onto a new course. The remainder keeps its current
+ * holding state or in-transit path unchanged.
+ */
+function processSplitFleet(
+  map: GameMap,
+  fleets: Fleet[],
+  action: Extract<PlayerAction, { type: 'SPLIT_FLEET' }>,
+  playerId: string,
+  players: Player[],
+  turnNumber: number,
+): { map: GameMap; fleets: Fleet[] } {
+  const fleet = fleets.find((candidate) => candidate.id === action.fleetId);
+  if (fleet === undefined || fleet.ownerId !== playerId) {
+    return { map, fleets };
+  }
+  const ships = Math.max(0, Math.floor(action.shipCount));
+  if (ships < 1) {
+    throw new Error('Split must send at least one ship');
+  }
+  if (ships > fleet.shipCount) {
+    throw new Error(
+      `Cannot split ${ships} ships from fleet; only ${fleet.shipCount} ships`,
+    );
+  }
+  const position = fleetMapPosition(fleet, map.planets);
+  if (position === undefined || position === null) {
+    return { map, fleets };
+  }
+  const player = players.find((candidate) => candidate.id === playerId);
+  const range = effectiveRange(player?.techLevel ?? 0);
+  const speed = effectiveSpeed(player?.techLevel ?? 0);
+  const fuelClicks = (fleet.fuelFraction ?? 1) * range;
+  const start: RouteVertex = { x: position.x, y: position.y };
+  const vertices = [start];
+  for (const stop of action.stops) {
+    const clamped = clampVertex(stop, map);
+    const previous = vertices[vertices.length - 1];
+    if (computeClickDistance(previous, clamped) < 0.05) {
+      continue;
+    }
+    vertices.push(clamped);
+  }
+  assertFuelPath(vertices, fuelClicks);
+  const end = vertices[vertices.length - 1];
+  const peeledBase = createFleet(
+    fleet.ownerId,
+    ships,
+    fleet.originPlanetId,
+    end?.planetId ?? '',
+    1,
+    turnNumber,
+    fleets.length,
+    fleet.dispatchedInRound,
+  );
+  const peeled = attachFlexibleCourse(
+    {
+      ...peeledBase,
+      // Avoid colliding with SEND_FLEET ids that reuse the send-action index.
+      id: `fleet-${turnNumber}-split-${fleets.length}`,
+    },
+    vertices,
+    fleet.fuelFraction ?? 1,
+    range,
+    speed,
+  );
+  const remainingShips = fleet.shipCount - ships;
+  if (remainingShips < 1) {
+    return {
+      map,
+      fleets: [...fleets.filter((candidate) => candidate.id !== fleet.id), peeled],
+    };
+  }
+  const remainder: Fleet = {
+    ...fleet,
+    shipCount: remainingShips,
+  };
+  return {
+    map,
+    fleets: [
+      ...fleets.map((candidate) => (candidate.id === fleet.id ? remainder : candidate)),
+      peeled,
+    ],
   };
 }
 
@@ -893,6 +985,22 @@ export function resolveTurn(state: GameState, input: TurnInput): ResolveTurnResu
 
   const flexible = flexibleMovementEnabled(state.flexibleMovement);
   if (flexible) {
+    // Splits run before hold/redirect so a remainder can still hold or redirect
+    // in the same turn after peels leave.
+    for (const action of input.actions) {
+      if (action.type === 'SPLIT_FLEET') {
+        const split = processSplitFleet(
+          map,
+          fleets,
+          action,
+          input.playerId,
+          players,
+          state.turnNumber,
+        );
+        map = split.map;
+        fleets = split.fleets;
+      }
+    }
     for (const action of input.actions) {
       if (action.type === 'HOLD_FLEET') {
         const held = processHoldFleet(map, fleets, action, input.playerId);

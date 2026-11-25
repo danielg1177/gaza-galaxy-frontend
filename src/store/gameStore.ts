@@ -40,7 +40,7 @@ import type {
   TurnEvent,
   VisibilityMode,
 } from '../game/types';
-import { applyVisibility } from '../game/visibility';
+import { applyVisibility, collectBattleLossRevealIds } from '../game/visibility';
 import { useMemo } from 'react';
 import { showAlert } from '../utils/webAlert';
 import { create } from 'zustand';
@@ -134,6 +134,8 @@ export interface PendingFleet {
   holdFleetId?: string;
   /** Replace the rest of this fleet's path. */
   redirectFleetId?: string;
+  /** Peel this many ships from an existing fleet onto a new course. */
+  splitFleetId?: string;
 }
 
 function pendingOrderToAction(order: PendingFleet): PlayerAction {
@@ -144,6 +146,14 @@ function pendingOrderToAction(order: PendingFleet): PlayerAction {
     return {
       type: 'REDIRECT_FLEET',
       fleetId: order.redirectFleetId,
+      stops: order.stops ?? [],
+    };
+  }
+  if (order.splitFleetId !== undefined) {
+    return {
+      type: 'SPLIT_FLEET',
+      fleetId: order.splitFleetId,
+      shipCount: order.shipCount,
       stops: order.stops ?? [],
     };
   }
@@ -452,8 +462,20 @@ function resolveAsyncLocalPlayerId(
   return getLocalHumanPlayerId(gameState);
 }
 
-function buildVisibleState(state: GameState, viewingPlayerId: string): GameState {
-  return applyVisibility(state, viewingPlayerId);
+function buildVisibleState(
+  state: GameState,
+  viewingPlayerId: string,
+  battleLossRevealIds?: ReadonlySet<string>,
+): GameState {
+  return applyVisibility(state, viewingPlayerId, battleLossRevealIds);
+}
+
+function battleLossRevealIdsForViewer(
+  state: GameState,
+  viewingPlayerId: string,
+): Set<string> {
+  const archive = useGameStore.getState().playerBattleArchiveByPlayerId[viewingPlayerId] ?? [];
+  return collectBattleLossRevealIds(archive, viewingPlayerId, state.players, state);
 }
 
 function visibleStateForRecord(
@@ -474,7 +496,11 @@ function visibleStateForRecord(
   if (viewingPlayerId === undefined) {
     return gameState;
   }
-  return buildVisibleState(gameState, viewingPlayerId);
+  return buildVisibleState(
+    gameState,
+    viewingPlayerId,
+    battleLossRevealIdsForViewer(gameState, viewingPlayerId),
+  );
 }
 
 function stripTurnEvents(result: ResolveTurnResult): GameState {
@@ -1361,6 +1387,7 @@ export const useGameStore = create<GameStore>()(
         ...(order.stops !== undefined ? { stops: order.stops } : {}),
         ...(order.holdFleetId !== undefined ? { holdFleetId: order.holdFleetId } : {}),
         ...(order.redirectFleetId !== undefined ? { redirectFleetId: order.redirectFleetId } : {}),
+        ...(order.splitFleetId !== undefined ? { splitFleetId: order.splitFleetId } : {}),
       }));
     } else {
       state = JSON.parse(detail.stateJson) as GameState;
@@ -2829,12 +2856,18 @@ export function useVisibleGameState(): GameState | null {
   });
   const showingAiObserver = useGameStore((s) => s.showingAiObserver);
   const pendingAiPlayerId = useGameStore((s) => s.pendingAiPlayerId);
+  const playerBattleArchiveByPlayerId = useGameStore((s) => s.playerBattleArchiveByPlayerId);
   return useMemo(
     () =>
       visibleStateForRecord(
         activeRecord,
         showingAiObserver ? pendingAiPlayerId : null,
       ),
-    [activeRecord, showingAiObserver, pendingAiPlayerId],
+    [
+      activeRecord,
+      showingAiObserver,
+      pendingAiPlayerId,
+      playerBattleArchiveByPlayerId,
+    ],
   );
 }

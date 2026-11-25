@@ -558,9 +558,9 @@ export default function HomeScreen() {
   const [gameNameDirty, setGameNameDirty] = useState(false);
   const [mapSize, setMapSize] = useState<MapSize>('medium');
   const [galaxyShapeChoice, setGalaxyShapeChoice] = useState<GalaxyShapeChoice>('random');
-  const [visibility, setVisibility] = useState<VisibilityMode>('classic');
-  const [planetMultipliers, setPlanetMultipliers] = useState<PlanetMultiplierMode>('off');
-  const [flexibleMovement, setFlexibleMovement] = useState<FlexibleMovementMode>('off');
+  const [visibility, setVisibility] = useState<VisibilityMode>('fog');
+  const [planetMultipliers, setPlanetMultipliers] = useState<PlanetMultiplierMode>('on');
+  const [flexibleMovement, setFlexibleMovement] = useState<FlexibleMovementMode>('on');
   const [settingHelp, setSettingHelp] = useState<'visibility' | 'multipliers' | 'movement' | null>(null);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [openGameCount, setOpenGameCount] = useState(0);
@@ -1056,9 +1056,9 @@ export default function HomeScreen() {
     mode: 'passAndPlay' | 'asyncMultiplayer',
     lobbyFill: 'invite' | 'open' = 'invite',
     galaxyShape?: GalaxyShape,
-    visibilityMode: VisibilityMode = 'classic',
-    multiplierMode: PlanetMultiplierMode = 'off',
-    movementMode: FlexibleMovementMode = 'off',
+    visibilityMode: VisibilityMode = 'fog',
+    multiplierMode: PlanetMultiplierMode = 'on',
+    movementMode: FlexibleMovementMode = 'on',
   ) => {
     const { width, height, planetCount } = computeMapDimensions(size, slots.length);
     const playerName = (slots[0]?.name ?? '').trim() || DEFAULT_PLAYER_NAME;
@@ -1980,7 +1980,7 @@ export default function HomeScreen() {
 
           <View style={styles.section}>
             <View style={styles.settingLabelRow}>
-              <Text style={styles.settingLabel}>Movement</Text>
+              <Text style={styles.settingLabel}>Flexible Movement</Text>
               <Pressable
                 onPress={() =>
                   setSettingHelp((current) => (current === 'movement' ? null : 'movement'))
