@@ -48,6 +48,7 @@ import {
 import {
   computeFactoryOutputs,
   MAX_TECH_LEVEL,
+  previewPlayerProduction,
   RESEARCH_LAB_POINTS_PER_TURN,
   researchThreshold,
   scaledBuildingCost,
@@ -1612,6 +1613,26 @@ function boxSelectHint(
   }
 }
 
+/** Four outward arrows in a plus — map pan / scroll mode. */
+function ScrollModeToggleIcon({ color }: { color: string }) {
+  const stroke = {
+    stroke: color,
+    strokeWidth: 2,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  };
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24">
+      <Line x1="12" y1="6" x2="12" y2="18" {...stroke} />
+      <Line x1="6" y1="12" x2="18" y2="12" {...stroke} />
+      <Path d="M9 7.5 L12 4 L15 7.5" fill="none" {...stroke} />
+      <Path d="M9 16.5 L12 20 L15 16.5" fill="none" {...stroke} />
+      <Path d="M7.5 9 L4 12 L7.5 15" fill="none" {...stroke} />
+      <Path d="M16.5 9 L20 12 L16.5 15" fill="none" {...stroke} />
+    </Svg>
+  );
+}
+
 function BoxSelectToggleIcon({
   variant,
   color,
@@ -2534,6 +2555,7 @@ export default function GameScreen() {
   const measureOriginPlanetRef = useRef<Planet | null>(null);
   const [outOfRangeMessage, setOutOfRangeMessage] = useState(false);
   const [showResearchModal, setShowResearchModal] = useState(false);
+  const [showPerTurnModal, setShowPerTurnModal] = useState(false);
   const [showQueuedModal, setShowQueuedModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [battleReportForcedOpen, setBattleReportForcedOpen] = useState(false);
@@ -2579,6 +2601,7 @@ export default function GameScreen() {
 
   // Box-select state. The bottom button opens an action menu; drawing a box then
   // runs the chosen action on the owned planets inside it.
+  const [scrollMode, setScrollMode] = useState(false);
   const [boxSelectMode, setBoxSelectMode] = useState(false);
   const [boxSelectAction, setBoxSelectAction] = useState<BoxSelectAction>('send');
   const [showBoxSelectMenu, setShowBoxSelectMenu] = useState(false);
@@ -3083,6 +3106,14 @@ export default function GameScreen() {
                 researchPointsPerTurn,
             ),
           );
+  const perTurnPreview =
+    gameState && localHumanPlayerId !== undefined
+      ? previewPlayerProduction(
+          gameState.map,
+          localHumanPlayerId,
+          gameState.roundNumber,
+        )
+      : { troops: 0, gold: 0, research: 0 };
 
   const currentRound = gameState?.roundNumber ?? 0;
 
@@ -3437,6 +3468,7 @@ export default function GameScreen() {
   const mapWidthSV = useSharedValue(1);
   const mapHeightSV = useSharedValue(1);
   const isFleetDragging = useSharedValue(false);
+  const isScrollModeSV = useSharedValue(false);
   // True while a redirect or extra path point is waiting for the next drag,
   // so that drag moves the route instead of the map.
   const isPathExtending = useSharedValue(false);
@@ -3816,17 +3848,21 @@ export default function GameScreen() {
       panPrevTranslationX.value = event.translationX;
       panPrevTranslationY.value = event.translationY;
       // Bail out without writing translateX while a fleet drag, pinch, or
-      // box-select draw is active.
-      if (
-        isFleetDragging.value ||
-        isPathExtending.value ||
-        isPinching.value ||
-        isBoxSelecting.value ||
-        pointerHitsOwnFleet(event.x - event.translationX, event.y - event.translationY)
-      ) {
-        if (pointerHitsOwnFleet(event.x - event.translationX, event.y - event.translationY)) {
-          isFleetDragging.value = true;
+      // box-select draw is active. Scroll mode always pans, even over fleets.
+      if (!isScrollModeSV.value) {
+        if (
+          isFleetDragging.value ||
+          isPathExtending.value ||
+          isPinching.value ||
+          isBoxSelecting.value ||
+          pointerHitsOwnFleet(event.x - event.translationX, event.y - event.translationY)
+        ) {
+          if (pointerHitsOwnFleet(event.x - event.translationX, event.y - event.translationY)) {
+            isFleetDragging.value = true;
+          }
+          return;
         }
+      } else if (isPinching.value) {
         return;
       }
       const clamped = clampTranslation(
@@ -3912,6 +3948,39 @@ export default function GameScreen() {
       isBoxSelectAwaitingDestSV.value = false;
     })();
   }, [isBoxSelectModeSV, isBoxSelecting, isBoxSelectAwaitingDestSV]);
+
+  const setScrollModeEnabled = useCallback(
+    (enabled: boolean) => {
+      setScrollMode(enabled);
+      runOnUI(() => {
+        'worklet';
+        isScrollModeSV.value = enabled;
+      })();
+      if (enabled) {
+        exitBoxSelect();
+        cancelDrag();
+        pathDraftRef.current = null;
+        setPathDraft(null);
+        setPathLineFrom(null);
+        setFleetTooltip(null);
+        dismissPlanetDetail();
+      }
+    },
+    [cancelDrag, dismissPlanetDetail, exitBoxSelect, isScrollModeSV],
+  );
+
+  const prevScrollGameIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeGameId === null) {
+      prevScrollGameIdRef.current = null;
+      return;
+    }
+    if (prevScrollGameIdRef.current === activeGameId) {
+      return;
+    }
+    prevScrollGameIdRef.current = activeGameId;
+    setScrollModeEnabled(false);
+  }, [activeGameId, setScrollModeEnabled]);
 
   const clearBoxSelection = useCallback(() => {
     setBoxSelectPhase('idle');
@@ -4155,7 +4224,8 @@ export default function GameScreen() {
         showingAiObserver ||
         gameState === null ||
         localHumanPlayerId === undefined ||
-        boxSelectMode
+        boxSelectMode ||
+        scrollMode
       ) {
         return;
       }
@@ -4301,6 +4371,7 @@ export default function GameScreen() {
       localHumanPlayerId,
       measureMapArea,
       boxSelectMode,
+      scrollMode,
       queuedOrders,
       cancelPathPoint,
     ],
@@ -4742,6 +4813,9 @@ export default function GameScreen() {
       if (isViewingFinishedGame) {
         return;
       }
+      if (scrollMode) {
+        return;
+      }
       // Don't process taps while the box is being drawn
       if (boxSelectPhase === 'drawing') {
         return;
@@ -4873,10 +4947,12 @@ export default function GameScreen() {
       exitBoxSelect,
       handleBoxSelectSend,
       cancelPathPoint,
+      scrollMode,
     ],
   );
 
   const planetTap = Gesture.Tap()
+    .enabled(!scrollMode)
     .maxDuration(300)
     .onEnd((event) => {
       runOnJS(handleMapTap)(
@@ -4891,8 +4967,12 @@ export default function GameScreen() {
     });
 
   const fleetDrag = Gesture.Pan()
+    .enabled(!scrollMode)
     .minDistance(5)
     .onStart((event) => {
+      if (isScrollModeSV.value) {
+        return;
+      }
       const startX = event.x - event.translationX;
       const startY = event.y - event.translationY;
       if (isPathExtending.value || pointerHitsOwnFleet(startX, startY)) {
@@ -4900,6 +4980,9 @@ export default function GameScreen() {
       }
     })
     .onUpdate((event) => {
+      if (isScrollModeSV.value) {
+        return;
+      }
       runOnJS(handleFleetPanUpdate)(
         event.x - event.translationX,
         event.y - event.translationY,
@@ -4911,6 +4994,9 @@ export default function GameScreen() {
       );
     })
     .onEnd((event) => {
+      if (isScrollModeSV.value) {
+        return;
+      }
       runOnJS(handleDragEnd)(
         event.x,
         event.y,
@@ -4924,8 +5010,12 @@ export default function GameScreen() {
     });
 
   const measureDrag = Gesture.Pan()
+    .enabled(!scrollMode)
     .minDistance(10)
     .onUpdate((event) => {
+      if (isScrollModeSV.value) {
+        return;
+      }
       runOnJS(handleMeasurePanUpdate)(
         event.x - event.translationX,
         event.y - event.translationY,
@@ -4947,10 +5037,15 @@ export default function GameScreen() {
   // Uses minDistance(5) so it activates before the pan (minDistance 8), ensuring
   // isBoxSelecting is set before pan.onUpdate can run.
   const boxSelectDrag = Gesture.Pan()
+    .enabled(!scrollMode)
     .minDistance(5)
     .onStart((event) => {
       // Only activate when mode is on and not already awaiting a destination tap
-      if (!isBoxSelectModeSV.value || isBoxSelectAwaitingDestSV.value) {
+      if (
+        isScrollModeSV.value ||
+        !isBoxSelectModeSV.value ||
+        isBoxSelectAwaitingDestSV.value
+      ) {
         return;
       }
       isBoxSelecting.value = true;
@@ -5550,6 +5645,15 @@ export default function GameScreen() {
                   }}
                 >
                   <Text style={styles.headerMenuRowText}>R&D</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.headerMenuRow}
+                  onPress={() => {
+                    setShowHeaderMenu(false);
+                    setShowPerTurnModal(true);
+                  }}
+                >
+                  <Text style={styles.headerMenuRowText}>Per Turn</Text>
                 </Pressable>
                 <Pressable
                   style={styles.headerMenuRow}
@@ -6489,6 +6593,33 @@ export default function GameScreen() {
         </Pressable>
       </Modal>
 
+      <Modal
+        visible={showPerTurnModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPerTurnModal(false)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowPerTurnModal(false)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <View style={styles.researchHeader}>
+              <Text style={styles.modalTitle}>Per Turn</Text>
+              <Pressable
+                onPress={() => setShowPerTurnModal(false)}
+                hitSlop={12}
+                style={styles.researchCloseButton}
+              >
+                <Text style={styles.planetDetailClose}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.researchLine}>Gold: {perTurnPreview.gold}</Text>
+            <Text style={styles.researchLine}>Troops: {perTurnPreview.troops}</Text>
+            <Text style={styles.researchLine}>
+              Research: {formatResearchAmount(perTurnPreview.research)}
+            </Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <StrategicMapModal
         visible={showStrategicMapModal}
         onClose={() => setShowStrategicMapModal(false)}
@@ -6777,6 +6908,21 @@ export default function GameScreen() {
           )}
           <Pressable
             style={[
+              styles.scrollModeToggle,
+              { bottom: insets.bottom + 16 + 52 },
+              scrollMode && styles.scrollModeToggleActive,
+            ]}
+            accessibilityLabel={scrollMode ? 'Turn off scroll mode' : 'Turn on scroll mode'}
+            accessibilityRole="button"
+            accessibilityState={{ selected: scrollMode }}
+            onPress={() => {
+              setScrollModeEnabled(!scrollMode);
+            }}
+          >
+            <ScrollModeToggleIcon color={scrollMode ? '#00c9d4' : COLORS.text} />
+          </Pressable>
+          <Pressable
+            style={[
               styles.boxSelectToggle,
               { bottom: insets.bottom + 16 },
               (boxSelectMode || showBoxSelectMenu) && styles.boxSelectToggleActive,
@@ -6790,6 +6936,9 @@ export default function GameScreen() {
             }
             accessibilityRole="button"
             onPress={() => {
+              if (scrollMode) {
+                setScrollModeEnabled(false);
+              }
               if (boxSelectMode) {
                 exitBoxSelect();
               } else {
@@ -7758,6 +7907,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 42,
+  },
+  scrollModeToggle: {
+    position: 'absolute',
+    left: 16,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 42,
+  },
+  scrollModeToggleActive: {
+    opacity: 1,
   },
   boxSelectAboveMenu: {
     zIndex: 42,

@@ -105,6 +105,41 @@ function countActiveBuildings(
   ).length;
 }
 
+/** Projected income for one player on the next production tick (same math as `runProduction`). */
+export function previewPlayerProduction(
+  map: GameMap,
+  playerId: string,
+  currentRound: number,
+): { troops: number; gold: number; research: number } {
+  let troops = 0;
+  let gold = 0;
+  let research = 0;
+
+  for (const planet of map.planets) {
+    if (planet.owner !== playerId) {
+      continue;
+    }
+    const factories = countActiveBuildings(planet, 'factory', currentRound);
+    const labs = countActiveBuildings(planet, 'researchLab', currentRound);
+    const outputMultiplier = planetOutputMultiplier(planet);
+    const { troops: rawTroopOutput, gold: rawGoldOutput } = computeFactoryOutputs(
+      factories,
+      planet.class,
+      planet.productionSlider,
+      outputMultiplier,
+    );
+
+    const troopAccumulator = planet.troopAccumulator + rawTroopOutput;
+    troops += Math.floor(troopAccumulator);
+    gold += Math.floor(rawGoldOutput);
+    research = roundToHundredth(
+      research + labs * RESEARCH_LAB_POINTS_PER_TURN * outputMultiplier,
+    );
+  }
+
+  return { troops, gold, research };
+}
+
 export function runProduction(
   map: GameMap,
   players: Player[],
